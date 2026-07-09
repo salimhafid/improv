@@ -1,102 +1,117 @@
 # Improv — iOS app
 
-A native **SwiftUI** app for browsing upcoming improv/comedy shows across multiple
-venues. It reads the same hourly-refreshed multi-source feed as the web backend
-(`https://ucb-ny-shows-…run.app/shows.json`) and presents it with a first-party,
-Apple-clean aesthetic.
+A native **SwiftUI** app for browsing upcoming improv/comedy shows and classes
+across multiple theaters in New York, Los Angeles, and Chicago. It reads the
+scheduled multi-source feeds from the Cloud Run backend (`/shows.json` and
+`/classes.json`) and presents them with a first-party, Apple-clean aesthetic.
 
 <p>
   <img src="UCBShows/Assets.xcassets/AppIcon.appiconset/icon-1024.png" width="96" alt="App icon">
 </p>
 
-**Sources** (choose any in Setup): UCB New York, Brooklyn Comedy Collective, Magnet
-Theater (NYC); UCB Los Angeles (LA); The Annoyance, iO Theater (Chicago).
-
-Verified building and running on the iOS 26.5 Simulator (iPhone 16 Pro) with the
-live feed — **0 errors, 0 warnings**:
-
-<p>
-  <img src="screenshots/setup-sources.png" width="240" alt="Setup — choose sources">
-  <img src="screenshots/feed-list-light.png" width="240" alt="Unified multi-city list">
-  <img src="screenshots/feed-filter-persisted.png" width="240" alt="Persisted city filter">
-</p>
+**Theaters**: UCB New York, Brooklyn Comedy Collective, Magnet Theater,
+WGIS New York (NYC); UCB Los Angeles, WGIS Los Angeles (LA); The Annoyance,
+iO Theater (Chicago).
 
 ## Run it
 
-Requires **Xcode 16+** (built/tested against Xcode 26.5, iOS 17+ deployment target).
+Requires **Xcode 16+** (built against Xcode 26.6, iOS 18.6 deployment target).
 
 ```bash
 open ios/UCBShows.xcodeproj
 ```
 
-Pick an iPhone simulator (or your device) and press **Run** (⌘R).
+Pick an iPhone or iPad simulator (or your device) and press **Run** (⌘R).
 
-> If a command-line build complains *"You have not agreed to the Xcode license"*,
-> run `sudo xcodebuild -license accept` once. Building from the Xcode app doesn't
-> need this.
+No third-party dependencies, no package resolution — it builds as-is. A
+`project.yml` is included if you ever need to regenerate the project with
+XcodeGen.
 
-No third-party dependencies, no package resolution — it builds as-is.
+> The screenshots in `screenshots/` are from an earlier design iteration
+> (source-toggle Setup, two tabs) and predate the sidebar/I'm Going redesign.
 
 ## What it does
 
-- **Setup / Sources** — choose which venues to include, grouped by city
-  (shown on first launch and reachable anytime via the toolbar). Unavailable
-  sources are greyed out; live "N upcoming" counts per source.
-- **Shows tab** — one unified list of all upcoming shows grouped into pinned date
-  sections (Today / Tomorrow / weekday), each tagged with a source·city badge.
-- **Pull to refresh** (both tabs) — re-reads the backend store for the latest data.
-  It never triggers a scrape; scraping happens only on the backend's hourly
-  schedule, and the refresh just surfaces whatever the last scheduled run stored.
-- **Search tab** — live title/blurb search across all enabled sources.
-- **I'm Going** — open a show and tap **I'm Going** on its page (next to Get
-  Tickets) to add it to your list. The **I'm Going tab** gathers your planned shows
-  (across all sources, regardless of Setup filters), grouped by date, with a count
-  badge. Persisted across launches.
-- **Filters** — city, venue, comedy type (multi-select), livestream, free, and a
-  date window; **filters persist across launches** and apply to both tabs. A
-  filter is auto-cleared if its city/venue stops being available (e.g. after
-  disabling that city's sources).
-- **Detail** — stretchy poster header, metadata chips, blurb, and a pinned
-  **Get Tickets** button that opens the ticket page in an in-app Safari sheet.
-- **Offline** — the last successful payload is cached to disk, so the app opens
-  instantly and shows saved data (with a banner) when the network is unavailable.
+- **City + theater scoping** — pick your home city on first launch (change it
+  anytime); a left sidebar (hamburger, or swipe right) lists that city's
+  theaters plus an **All Theaters** whole-city feed. Unavailable sources are
+  greyed out; live counts per theater match the visible tab.
+- **Shows tab** — a date-sectioned chronological feed for the selected scope
+  (Today / Tomorrow / weekday headers, pinned), with an inline search bar.
+- **I'm Going tab** — tap the heart on a show's page to save it. Saved shows
+  persist across launches (even after they leave the feed), group by date,
+  badge the tab with a count, and schedule a local reminder ~3 hours before
+  showtime (if you allow notifications).
+- **Classes tab** — classes & workshops for the same scope, grouped by
+  level/track, with level and open-seats filters. Each class has a native
+  detail page (description, instructor, schedule, price) with **Register**
+  opening the registration page in an in-app Safari sheet.
+- **Filters** — venue, comedy type (multi-select), livestream, free, and a date
+  window (This weekend = Fri–Sun). Filters persist across launches, the toolbar
+  icon shows an active-count badge, and selections are auto-cleared if their
+  venue/type stops being available in the current scope.
+- **Show detail** — stretchy poster header, metadata chips, blurb, cast section,
+  Share, **Add to Calendar** (write-only EventKit access), and a pinned bar with
+  the I'm Going heart and **Get Tickets** (in-app Safari).
+- **Tonight widget** — a small/medium home-screen widget listing tonight's
+  shows for a theater you choose in the widget's configuration (self-contained;
+  fetches the feed directly).
+- **Pull to refresh** (Shows and Classes) — re-reads the backend store. It never
+  triggers a scrape; scraping happens on the backend's schedule, and refresh
+  surfaces whatever the last run stored.
+- **Offline** — the last successful payloads are cached to disk, so the app
+  opens instantly and shows saved data (with a banner) when the network is
+  unavailable.
+- **iPad** — on regular width the theater sidebar becomes a persistent leading
+  column instead of a drawer.
 
 ## Design
 
 Materials-first, content-led, stock components only — large titles, SF Symbols,
 system materials, a single coral accent, full Dynamic Type, and light/dark for
 free via semantic colors. Missing posters render a deterministic typographic
-`GeneratedCover` rather than a broken image. The card→detail zoom transition uses
-`.navigationTransition(.zoom)` on iOS 18 with a graceful fallback on iOS 17.
+`GeneratedCover` rather than a broken image. Card→detail uses the zoom
+navigation transition. All date logic is venue-local: each show is parsed,
+day-bucketed, and labeled in its own city's timezone, so "Today" flips at the
+venue's midnight in every city.
 
 ## Architecture
 
 ```
 UCBShows/
-  UCBShowsApp.swift          @main; injects ShowsStore, sets the tint
+  UCBShowsApp.swift          @main; injects the stores, sets the tint
   Models/
-    Show.swift               Decodable model (defensive) + derived display values
-    Filters.swift            value-type filter state
+    Show.swift               Codable model (defensive) + derived display values
+    Class.swift              class/workshop model, same conventions
+    Source.swift             City (timezone) + theater catalog + feed source info
+    Filters.swift            value-type filter state (shows + classes)
   Services/
-    ShowsService.swift       fetch + on-disk last-good cache
-    ShowsStore.swift         @MainActor @Observable single source of truth
-  Support/DateUtils.swift    NY-timezone parsing/formatting + day grouping
+    ShowsService.swift       fetch + on-disk last-good cache (shows.json)
+    ClassesService.swift     same for classes.json
+    ShowsStore.swift         @MainActor @Observable source of truth for shows
+    ClassesStore.swift       same for classes
+    GoingStore.swift         saved "I'm Going" shows + pre-show reminders
+    CalendarService.swift    write-only EventKit "Add to Calendar"
+    AppState.swift           selected city/theater/tab; drives all scoping
+  Support/DateUtils.swift    per-timezone parsing/formatting + day grouping
   DesignSystem/Theme.swift   accent, radii, per-type tints & symbols
-  Views/                     RootView, ShowsFeedView, SearchView, ShowDetailView
-  Views/Components/          ShowRow, HeroTonightCard, PosterImage/GeneratedCover,
-                             FilterSheet, Chips, SectionsList, SafariView, …
-  Assets.xcassets/           AccentColor (light/dark), AppIcon
+  Views/                     RootView, ShowsFeedView, GoingView, ClassesView,
+                             ShowDetailView, ClassDetailView, SetupView
+  Views/Components/          TheaterSidebar/TheaterListPanel, ShowRow, ClassRow,
+                             PosterImage/GeneratedCover, FilterSheet, Chips, …
+UCBWidget/                   self-contained WidgetKit "Tonight" extension
 ```
 
-Data flows one way: `ShowsService` fetches/decodes → `ShowsStore` holds, filters,
-and date-groups → SwiftUI views render. The store is `@MainActor @Observable`;
-networking/decoding happen off the main actor.
+Data flows one way: services fetch/decode → stores hold, filter, and date-group
+→ SwiftUI views render. Stores are `@MainActor @Observable`; cache reads happen
+off the main actor.
 
-The project uses Xcode's modern *file-system synchronized* group, so new files
-added under `UCBShows/` are picked up automatically — no `.pbxproj` edits needed.
-A `project.yml` is included if you'd rather regenerate the project with XcodeGen.
+The project uses Xcode's *file-system synchronized* groups, so new files added
+under `UCBShows/` or `UCBWidget/` are picked up automatically — no `.pbxproj`
+edits needed.
 
 ## Data source
 
-`ShowsService.feedURL` points at the live Cloud Run endpoint. To point it at a
-different backend (e.g. a local `python app.py`), change that one constant.
+`ShowsService.feedURL` / `ClassesService.feedURL` point at the live Cloud Run
+endpoints. To point at a different backend (e.g. a local `python app.py`),
+change those constants. The widget has its own copy in `TonightLoader.feedURL`.
