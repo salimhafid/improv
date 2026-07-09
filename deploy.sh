@@ -92,10 +92,11 @@ fi
 gcloud run services add-iam-policy-binding "${SERVICE}" --region="${REGION}" \
   --member="serviceAccount:${SA_EMAIL}" --role="roles/run.invoker" >/dev/null 2>&1 || true
 
-echo "==> Configuring hourly Cloud Scheduler job '${JOB}'…"
+echo "==> Configuring Cloud Scheduler job '${JOB}' (every 3h — matches the
+     tightest per-source scrape interval; in-between runs were no-ops)…"
 SCHED_ARGS=(
   --location="${REGION}"
-  --schedule="0 * * * *"
+  --schedule="0 */3 * * *"
   --time-zone="America/New_York"
   --uri="${URL}/refresh"
   --http-method=POST
