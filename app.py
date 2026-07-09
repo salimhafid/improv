@@ -141,6 +141,12 @@ def index():
     return render_template("index.html", payload=payload, hourly=False)
 
 
+@app.get("/privacy")
+def privacy():
+    # Static privacy policy for the iOS App Store listing.
+    return render_template("privacy.html")
+
+
 @app.post("/refresh")
 def refresh():
     token = request.headers.get("X-Refresh-Token", "")
