@@ -1,15 +1,11 @@
 import SwiftUI
 
-/// Left hamburger drawer listing the selected city's theaters. Selecting one
-/// scopes both the Shows and Classes tabs to that theater (via `AppState`).
-/// Overlays the whole TabView from `RootView`; opened by the hamburger button in
-/// each tab's toolbar. A custom drawer (not `NavigationSplitView`, which collapses
-/// to a pushed stack on iPhone).
+/// Left hamburger drawer listing the selected city's theaters (plus an
+/// "All Theaters" whole-city scope). Selecting one scopes the Shows and Classes
+/// tabs via `AppState`. Overlays the whole TabView from `RootView` on iPhone;
+/// on iPad the inner `TheaterListPanel` is shown as a persistent column instead.
 struct TheaterSidebar: View {
     @Environment(AppState.self) private var app
-    @Environment(ShowsStore.self) private var store
-
-    private let panelWidth: CGFloat = 290
 
     var body: some View {
         @Bindable var app = app
@@ -19,27 +15,35 @@ struct TheaterSidebar: View {
                     .ignoresSafeArea()
                     .transition(.opacity)
                     .onTapGesture { app.sidebarOpen = false }
+                    .accessibilityLabel("Close theater list")
+                    .accessibilityAddTraits(.isButton)
 
-                panel
+                TheaterListPanel()
+                    .frame(width: 290)
+                    .background(.regularMaterial)   // fills to screen edges; content respects safe area
                     .transition(.move(edge: .leading))
+                    .accessibilityAction(.escape) { app.sidebarOpen = false }
             }
         }
         .animation(.snappy(duration: 0.28), value: app.sidebarOpen)
     }
+}
 
-    /// Close the drawer, then present the city picker, so the sheet doesn't stack
-    /// over the still-open drawer.
-    private func openCityPicker() {
-        app.sidebarOpen = false
-        app.showCityPicker = true
-    }
+/// The sidebar's content: header, All Theaters + per-theater rows with live
+/// counts (shows or classes, matching the visible tab), and the city switcher.
+/// Reused by the iPhone drawer and the persistent iPad column.
+struct TheaterListPanel: View {
+    @Environment(AppState.self) private var app
+    @Environment(ShowsStore.self) private var store
+    @Environment(ClassesStore.self) private var classesStore
 
-    private var panel: some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
             ScrollView {
                 VStack(spacing: 0) {
+                    allTheatersRow
                     ForEach(app.cityTheaters) { entry in
                         theaterRow(entry)
                     }
@@ -55,9 +59,14 @@ struct TheaterSidebar: View {
             }
             .foregroundStyle(.primary)
         }
-        .frame(width: panelWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(.regularMaterial)   // fills to screen edges; content respects safe area
+    }
+
+    /// Close the drawer, then present the city picker, so the sheet doesn't stack
+    /// over the still-open drawer.
+    private func openCityPicker() {
+        app.sidebarOpen = false
+        app.showCityPicker = true
     }
 
     private var header: some View {
@@ -80,21 +89,56 @@ struct TheaterSidebar: View {
         .padding(.bottom, 12)
     }
 
+    /// Count for a theater in whichever list the user is looking at (the I'm
+    /// Going tab keeps showing show counts — it's a shows list too).
+    private func count(for id: String) -> Int? {
+        if app.activeTab == 2 {
+            return classesStore.sourcesInfo.first { $0.id == id }?.count
+        }
+        return store.info(for: id)?.count
+    }
+
+    private var allTheatersRow: some View {
+        let total = app.cityTheaters.compactMap { count(for: $0.id) }.reduce(0, +)
+        return row(
+            title: "All Theaters",
+            subtitle: "Everything in \(app.selectedCity.short)",
+            symbol: "square.grid.2x2.fill",
+            count: total > 0 ? total : nil,
+            selected: app.isAllTheaters,
+            available: true
+        ) {
+            app.select(SourceCatalog.allTheatersID)
+        }
+    }
+
     private func theaterRow(_ entry: SourceCatalogEntry) -> some View {
-        let selected = entry.id == app.selectedTheater
-        let count = store.info(for: entry.id)?.count
-        return Button {
+        let available = store.isAvailable(entry.id)
+        return row(
+            title: entry.name,
+            subtitle: available ? entry.blurb : "Temporarily unavailable",
+            symbol: "theatermasks.fill",
+            count: count(for: entry.id),
+            selected: entry.id == app.selectedTheater,
+            available: available
+        ) {
             app.select(entry.id)
-        } label: {
+        }
+    }
+
+    private func row(title: String, subtitle: String, symbol: String, count: Int?,
+                     selected: Bool, available: Bool,
+                     action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: "theatermasks.fill")
+                Image(systemName: symbol)
                     .foregroundStyle(selected ? Theme.accent : .secondary)
                     .frame(width: 26)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.name)
+                    Text(title)
                         .font(.body.weight(selected ? .semibold : .regular))
                         .foregroundStyle(.primary)
-                    Text(entry.blurb)
+                    Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -115,6 +159,7 @@ struct TheaterSidebar: View {
             .padding(.vertical, 12)
             .background(selected ? Theme.accent.opacity(0.10) : Color.clear)
             .contentShape(Rectangle())
+            .opacity(available ? 1 : 0.45)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? [.isSelected] : [])

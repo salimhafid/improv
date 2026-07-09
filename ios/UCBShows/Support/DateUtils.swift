@@ -1,33 +1,41 @@
 import Foundation
 
 extension TimeZone {
-    /// The venue timezone. Shows are physically in New York; the feed's start
-    /// values are timezone-naive local times, so we anchor them here.
+    /// Fallback venue timezone for feed values whose city is unknown.
     static let newYork = TimeZone(identifier: "America/New_York") ?? .current
 }
 
-extension Calendar {
-    /// Gregorian calendar fixed to NY time for stable day bucketing.
-    static let nyCalendar: Calendar = {
-        var c = Calendar(identifier: .gregorian)
-        c.timeZone = .newYork
-        return c
-    }()
-}
-
-/// Parsing/formatting helpers for the feed's date strings, all in NY time.
+/// Parsing/formatting helpers for the feed's date strings. The feed emits
+/// timezone-naive venue-local times, so every helper takes the venue's timezone
+/// (from `City.timeZone`) and parses/formats/buckets in that zone.
 enum DateUtils {
-    /// Parses either `yyyy-MM-dd'T'HH:mm:ss` (timed) or `yyyy-MM-dd` (date-only),
-    /// interpreting the value in America/New_York.
-    static func parse(_ value: String) -> Date? {
-        if value.count == 10 {
-            return dateOnlyFormatter.date(from: value)
-        }
-        return dateTimeFormatter.date(from: value) ?? dateOnlyFormatter.date(from: String(value.prefix(10)))
+    /// Gregorian calendar pinned to a timezone (cached per zone).
+    static func calendar(in tz: TimeZone) -> Calendar {
+        calendars[tz.identifier] ?? {
+            var c = Calendar(identifier: .gregorian)
+            c.timeZone = tz
+            return c
+        }()
     }
 
-    static func dayKey(_ date: Date) -> String {
-        dayKeyFormatter.string(from: date)
+    /// Parses either `yyyy-MM-dd'T'HH:mm:ss` (timed) or `yyyy-MM-dd` (date-only),
+    /// interpreting the value in the venue's timezone.
+    static func parse(_ value: String, in tz: TimeZone) -> Date? {
+        if value.count == 10 {
+            return formatter(.dateOnly, in: tz).date(from: value)
+        }
+        return formatter(.dateTime, in: tz).date(from: value)
+            ?? formatter(.dateOnly, in: tz).date(from: String(value.prefix(10)))
+    }
+
+    /// `yyyy-MM-dd` bucket key in the venue's local day.
+    static func dayKey(_ date: Date, in tz: TimeZone) -> String {
+        formatter(.dateOnly, in: tz).string(from: date)
+    }
+
+    /// Venue-local short time, e.g. "7:00 PM".
+    static func timeString(_ date: Date, in tz: TimeZone) -> String {
+        formatter(.time, in: tz).string(from: date)
     }
 
     /// Parses the feed's `generated_at` ISO8601 timestamp, e.g.
@@ -49,37 +57,66 @@ enum DateUtils {
         return "Updated " + fmt.localizedString(for: date, relativeTo: now)
     }
 
-    /// Section header for a day, e.g. "Today", "Tomorrow", or "Friday, June 26".
-    /// Day grouping is venue-local-correct (parse + format share a timezone), but
-    /// the relative Today/Tomorrow labels are anchored to NY time — an accepted
-    /// simplification that can only differ for LA/Chicago shows within a few hours
-    /// of midnight.
-    static func sectionTitle(for date: Date, now: Date = Date()) -> String {
-        let cal = Calendar.nyCalendar
+    /// Section header for a day, e.g. "Today", "Tomorrow", or "Friday, June 26" —
+    /// all reckoned in the venue's timezone, so "Today" flips at the venue's
+    /// midnight, not New York's.
+    static func sectionTitle(for date: Date, in tz: TimeZone, now: Date = Date()) -> String {
+        let cal = calendar(in: tz)
         if cal.isDate(date, inSameDayAs: now) { return "Today" }
         if let tomorrow = cal.date(byAdding: .day, value: 1, to: now),
            cal.isDate(date, inSameDayAs: tomorrow) { return "Tomorrow" }
-        return weekdayLongFormatter.string(from: date)
+        return formatter(.weekdayLong, in: tz).string(from: date)
     }
 
     /// e.g. "Jun 26" — compact secondary label.
-    static func compactDate(_ date: Date) -> String {
-        compactFormatter.string(from: date)
+    static func compactDate(_ date: Date, in tz: TimeZone) -> String {
+        formatter(.compact, in: tz).string(from: date)
     }
 
-    // MARK: Formatters (cached; each pinned to NY time)
+    // MARK: Formatters (prebuilt per supported timezone)
 
-    private static let dateTimeFormatter: DateFormatter = fixed("yyyy-MM-dd'T'HH:mm:ss")
-    private static let dateOnlyFormatter: DateFormatter = fixed("yyyy-MM-dd")
-    private static let dayKeyFormatter: DateFormatter = fixed("yyyy-MM-dd")
-    private static let weekdayLongFormatter: DateFormatter = fixed("EEEE, MMMM d")
-    private static let compactFormatter: DateFormatter = fixed("MMM d")
+    private enum Format: String, CaseIterable {
+        case dateTime = "yyyy-MM-dd'T'HH:mm:ss"
+        case dateOnly = "yyyy-MM-dd"
+        case weekdayLong = "EEEE, MMMM d"
+        case compact = "MMM d"
+        case time = "h:mm a"
+    }
 
-    private static func fixed(_ format: String) -> DateFormatter {
+    /// One immutable formatter per (format, zone), built once for the supported
+    /// city zones; unknown zones get a fresh instance as a safety net.
+    private static func formatter(_ format: Format, in tz: TimeZone) -> DateFormatter {
+        formatters["\(tz.identifier)|\(format.rawValue)"] ?? make(format, tz)
+    }
+
+    private static let supportedZones: [TimeZone] =
+        City.allCases.map(\.timeZone) + [.newYork]
+
+    private static let formatters: [String: DateFormatter] = {
+        var all: [String: DateFormatter] = [:]
+        for tz in supportedZones {
+            for format in Format.allCases {
+                all["\(tz.identifier)|\(format.rawValue)"] = make(format, tz)
+            }
+        }
+        return all
+    }()
+
+    private static let calendars: [String: Calendar] = {
+        var all: [String: Calendar] = [:]
+        for tz in supportedZones {
+            var c = Calendar(identifier: .gregorian)
+            c.timeZone = tz
+            all[tz.identifier] = c
+        }
+        return all
+    }()
+
+    private static func make(_ format: Format, _ tz: TimeZone) -> DateFormatter {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .newYork
-        f.dateFormat = format
+        f.timeZone = tz
+        f.dateFormat = format.rawValue
         return f
     }
 

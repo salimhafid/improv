@@ -20,7 +20,7 @@ struct ShowsPayload: Decodable {
 /// A single upcoming UCB show. Decoding is defensive: the scraper can emit
 /// `null`/empty for `start`, `end`, `image`, or `post_id`, so those are optional
 /// and never abort decoding.
-struct Show: Decodable, Identifiable, Hashable {
+struct Show: Codable, Identifiable, Hashable {
     let postID: Int?
     let title: String
     let urlString: String?
@@ -96,6 +96,32 @@ struct Show: Decodable, Identifiable, Hashable {
         guard let s, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return s
     }
+
+    /// Encodable so saved ("I'm Going") shows persist as full objects and stay
+    /// renderable even after they drop out of the live feed.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(postID, forKey: .postID)
+        try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(urlString, forKey: .urlString)
+        try c.encodeIfPresent(slug, forKey: .slug)
+        try c.encode(dateRaw, forKey: .dateRaw)
+        try c.encodeIfPresent(start, forKey: .start)
+        try c.encodeIfPresent(end, forKey: .end)
+        try c.encode(hasTime, forKey: .hasTime)
+        try c.encode(venue, forKey: .venue)
+        try c.encode(venues, forKey: .venues)
+        try c.encode(isLivestream, forKey: .isLivestream)
+        try c.encode(comedyTypes, forKey: .comedyTypes)
+        try c.encodeIfPresent(imageString, forKey: .imageString)
+        try c.encode(excerpt, forKey: .excerpt)
+        try c.encode(fullDescription, forKey: .fullDescription)
+        try c.encode(cast, forKey: .cast)
+        try c.encode(isFree, forKey: .isFree)
+        try c.encode(source, forKey: .source)
+        try c.encode(org, forKey: .org)
+        try c.encode(city, forKey: .city)
+    }
 }
 
 // MARK: - Stable identity & derived display values
@@ -121,37 +147,45 @@ extension Show {
         return u
     }
 
+    /// The venue's timezone, from the show's city (feed start values are
+    /// timezone-naive venue-local times).
+    var cityTimeZone: TimeZone {
+        City(rawValue: city)?.timeZone ?? .newYork
+    }
+
     /// Event start as a `Date`, interpreting the timezone-naive feed value in the
-    /// venue's timezone (America/New_York) so day-grouping is stable regardless of
-    /// the device's timezone. Returns nil if unparseable.
+    /// venue's own timezone so day-grouping and "Today" labels are correct in
+    /// every city regardless of the device's timezone. Returns nil if unparseable.
     var startDate: Date? {
         guard let start else { return nil }
-        return DateUtils.parse(start)
+        return DateUtils.parse(start, in: cityTimeZone)
     }
 
     /// Multi-day festival end date (date-only), if any.
     var endDate: Date? {
         guard let end else { return nil }
-        return DateUtils.parse(end)
+        return DateUtils.parse(end, in: cityTimeZone)
     }
 
     var isMultiDay: Bool {
         guard let endDate, let startDate else { return false }
-        return !Calendar.nyCalendar.isDate(endDate, inSameDayAs: startDate)
+        return !DateUtils.calendar(in: cityTimeZone).isDate(endDate, inSameDayAs: startDate)
     }
 
-    /// `yyyy-MM-dd` bucket key in NY time for grouping; "tba" when undated.
+    /// `yyyy-MM-dd` bucket key in venue-local time for grouping; "tba" when undated.
     var dayKey: String {
         guard let startDate else { return "tba" }
-        return DateUtils.dayKey(startDate)
+        return DateUtils.dayKey(startDate, in: cityTimeZone)
     }
 
-    /// Short time shown on cards, e.g. "7:00 PM". Multi-day → "Multiple days",
-    /// undated/timeless → "Time TBA".
+    /// Short time shown on cards, e.g. "7:00 PM". Multi-day → "Multiple days";
+    /// falls back to formatting the parsed start when `dateRaw` has no time, and
+    /// only claims "Time TBA" when no time is known at all.
     var timeLabel: String {
         if let t = Self.extractTime(from: dateRaw) { return t }
         if isMultiDay { return "Multiple days" }
-        return hasTime ? "Time TBA" : "All day"
+        if hasTime, let startDate { return DateUtils.timeString(startDate, in: cityTimeZone) }
+        return "Time TBA"
     }
 
     private static func extractTime(from raw: String) -> String? {
@@ -205,5 +239,18 @@ extension Show {
     var sourceLabel: String {
         let cityShort = City(rawValue: city)?.short ?? city
         return cityShort.isEmpty ? org : "\(org) · \(cityShort)"
+    }
+
+    /// Strips scraper boilerplate from a raw venue name (single place for these
+    /// source-specific prefixes; ideally the scraper drops them upstream).
+    static func cleanVenueName(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "NY - 14TH ST. ", with: "")
+    }
+
+    /// Compact venue label for rows, e.g. "Mainstage" / "Upstairs", or
+    /// "Livestream" for a venue-less stream.
+    var shortVenue: String {
+        if venue.isEmpty { return isLivestream ? "Livestream" : "" }
+        return Self.cleanVenueName(venue)
     }
 }

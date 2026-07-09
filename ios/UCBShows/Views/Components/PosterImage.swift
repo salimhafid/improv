@@ -10,7 +10,9 @@ struct PosterImage: View {
             AsyncImage(url: url, transaction: Transaction(animation: .easeInOut(duration: 0.25))) { phase in
                 switch phase {
                 case .empty:
-                    Rectangle().fill(.quaternary).overlay { ProgressView() }
+                    // Plain placeholder — a spinner per thumbnail is visual noise
+                    // during fast scrolls.
+                    Rectangle().fill(.quaternary)
                 case .success(let image):
                     image.resizable().scaledToFill()
                 case .failure:
