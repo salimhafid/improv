@@ -36,6 +36,30 @@ struct SectionHeaderView: View {
     }
 }
 
+/// Filter toolbar icon with a small count badge when filters are active, so a
+/// short list is visibly explained by "2 filters" rather than just a filled icon.
+struct FilterToolbarIcon: View {
+    let activeCount: Int
+
+    var body: some View {
+        Image(systemName: activeCount > 0
+              ? "line.3.horizontal.decrease.circle.fill"
+              : "line.3.horizontal.decrease.circle")
+            .overlay(alignment: .topTrailing) {
+                if activeCount > 0 {
+                    Text("\(activeCount)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4.5)
+                        .padding(.vertical, 1.5)
+                        .background(Theme.accent, in: Capsule())
+                        .offset(x: 10, y: -8)
+                }
+            }
+            .accessibilityLabel(activeCount > 0 ? "Filters, \(activeCount) active" : "Filters")
+    }
+}
+
 /// Unobtrusive banner shown when displaying cached data after a failed refresh.
 struct OfflineBanner: View {
     let updatedLabel: String?

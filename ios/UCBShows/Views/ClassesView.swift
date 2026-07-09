@@ -1,18 +1,18 @@
 import SwiftUI
 
-/// Tab 2 — classes & workshops for the currently selected theater (chosen in the
-/// hamburger sidebar), grouped by level. An inline search bar sits above the list.
-/// Tapping a class opens its registration page in an in-app Safari sheet.
+/// Classes & workshops for the currently selected theater (chosen in the
+/// hamburger sidebar), grouped by level. An inline search bar sits above the
+/// list. Tapping a class pushes a native detail page (with Register from there).
 struct ClassesView: View {
     @Environment(ClassesStore.self) private var store
     @Environment(AppState.self) private var app
+    @Environment(\.horizontalSizeClass) private var hSize
     @State private var showFilters = false
-    @State private var webLink: WebLink?
     @State private var query = ""
 
     private var city: String { app.selectedCity.rawValue }
     private var theater: String { app.selectedTheater }
-    private var theaterName: String { app.selectedEntry?.name ?? "Classes" }
+    private var theaterName: String { app.scopeTitle }
 
     var body: some View {
         NavigationStack {
@@ -34,15 +34,17 @@ struct ClassesView: View {
                 hamburgerToolbarItem
                 filterToolbarItem
             }
+            .navigationDestination(for: ClassItem.self) { item in
+                ClassDetailView(item: item)
+            }
             .searchable(text: $query, prompt: "Search \(theaterName) classes")
             .sheet(isPresented: $showFilters) {
                 ClassFilterSheet(store: store, city: city, theater: theater)
             }
-            .sheet(item: $webLink) { link in
-                SafariView(url: link.url).ignoresSafeArea()
-            }
             .refreshable { await store.refresh() }
-            .onSwipeRight { app.sidebarOpen = true }   // swipe L→R opens the theater drawer
+            .onSwipeRight {                             // swipe L→R opens the theater drawer
+                if hSize == .compact { app.sidebarOpen = true }
+            }
             .task { store.reconcileLevel(city: city, theater: theater) }
             .onChange(of: theater) { _, _ in
                 // Scope changed — drop a level not offered by the new theater.
@@ -98,14 +100,9 @@ struct ClassesView: View {
         }
     }
 
-    @ViewBuilder
     private func rowButton(_ item: ClassItem) -> some View {
-        if let url = item.url {
-            Button { webLink = WebLink(url: url) } label: { ClassRow(item: item) }
-                .buttonStyle(.plain)
-        } else {
-            ClassRow(item: item)
-        }
+        NavigationLink(value: item) { ClassRow(item: item) }
+            .buttonStyle(.plain)
     }
 
     // MARK: States
@@ -162,12 +159,16 @@ struct ClassesView: View {
         }
     }
 
+    /// The drawer only exists on compact width — iPad shows a persistent column.
+    @ToolbarContentBuilder
     private var hamburgerToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Button { app.sidebarOpen = true } label: {
-                Image(systemName: "line.3.horizontal")
+        if hSize == .compact {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { app.sidebarOpen = true } label: {
+                    Image(systemName: "line.3.horizontal")
+                }
+                .accessibilityLabel("Theaters")
             }
-            .accessibilityLabel("Theaters")
         }
     }
 
@@ -176,11 +177,8 @@ struct ClassesView: View {
             Button {
                 showFilters = true
             } label: {
-                Image(systemName: store.filters.isActive
-                      ? "line.3.horizontal.decrease.circle.fill"
-                      : "line.3.horizontal.decrease.circle")
+                FilterToolbarIcon(activeCount: store.filters.activeCount)
             }
-            .accessibilityLabel("Filters")
         }
     }
 }

@@ -48,7 +48,8 @@ struct ClassRow: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(.quaternary, in: Capsule())
-                } else if item.url != nil {
+                } else {
+                    // Every row pushes the native class detail page.
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
