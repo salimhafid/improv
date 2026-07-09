@@ -21,7 +21,7 @@ struct FilterSheet: View {
                         Picker("Venue", selection: $store.filters.venue) {
                             Text("All venues").tag(String?.none)
                             ForEach(venues, id: \.self) { venue in
-                                Text(venue.replacingOccurrences(of: "NY - 14TH ST. ", with: ""))
+                                Text(Show.cleanVenueName(venue))
                                     .tag(Optional(venue))
                             }
                         }

@@ -6,6 +6,7 @@ import SwiftUI
 struct ShowsFeedView: View {
     @Environment(ShowsStore.self) private var store
     @Environment(AppState.self) private var app
+    @Environment(\.horizontalSizeClass) private var hSize
     @State private var showFilters = false
     @State private var query = ""
     @State private var path: [Show] = []
@@ -13,7 +14,7 @@ struct ShowsFeedView: View {
 
     private var city: String { app.selectedCity.rawValue }
     private var theater: String { app.selectedTheater }
-    private var theaterName: String { app.selectedEntry?.name ?? "Shows" }
+    private var theaterName: String { app.scopeTitle }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -43,7 +44,9 @@ struct ShowsFeedView: View {
                 FilterSheet(store: store, city: city, theater: theater)
             }
             .refreshable { await store.refresh() }
-            .onSwipeRight { app.sidebarOpen = true }   // swipe L→R opens the theater drawer
+            .onSwipeRight {                             // swipe L→R opens the theater drawer
+                if hSize == .compact { app.sidebarOpen = true }
+            }
             .task { store.reconcileFilters(city: city, theater: theater) }
             .onChange(of: theater) { _, _ in
                 // Scope changed — drop venue/types not in the new theater.
@@ -139,12 +142,16 @@ struct ShowsFeedView: View {
         }
     }
 
+    /// The drawer only exists on compact width — iPad shows a persistent column.
+    @ToolbarContentBuilder
     private var hamburgerToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Button { app.sidebarOpen = true } label: {
-                Image(systemName: "line.3.horizontal")
+        if hSize == .compact {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { app.sidebarOpen = true } label: {
+                    Image(systemName: "line.3.horizontal")
+                }
+                .accessibilityLabel("Theaters")
             }
-            .accessibilityLabel("Theaters")
         }
     }
 
@@ -153,11 +160,8 @@ struct ShowsFeedView: View {
             Button {
                 showFilters = true
             } label: {
-                Image(systemName: store.filters.isActive
-                      ? "line.3.horizontal.decrease.circle.fill"
-                      : "line.3.horizontal.decrease.circle")
+                FilterToolbarIcon(activeCount: store.filters.activeCount)
             }
-            .accessibilityLabel("Filters")
         }
     }
 

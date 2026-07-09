@@ -42,11 +42,3 @@ extension View {
         }
     }
 }
-
-extension Show {
-    /// Compact venue label, e.g. "Mainstage" / "Upstairs", or "Livestream".
-    var shortVenue: String {
-        if venue.isEmpty { return isLivestream ? "Livestream" : "" }
-        return venue.replacingOccurrences(of: "NY - 14TH ST. ", with: "")
-    }
-}

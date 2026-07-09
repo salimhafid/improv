@@ -23,6 +23,20 @@ enum City: String, CaseIterable, Identifiable, Codable {
         case .chicago:    return "CHI"
         }
     }
+
+    /// The city's local timezone. The feed's start values are timezone-naive
+    /// venue-local times, so each show is parsed and day-bucketed in its own
+    /// city's zone (and "Today"/date windows compare against that zone's now).
+    var timeZone: TimeZone {
+        switch self {
+        case .newYork:    return TimeZone(identifier: "America/New_York") ?? .current
+        case .losAngeles: return TimeZone(identifier: "America/Los_Angeles") ?? .current
+        case .chicago:    return TimeZone(identifier: "America/Chicago") ?? .current
+        }
+    }
+
+    /// Gregorian calendar pinned to the city's timezone.
+    var calendar: Calendar { DateUtils.calendar(in: timeZone) }
 }
 
 /// A source the app knows how to show, listed in Setup even before the feed loads
@@ -46,6 +60,9 @@ struct SourceInfo: Decodable, Identifiable, Hashable {
 
 /// The supported sources (the 4 wired venues + iO, which is currently unavailable).
 enum SourceCatalog {
+    /// Sentinel theater id meaning "every theater in the selected city".
+    static let allTheatersID = "all"
+
     static let all: [SourceCatalogEntry] = [
         .init(id: "ucb_ny", name: "UCB New York", blurb: "Upright Citizens Brigade", city: .newYork),
         .init(id: "brooklyn_cc", name: "Brooklyn Comedy Collective", blurb: "Williamsburg, Brooklyn", city: .newYork),

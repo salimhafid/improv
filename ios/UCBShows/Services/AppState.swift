@@ -17,8 +17,9 @@ final class AppState {
         }
     }
 
-    /// Currently viewed theater — a `SourceCatalog` source id (e.g. "ucb_ny").
-    /// Always valid for `selectedCity`.
+    /// Currently viewed theater — a `SourceCatalog` source id (e.g. "ucb_ny") or
+    /// `SourceCatalog.allTheatersID` for the whole-city feed. Always valid for
+    /// `selectedCity`.
     var selectedTheater: String {
         didSet { Self.persist(Self.theaterKey, selectedTheater) }
     }
@@ -26,6 +27,9 @@ final class AppState {
     /// Transient UI state (not persisted).
     var sidebarOpen = false
     var showCityPicker = false
+    /// Selected tab (0 Shows, 1 I'm Going, 2 Classes) — lets the sidebar show
+    /// counts for whichever list is on screen.
+    var activeTab = 0
 
     private static let cityKey = "selectedCity"
     private static let theaterKey = "selectedTheater"
@@ -38,11 +42,21 @@ final class AppState {
         // otherwise fall back to that city's first theater.
         let saved = UserDefaults.standard.string(forKey: Self.theaterKey)
         let cityTheaterIDs = SourceCatalog.all.filter { $0.city == city }.map(\.id)
-        if let saved, cityTheaterIDs.contains(saved) {
+        if let saved, saved == SourceCatalog.allTheatersID || cityTheaterIDs.contains(saved) {
             selectedTheater = saved
         } else {
             selectedTheater = cityTheaterIDs.first ?? ""
         }
+    }
+
+    /// Whether the whole-city ("All Theaters") scope is selected.
+    var isAllTheaters: Bool { selectedTheater == SourceCatalog.allTheatersID }
+
+    /// Navigation title for the current scope — the theater's name, or the city
+    /// for the all-theaters feed.
+    var scopeTitle: String {
+        if isAllTheaters { return selectedCity.rawValue }
+        return selectedEntry?.name ?? "Shows"
     }
 
     /// Theaters available in the selected city, in catalog order.
@@ -56,8 +70,9 @@ final class AppState {
     }
 
     /// Keep `selectedTheater` valid for `selectedCity` (called on city change).
+    /// The all-theaters scope is valid in every city.
     func ensureTheaterInCity() {
-        if selectedEntry?.city != selectedCity {
+        if !isAllTheaters, selectedEntry?.city != selectedCity {
             selectedTheater = cityTheaters.first?.id ?? ""
         }
     }

@@ -94,9 +94,13 @@ final class ClassesStore {
 
     // MARK: Filter option sources (scoped to the current city + theater)
 
-    /// Classes in a given city + theater scope (no other filters).
+    /// Classes in a given city + theater scope (no other filters). The
+    /// all-theaters sentinel widens the scope to the whole city.
     func scoped(city: String, theater: String) -> [ClassItem] {
-        allClasses.filter { $0.city == city && $0.source == theater }
+        allClasses.filter {
+            $0.city == city
+                && (theater == SourceCatalog.allTheatersID || $0.source == theater)
+        }
     }
 
     /// Distinct levels/tracks present in the scope, sorted.
@@ -118,7 +122,8 @@ final class ClassesStore {
     }
 
     private func matches(_ item: ClassItem, query: String, city: String, theater: String) -> Bool {
-        if item.city != city || item.source != theater { return false }
+        if item.city != city { return false }
+        if theater != SourceCatalog.allTheatersID, item.source != theater { return false }
         if let level = filters.level, item.level != level { return false }
         if filters.openOnly, item.isFull { return false }
         if !query.isEmpty {

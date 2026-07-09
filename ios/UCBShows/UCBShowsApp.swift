@@ -4,6 +4,7 @@ import SwiftUI
 struct UCBShowsApp: App {
     @State private var store = ShowsStore()
     @State private var classesStore = ClassesStore()
+    @State private var going = GoingStore()
     @State private var app = AppState()
 
     init() {
@@ -18,6 +19,7 @@ struct UCBShowsApp: App {
             RootView()
                 .environment(store)
                 .environment(classesStore)
+                .environment(going)
                 .environment(app)
                 .tint(Theme.accent)
         }

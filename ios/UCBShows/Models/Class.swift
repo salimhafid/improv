@@ -97,11 +97,13 @@ extension ClassItem {
         return u
     }
 
-    /// Start as a `Date`, interpreting the timezone-naive feed value in NY time
-    /// (matches the shows feed convention). Nil if undated/unparseable.
+    /// Start as a `Date`, interpreting the timezone-naive feed value in the
+    /// class's own city timezone (matches the shows feed convention). Nil if
+    /// undated/unparseable.
     var startDate: Date? {
         guard let start else { return nil }
-        return DateUtils.parse(start)
+        let tz = City(rawValue: city)?.timeZone ?? .newYork
+        return DateUtils.parse(start, in: tz)
     }
 
     /// Short theater label for badges, e.g. "WGIS · LA".

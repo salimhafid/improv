@@ -7,6 +7,25 @@ struct DaySection: Identifiable {
     let date: Date?
     let title: String       // "Today" / "Tomorrow" / "Friday, June 26" / "Dates TBA"
     let shows: [Show]
+
+    /// Groups shows into date sections keyed on each show's venue-local day.
+    /// Shared by the feed and the I'm Going tab (which can mix cities).
+    static func group(_ shows: [Show]) -> [DaySection] {
+        let byDay = Dictionary(grouping: shows, by: \.dayKey)
+        return byDay.keys.sorted { a, b in
+            if a == "tba" { return false }
+            if b == "tba" { return true }
+            return a < b
+        }.map { key in
+            let items = byDay[key] ?? []
+            let first = items.first
+            let date = first?.startDate
+            let title = date.map {
+                DateUtils.sectionTitle(for: $0, in: first?.cityTimeZone ?? .newYork)
+            } ?? "Dates to be announced"
+            return DaySection(id: key, date: date, title: title, shows: items)
+        }
+    }
 }
 
 /// Single source of truth for the app: loads the feed, caches it for offline,
@@ -113,9 +132,13 @@ final class ShowsStore {
     // MARK: Filter option sources (scoped to the current city + theater)
 
     /// Shows in a given city + theater scope (no other filters) — the basis for
-    /// filter option lists and the per-theater feed.
+    /// filter option lists and the per-theater feed. The all-theaters sentinel
+    /// widens the scope to the whole city.
     func scoped(city: String, theater: String) -> [Show] {
-        allShows.filter { $0.city == city && $0.source == theater }
+        allShows.filter {
+            $0.city == city
+                && (theater == SourceCatalog.allTheatersID || $0.source == theater)
+        }
     }
 
     func availableVenues(city: String, theater: String) -> [String] {
@@ -137,7 +160,8 @@ final class ShowsStore {
     }
 
     private func matches(_ show: Show, query: String, city: String, theater: String) -> Bool {
-        if show.city != city || show.source != theater { return false }
+        if show.city != city { return false }
+        if theater != SourceCatalog.allTheatersID, show.source != theater { return false }
         if let venue = filters.venue, show.venue != venue { return false }
         if !filters.comedyTypes.isEmpty,
            filters.comedyTypes.isDisjoint(with: Set(show.comedyTypes)) { return false }
@@ -154,7 +178,8 @@ final class ShowsStore {
 
     private func inDateWindow(_ show: Show) -> Bool {
         guard let date = show.startDate else { return false }
-        let cal = Calendar.nyCalendar
+        // Reckon "today"/windows in the show's own city timezone.
+        let cal = DateUtils.calendar(in: show.cityTimeZone)
         let now = Date()
         let startOfToday = cal.startOfDay(for: now)
         switch filters.dateWindow {
@@ -167,43 +192,32 @@ final class ShowsStore {
             guard let end = cal.date(byAdding: .day, value: 14, to: startOfToday) else { return true }
             return date >= startOfToday && date <= end
         case .weekend:
-            guard let weekend = upcomingWeekend(now: now) else { return false }
+            guard let weekend = upcomingWeekend(now: now, calendar: cal) else { return false }
             return date >= weekend.start && date < weekend.end
         }
     }
 
-    /// Bounds of the upcoming weekend in NY time: from Saturday 00:00 up to
-    /// Monday 00:00. If today is Sun, the weekend's Saturday is yesterday — but
-    /// already-passed shows are filtered out of the feed anyway, so this
-    /// effectively means "today".
-    private func upcomingWeekend(now: Date) -> (start: Date, end: Date)? {
-        let cal = Calendar.nyCalendar
+    /// Bounds of the upcoming weekend: from Friday 00:00 up to Monday 00:00
+    /// (Fri–Sun — comedy audiences count Friday night as the weekend). Mid-weekend
+    /// the window starts in the past, but passed shows aren't in the feed anyway.
+    private func upcomingWeekend(now: Date, calendar cal: Calendar) -> (start: Date, end: Date)? {
         let today = cal.startOfDay(for: now)
         let weekday = cal.component(.weekday, from: today) // 1 = Sun ... 7 = Sat
-        let satOffset = (weekday == 1) ? -1 : (7 - weekday)
-        guard let saturday = cal.date(byAdding: .day, value: satOffset, to: today),
-              let monday = cal.date(byAdding: .day, value: 2, to: saturday) else { return nil }
-        return (saturday, monday)
+        let friOffset: Int
+        switch weekday {
+        case 1: friOffset = -2          // Sunday → this weekend's Friday
+        case 7: friOffset = -1          // Saturday
+        default: friOffset = 6 - weekday
+        }
+        guard let friday = cal.date(byAdding: .day, value: friOffset, to: today),
+              let monday = cal.date(byAdding: .day, value: 3, to: friday) else { return nil }
+        return (friday, monday)
     }
 
     // MARK: Sections
 
     /// Date-grouped sections of the current city+theater shows (filtered).
     func sections(city: String, theater: String, searchText: String = "") -> [DaySection] {
-        grouped(filtered(city: city, theater: theater, searchText: searchText))
-    }
-
-    private func grouped(_ shows: [Show]) -> [DaySection] {
-        let byDay = Dictionary(grouping: shows, by: \.dayKey)
-        return byDay.keys.sorted { a, b in
-            if a == "tba" { return false }
-            if b == "tba" { return true }
-            return a < b
-        }.map { key in
-            let items = byDay[key] ?? []
-            let date = items.first?.startDate
-            let title = date.map { DateUtils.sectionTitle(for: $0) } ?? "Dates to be announced"
-            return DaySection(id: key, date: date, title: title, shows: items)
-        }
+        DaySection.group(filtered(city: city, theater: theater, searchText: searchText))
     }
 }

@@ -1,13 +1,17 @@
 import SwiftUI
 
 /// The show detail: stretchy poster header, metadata, blurb, and a pinned
-/// Get Tickets bar that opens the ticket page in an in-app Safari sheet.
+/// bottom bar with an "I'm Going" heart and a Get Tickets button that opens the
+/// ticket page in an in-app Safari sheet.
 struct ShowDetailView: View {
     let show: Show
     let namespace: Namespace.ID
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(GoingStore.self) private var going
     @State private var webLink: WebLink?
+    @State private var calendarMessage: String?
+    @State private var showCalendarAlert = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -65,6 +69,16 @@ struct ShowDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .zoomDestination(id: show.id, in: namespace)
         .toolbar {
+            if show.startDate != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        addToCalendar()
+                    } label: {
+                        Image(systemName: "calendar.badge.plus")
+                    }
+                    .accessibilityLabel("Add to Calendar")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 if let url = show.url {
                     ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
@@ -77,7 +91,22 @@ struct ShowDetailView: View {
         .sheet(item: $webLink) { link in
             SafariView(url: link.url).ignoresSafeArea()
         }
+        .alert(calendarMessage ?? "", isPresented: $showCalendarAlert) {
+            Button("OK", role: .cancel) {}
+        }
         .onSwipeRight { dismiss() }   // swipe L→R anywhere goes back to the feed
+    }
+
+    private func addToCalendar() {
+        Task {
+            do {
+                try await CalendarService.add(show)
+                calendarMessage = "Added to your calendar."
+            } catch {
+                calendarMessage = error.localizedDescription
+            }
+            showCalendarAlert = true
+        }
     }
 
     // MARK: Pieces
@@ -106,22 +135,41 @@ struct ShowDetailView: View {
         }
     }
 
-    @ViewBuilder
     private var bottomBar: some View {
-        if let url = show.url {
-            Button {
-                webLink = WebLink(url: url)
-            } label: {
-                Label(show.isFree ? "Reserve · Free" : "Get Tickets", systemImage: "ticket.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
+        HStack(spacing: 12) {
+            goingButton
+            if let url = show.url {
+                Button {
+                    webLink = WebLink(url: url)
+                } label: {
+                    Label(show.isFree ? "Reserve · Free" : "Get Tickets", systemImage: "ticket.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding(.horizontal, Theme.Space.gutter)
-            .padding(.vertical, 12)
-            .background(.bar)
         }
+        .padding(.horizontal, Theme.Space.gutter)
+        .padding(.vertical, 12)
+        .background(.bar)
+    }
+
+    /// The "I'm Going" heart — saves the show to the I'm Going tab and schedules
+    /// a pre-show reminder.
+    private var goingButton: some View {
+        let isGoing = going.isGoing(show)
+        return Button {
+            going.toggle(show)
+        } label: {
+            Image(systemName: isGoing ? "heart.fill" : "heart")
+                .font(.headline)
+                .symbolEffect(.bounce, value: isGoing)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .sensoryFeedback(.impact, trigger: isGoing)
+        .accessibilityLabel(isGoing ? "Remove from I'm Going" : "I'm Going")
     }
 
     private var ambient: some View {
