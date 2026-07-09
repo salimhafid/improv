@@ -1,0 +1,33 @@
+# Fallback project generator (optional). If the committed UCBShows.xcodeproj ever
+# gets out of sync, regenerate it with XcodeGen:
+#
+#   brew install xcodegen && cd ios && xcodegen generate
+#
+name: UCBShows
+options:
+  bundleIdPrefix: com.salimhafid
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  UCBShows:
+    type: application
+    platform: iOS
+    sources:
+      - UCBShows
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.salimhafid.UCBShows
+        GENERATE_INFOPLIST_FILE: true
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: true
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_CFBundleDisplayName: "UCB NY"
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true

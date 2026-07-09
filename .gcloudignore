@@ -1,0 +1,12 @@
+.git/
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.pyc
+data/
+site/
+*.local.json
+.refresh_token.local
+README.md
+.DS_Store

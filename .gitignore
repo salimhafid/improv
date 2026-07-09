@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets / local state
+.refresh_token.local
+
+# macOS
+.DS_Store
+
+# Xcode
+ios/UCBShows.xcodeproj/xcuserdata/
+ios/UCBShows.xcodeproj/project.xcworkspace/xcuserdata/
+DerivedData/
+build/
