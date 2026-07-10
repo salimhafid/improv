@@ -3,9 +3,10 @@ import Foundation
 /// Fetches the shows feed and keeps a local "last-good" copy so the app shows
 /// content instantly on launch and survives being offline.
 struct ShowsService {
-    /// Live feed produced by the Cloud Run scraper (refreshed on a schedule
-    /// server-side: UCB New York every 6h, other sources every 24h).
-    static let feedURL = URL(string: "https://ucb-ny-shows-315881650478.us-central1.run.app/shows.json")!
+    /// Live feed published to GitHub Pages by the scheduled scraper workflow
+    /// (UCB every 3h, other sources every 24h). Served from Pages' CDN with
+    /// automatic ETag/304 revalidation.
+    static let feedURL = URL(string: "https://salimhafid.github.io/improv/shows.json")!
 
     enum LoadError: LocalizedError {
         case offlineNoCache

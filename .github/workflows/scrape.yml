@@ -1,0 +1,44 @@
+name: Scrape feeds
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"   # every 3h (offset minute; matches the tightest source cadence)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Scrape and write feeds into docs/
+        env:
+          LOCAL_STORE_DIR: docs
+        run: python publish_static.py
+
+      - name: Commit updated feeds
+        run: |
+          git config user.name "improv-feed-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/shows.json docs/classes.json
+          if git diff --cached --quiet; then
+            echo "feeds unchanged — nothing to publish"
+          else
+            git commit -m "Update feeds"
+            git push
+          fi

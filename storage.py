@@ -1,10 +1,14 @@
-"""Durable 'last-good' cache for the shows + classes payloads, backed by Google
-Cloud Storage. Lets the Cloud Run service serve immediately on cold start and
-survive scale-to-zero without re-scraping, and preserves the previous data if a
-scrape fails.
+"""Durable 'last-good' cache for the shows + classes payloads.
 
-If BUCKET is unset (e.g. local dev without GCS), these become no-ops returning
-None / False so the app still runs.
+Two backends, picked by environment:
+  - LOCAL_STORE_DIR: plain JSON files in a directory. Used by the GitHub
+    Actions publisher, where the checked-out repo's docs/ folder is both the
+    previous-payload cache (so per-source scrape cadences carry across runs)
+    and the content GitHub Pages serves.
+  - BUCKET: Google Cloud Storage (the legacy Cloud Run deployment).
+
+If neither is set (e.g. bare local dev), these are no-ops returning None/False
+so the app still runs.
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ import os
 
 log = logging.getLogger("ucb.storage")
 
+LOCAL_DIR = os.environ.get("LOCAL_STORE_DIR", "")
 BUCKET = os.environ.get("BUCKET", "")
 SHOWS_BLOB = os.environ.get("BLOB_NAME", "shows.json")
 CLASSES_BLOB = os.environ.get("CLASSES_BLOB_NAME", "classes.json")
@@ -25,6 +30,18 @@ def _blob(name: str):
 
 
 def load(name: str) -> dict | None:
+    if LOCAL_DIR:
+        path = os.path.join(LOCAL_DIR, name)
+        try:
+            with open(path, encoding="utf-8") as f:
+                payload = json.load(f)
+            log.info("loaded %s (count=%s)", path, payload.get("count"))
+            return payload
+        except FileNotFoundError:
+            return None
+        except Exception as e:  # noqa: BLE001 - cache is best-effort
+            log.warning("local load failed for %s: %r", path, e)
+            return None
     if not BUCKET:
         return None
     try:
@@ -40,6 +57,19 @@ def load(name: str) -> dict | None:
 
 
 def save(name: str, payload: dict) -> bool:
+    if LOCAL_DIR:
+        path = os.path.join(LOCAL_DIR, name)
+        try:
+            os.makedirs(LOCAL_DIR, exist_ok=True)
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp, path)
+            log.info("saved %s (count=%s)", path, payload.get("count"))
+            return True
+        except Exception as e:  # noqa: BLE001 - cache is best-effort
+            log.warning("local save failed for %s: %r", path, e)
+            return False
     if not BUCKET:
         return False
     try:
