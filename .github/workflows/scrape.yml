@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "17 */3 * * *"   # every 3h (offset minute; matches the tightest source cadence)
   workflow_dispatch:
+    inputs:
+      probe:
+        description: "Force a from-scratch scrape into a throwaway dir (no commit) — tests that runner IPs can reach the sources"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -28,10 +33,13 @@ jobs:
 
       - name: Scrape and write feeds into docs/
         env:
-          LOCAL_STORE_DIR: docs
+          # Probe mode scrapes into a throwaway dir with no previous payload,
+          # so every source is due — a true test of runner connectivity.
+          LOCAL_STORE_DIR: ${{ inputs.probe && 'probe-out' || 'docs' }}
         run: python publish_static.py
 
       - name: Commit updated feeds
+        if: ${{ !inputs.probe }}
         run: |
           git config user.name "improv-feed-bot"
           git config user.email "actions@users.noreply.github.com"
