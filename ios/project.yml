@@ -30,6 +30,7 @@ targets:
         ENABLE_PREVIEWS: true
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_KEY_CFBundleDisplayName: "Improv"
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.entertainment"
         INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription: "Improv adds shows you're going to as events in your calendar."
         INFOPLIST_KEY_UILaunchScreen_Generation: true
