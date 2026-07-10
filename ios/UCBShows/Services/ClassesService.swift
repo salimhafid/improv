@@ -4,9 +4,9 @@ import Foundation
 /// shows content instantly on launch and survives being offline. Mirrors
 /// `ShowsService`.
 struct ClassesService {
-    /// Live feed produced by the Cloud Run scraper (refreshed server-side: UCB NY
-    /// + WGIS every 24h, other theaters every 7 days).
-    static let feedURL = URL(string: "https://ucb-ny-shows-315881650478.us-central1.run.app/classes.json")!
+    /// Live classes feed published to GitHub Pages by the scheduled scraper
+    /// workflow (see `ShowsService.feedURL`).
+    static let feedURL = URL(string: "https://salimhafid.github.io/improv/classes.json")!
 
     enum LoadError: LocalizedError {
         case offlineNoCache
