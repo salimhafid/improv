@@ -203,6 +203,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Improv;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
 				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Improv adds shows you're going to as events in your calendar.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -235,6 +236,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Improv;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
 				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Improv adds shows you're going to as events in your calendar.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
