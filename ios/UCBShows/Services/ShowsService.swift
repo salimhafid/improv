@@ -6,7 +6,7 @@ struct ShowsService {
     /// Live feed published to GitHub Pages by the scheduled scraper workflow
     /// (UCB every 3h, other sources every 24h). Served from Pages' CDN with
     /// automatic ETag/304 revalidation.
-    static let feedURL = URL(string: "https://salimhafid.github.io/improv/shows.json")!
+    static let feedURL = URL(string: "https://salimhafid.com/improv/shows.json")!
 
     enum LoadError: LocalizedError {
         case offlineNoCache
