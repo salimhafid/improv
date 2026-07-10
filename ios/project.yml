@@ -21,9 +21,6 @@ targets:
     platform: iOS
     sources:
       - UCBShows
-    dependencies:
-      - target: UCBWidget
-        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.salimhafid.UCBShows
@@ -37,16 +34,3 @@ targets:
         INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription: "Improv adds shows you're going to as events in your calendar."
         INFOPLIST_KEY_UILaunchScreen_Generation: true
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
-  UCBWidget:
-    type: app-extension
-    platform: iOS
-    sources:
-      - UCBWidget
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.salimhafid.UCBShows.Widget
-        GENERATE_INFOPLIST_FILE: true
-        INFOPLIST_FILE: UCBWidgetInfo.plist
-        INFOPLIST_KEY_CFBundleDisplayName: "Improv Tonight"
-        SKIP_INSTALL: true
-        TARGETED_DEVICE_FAMILY: "1,2"
