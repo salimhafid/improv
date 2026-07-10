@@ -32,7 +32,7 @@ struct ShowDetailView: View {
                             // Only show a map-pin for a real physical venue; a
                             // venue-less livestream is already conveyed by the chip.
                             if !show.venue.isEmpty {
-                                Label(show.venue, systemImage: "mappin.and.ellipse")
+                                Label(show.shortVenue, systemImage: "mappin.and.ellipse")
                             }
                         }
                         .font(.subheadline)
