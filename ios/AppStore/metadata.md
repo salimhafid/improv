@@ -67,8 +67,8 @@ improv,comedy,ucb,standup,sketch,shows,tonight,magnet,annoyance,theater,tickets,
 (97 chars)
 
 ## URLs
-- Support URL: `https://salimhafid.github.io/improv/`
-- Privacy Policy URL: `https://salimhafid.github.io/improv/privacy.html`
+- Support URL: `https://salimhafid.com/improv/`
+- Privacy Policy URL: `https://salimhafid.com/improv/privacy.html`
 - Marketing URL: (optional, leave blank)
 
 ## App Privacy questionnaire
