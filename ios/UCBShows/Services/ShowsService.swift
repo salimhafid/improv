@@ -35,10 +35,11 @@ struct ShowsService {
         self.cacheURL = dir.appendingPathComponent("shows.cache.json")
     }
 
-    /// Fetch fresh data from the network and update the on-disk cache.
+    /// Fetch fresh data from the network and update the on-disk cache. Uses the
+    /// protocol cache policy so URLSession honors the server's ETag/max-age —
+    /// unchanged feeds cost a ~0-byte 304 revalidation instead of a re-download.
     func fetchRemote() async throws -> ShowsPayload {
         var request = URLRequest(url: Self.feedURL)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 20
 
         let (data, response) = try await session.data(for: request)

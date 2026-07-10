@@ -34,10 +34,11 @@ struct ClassesService {
         self.cacheURL = dir.appendingPathComponent("classes.cache.json")
     }
 
-    /// Fetch fresh data from the network and update the on-disk cache.
+    /// Fetch fresh data from the network and update the on-disk cache. Protocol
+    /// cache policy so unchanged feeds revalidate as a ~0-byte 304 (see
+    /// `ShowsService.fetchRemote`).
     func fetchRemote() async throws -> ClassesPayload {
         var request = URLRequest(url: Self.feedURL)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 20
 
         let (data, response) = try await session.data(for: request)
