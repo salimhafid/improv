@@ -124,14 +124,25 @@ def status():
             "generated_at": payload.get("generated_at")}, 200
 
 
+def _cacheable_json(payload: dict, kind: str):
+    """JSON response with an ETag + short max-age. The feed only changes when a
+    scheduled scrape stores a new payload, so `generated_at` is a perfect cache
+    validator: repeat fetches revalidate with If-None-Match and get an empty 304
+    unless there's genuinely new data. Also makes the feeds CDN-cacheable."""
+    resp = jsonify(payload)
+    resp.set_etag(f"{kind}-{payload.get('generated_at') or 'empty'}")
+    resp.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=600"
+    return resp.make_conditional(request)
+
+
 @app.get("/shows.json")
 def shows_json():
-    return jsonify(latest_payload())
+    return _cacheable_json(latest_payload(), "shows")
 
 
 @app.get("/classes.json")
 def classes_json():
-    return jsonify(latest_classes())
+    return _cacheable_json(latest_classes(), "classes")
 
 
 @app.get("/")

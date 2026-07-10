@@ -53,9 +53,6 @@ XcodeGen.
 - **Show detail** — stretchy poster header, metadata chips, blurb, cast section,
   Share, **Add to Calendar** (write-only EventKit access), and a pinned bar with
   the I'm Going heart and **Get Tickets** (in-app Safari).
-- **Tonight widget** — a small/medium home-screen widget listing tonight's
-  shows for a theater you choose in the widget's configuration (self-contained;
-  fetches the feed directly).
 - **Pull to refresh** (Shows and Classes) — re-reads the backend store. It never
   triggers a scrape; scraping happens on the backend's schedule, and refresh
   surfaces whatever the last run stored.
@@ -99,19 +96,17 @@ UCBShows/
                              ShowDetailView, ClassDetailView, SetupView
   Views/Components/          TheaterSidebar/TheaterListPanel, ShowRow, ClassRow,
                              PosterImage/GeneratedCover, FilterSheet, Chips, …
-UCBWidget/                   self-contained WidgetKit "Tonight" extension
 ```
 
 Data flows one way: services fetch/decode → stores hold, filter, and date-group
 → SwiftUI views render. Stores are `@MainActor @Observable`; cache reads happen
 off the main actor.
 
-The project uses Xcode's *file-system synchronized* groups, so new files added
-under `UCBShows/` or `UCBWidget/` are picked up automatically — no `.pbxproj`
-edits needed.
+The project uses Xcode's *file-system synchronized* group, so new files added
+under `UCBShows/` are picked up automatically — no `.pbxproj` edits needed.
 
 ## Data source
 
 `ShowsService.feedURL` / `ClassesService.feedURL` point at the live Cloud Run
 endpoints. To point at a different backend (e.g. a local `python app.py`),
-change those constants. The widget has its own copy in `TonightLoader.feedURL`.
+change those constants.

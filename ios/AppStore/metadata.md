@@ -20,7 +20,7 @@ Primary: Entertainment. Secondary: Lifestyle (optional).
 ## Promotional text (170 chars max, editable without review)
 ```
 Tonight's improv, sketch, and standup across New York, Los Angeles, and
-Chicago — with reminders, a home-screen widget, and every theater in one feed.
+Chicago — with showtime reminders and every theater in one feed.
 ```
 
 ## Description (4000 chars max)
@@ -50,10 +50,6 @@ being available clears itself.
 CLASSES TOO
 Every theater's classes and workshops, grouped by level, with instructor,
 schedule, price, and open-seat filtering. Register in a couple of taps.
-
-TONIGHT, ON YOUR HOME SCREEN
-A widget shows tonight's lineup for the theater you choose — glance, pick a
-show, go.
 
 BUILT LIKE APPLE BUILT IT
 Native SwiftUI, full Dynamic Type, light and dark mode, offline support (your
