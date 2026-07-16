@@ -64,6 +64,14 @@ extension ProcessInfo {
         #endif
     }
 
+    var uiTestScrollCast: Bool {
+        #if DEBUG
+        environment["UITEST_SCROLL_CAST"] == "1"
+        #else
+        false
+        #endif
+    }
+
     var uiTestClassFilter: Bool {
         #if DEBUG
         environment["UITEST_CLASS_FILTER"] == "1"
