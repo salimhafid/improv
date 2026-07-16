@@ -42,6 +42,10 @@ def _parse_cards(html: str, source: str, org: str, city: str) -> list[dict]:
 
         img_el = card.select_one("img[data-src]") or card.select_one("img[src]")
         image = safe_url((img_el.get("data-src") or img_el.get("src")) if img_el else None) or None
+        # The grid serves a 500x250 thumbnail; WordPress keeps the full-size
+        # original at the same URL without the -WxH suffix.
+        if image:
+            image = _WP_SIZE_SUFFIX.sub("", image)
 
         excerpt_el = card.select_one(".ucb-event-post-excerpt")
         excerpt = clean(excerpt_el.get_text()) if excerpt_el else ""
@@ -77,18 +81,26 @@ def fetch(region: str) -> list[dict]:
 
 
 _CAST_RE = re.compile(r"(?:Featuring|Cast|Line\s*-?up)\s*:\s*(.+)", re.I)
+_WP_SIZE_SUFFIX = re.compile(r"-\d+x\d+(?=\.(?:jpe?g|png|webp|gif)$)", re.I)
 
 
-def detail(url: str) -> tuple[str, str]:
-    """Fetch a UCB show page → (full description, cast). Best-effort."""
+def og_image(soup: BeautifulSoup) -> str | None:
+    """The page's og:image — usually the full-size hero/poster upload."""
+    el = soup.select_one('meta[property="og:image"]')
+    return safe_url(el.get("content")) if el else None
+
+
+def detail(url: str) -> tuple[str, str, str | None]:
+    """Fetch a UCB show page → (full description, cast, hero image).
+    Best-effort."""
     try:
         soup = BeautifulSoup(fetch_html(url), "lxml")
     except RuntimeError:
-        return "", ""
+        return "", "", None
     el = soup.select_one(".ucb-event-description")
     description = clean(el.get_text(" ")) if el else ""
     cast = ""
     m = _CAST_RE.search(soup.get_text("\n"))
     if m:
         cast = clean(m.group(1))[:300]
-    return description[:2000], cast
+    return description[:2000], cast, og_image(soup)

@@ -58,21 +58,25 @@ def _parse_dt(value):
 
 
 def _enrich_details(shows, detail_fn, prev_detail, budget) -> int:
-    """Fill description/cast: reuse cached details by url for shows already
-    attempted in a prior run, fetch (in parallel, up to `budget`) only shows not
-    yet attempted. Each processed show is flagged `detail_done` so a page that
-    legitimately has no description/cast (or a transient fetch failure) is not
-    re-fetched on every run — the cache converges. Returns the number fetched."""
+    """Fill description/cast/hero image: reuse cached details by url for shows
+    already attempted in a prior run, fetch (in parallel, up to `budget`) only
+    shows not yet attempted. The detail page's og:image only fills in when the
+    listing gave no artwork (Magnet's calendar grid has none). Each processed
+    show is flagged `detail_done` so a page that legitimately has no
+    description/cast (or a transient fetch failure) is not re-fetched on every
+    run — the cache converges. Returns the number fetched."""
     def safe(url):
         try:
             return detail_fn(url)
         except Exception:  # noqa: BLE001
-            return "", ""
+            return "", "", None
     to_fetch = []
     for show in shows:
         cached = prev_detail.get(show.get("url"))
         if cached is not None:
-            show["description"], show["cast"] = cached  # reuse even if empty
+            show["description"], show["cast"], img = cached  # reuse even if empty
+            if img and not show.get("image"):
+                show["image"] = img
             show["detail_done"] = True
         elif show.get("url"):
             to_fetch.append(show)
@@ -80,11 +84,13 @@ def _enrich_details(shows, detail_fn, prev_detail, budget) -> int:
     if to_fetch:
         with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as ex:
             results = list(ex.map(lambda s: safe(s["url"]), to_fetch))
-        for s, (desc, cast) in zip(to_fetch, results):
+        for s, (desc, cast, img) in zip(to_fetch, results):
             if desc:
                 s["description"] = desc
             if cast:
                 s["cast"] = cast
+            if img and not s.get("image"):
+                s["image"] = img
             s["detail_done"] = True   # attempted; don't re-fetch next run
     return len(to_fetch)
 
@@ -108,7 +114,7 @@ def aggregate(today: date | None = None, now: datetime | None = None) -> dict:
     # counts as already-attempted if it was flagged detail_done OR already has a
     # description/cast (covers payloads written before detail_done existed), so we
     # neither re-fetch description-less pages forever nor drop cast-only results.
-    prev_detail = {s.get("url"): (s.get("description", ""), s.get("cast", ""))
+    prev_detail = {s.get("url"): (s.get("description", ""), s.get("cast", ""), s.get("image"))
                    for s in previous.get("shows", [])
                    if s.get("url") and (s.get("detail_done") or s.get("description") or s.get("cast"))}
     detail_budget = _DETAIL_BUDGET
