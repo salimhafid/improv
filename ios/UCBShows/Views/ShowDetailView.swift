@@ -9,9 +9,13 @@ struct ShowDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(GoingStore.self) private var going
+    @Environment(TalentStore.self) private var talent
     @State private var webLink: WebLink?
     @State private var calendarMessage: String?
     @State private var showCalendarAlert = false
+
+    /// The talent directory only covers UCB New York.
+    private var hasTalentDirectory: Bool { show.source == "ucb_ny" }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -49,16 +53,7 @@ struct ShowDetailView: View {
                         }
 
                         if show.hasCast {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Label("Cast", systemImage: "person.2.fill")
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                Text(show.castLine)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                            }
-                            .padding(.top, 4)
+                            castSection
                         }
                     }
                     .padding(Theme.Space.gutter)
@@ -67,6 +62,14 @@ struct ShowDetailView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: TalentRoute.self) { route in
+            switch route {
+            case .person(let person):
+                TalentBioView(person: person)
+            case .directory(let initialSearch):
+                TalentDirectoryView(initialSearch: initialSearch)
+            }
+        }
         .zoomDestination(id: show.id, in: namespace)
         .toolbar {
             if show.startDate != nil {
@@ -107,6 +110,65 @@ struct ShowDetailView: View {
             }
             showCalendarAlert = true
         }
+    }
+
+    // MARK: Cast
+
+    /// Cast section. For UCB New York, each name is tappable: matched names
+    /// push the performer's bio; unmatched ones open the directory pre-searched.
+    /// Other theaters keep the plain text line.
+    private var castSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Cast", systemImage: "person.2.fill")
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            if hasTalentDirectory, !show.castMembers.isEmpty {
+                FlowLayout(spacing: 8) {
+                    ForEach(show.castMembers, id: \.self) { name in
+                        castChip(name)
+                    }
+                }
+                NavigationLink(value: TalentRoute.directory(initialSearch: "")) {
+                    HStack(spacing: 4) {
+                        Text("Browse UCB Talent Directory")
+                        Image(systemName: "chevron.right").font(.caption2.weight(.bold))
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                }
+                .padding(.top, 2)
+            } else {
+                Text(show.castLine)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private func castChip(_ name: String) -> some View {
+        let match = talent.person(named: name)
+        NavigationLink(value: match.map(TalentRoute.person)
+                        ?? TalentRoute.directory(initialSearch: name)) {
+            HStack(spacing: 4) {
+                Text(name)
+                if match != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(match != nil ? Theme.accent : .primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background((match != nil ? Theme.accent : Color.secondary).opacity(0.12),
+                        in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Pieces

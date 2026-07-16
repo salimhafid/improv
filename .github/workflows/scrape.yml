@@ -43,7 +43,7 @@ jobs:
         run: |
           git config user.name "improv-feed-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add docs/shows.json docs/classes.json
+          git add docs/shows.json docs/classes.json docs/talent.json
           if git diff --cached --quiet; then
             echo "feeds unchanged — nothing to publish"
           else

@@ -226,6 +226,22 @@ extension Show {
 
     var hasCast: Bool { !detailParts.cast.isEmpty }
 
+    /// Individual performer names split out of the cast line ("A, B & C" /
+    /// "A, B, and C" → ["A", "B", "C"]). Best-effort; entries that don't look
+    /// like names (too long/short) are dropped.
+    var castMembers: [String] {
+        guard hasCast else { return [] }
+        let unified = castLine
+            .replacingOccurrences(of: #"\s*&\s*"#, with: ", ", options: .regularExpression)
+            .replacingOccurrences(of: #",?\s+and\s+"#, with: ", ", options: .regularExpression)
+        return unified.split(separator: ",").compactMap { piece in
+            let name = piece.trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".!"))
+            guard name.count >= 3, name.count <= 50 else { return nil }
+            return name
+        }
+    }
+
     private static func stripCastLabel(_ s: String) -> String {
         var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         if let r = t.range(of: "^" + castLabel,
