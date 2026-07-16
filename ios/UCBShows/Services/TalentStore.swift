@@ -43,10 +43,18 @@ final class TalentStore {
         byName[TalentPerson.nameKey(raw)]
     }
 
-    /// Directory filtered by search text and an optional group tag.
+    /// Directory filtered by search text and an optional city tag. DCM talent
+    /// counts as New York (the marathon is a NY institution), so the "ny"
+    /// filter includes anyone tagged ny OR dcm.
     func people(matching query: String, group: String? = nil) -> [TalentPerson] {
         var out = allPeople
-        if let group { out = out.filter { $0.groups.contains(group) } }
+        if let group {
+            out = out.filter {
+                group == "ny"
+                    ? ($0.groups.contains("ny") || $0.groups.contains("dcm"))
+                    : $0.groups.contains(group)
+            }
+        }
         let q = TalentPerson.nameKey(query)
         if !q.isEmpty { out = out.filter { TalentPerson.nameKey($0.name).contains(q) } }
         return out
