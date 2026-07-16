@@ -9,12 +9,15 @@ enum TalentRoute: Hashable {
 
 // MARK: - Bio
 
-/// A performer's page: headshot, name, group tags, and the full bio on
-/// ucbcomedy.com in an in-app Safari sheet.
+/// A performer's page: headshot, name, city tag, their scraped bio, their
+/// upcoming shows from the feed (each links to the show page in-app), and the
+/// full profile on ucbcomedy.com in an in-app Safari sheet.
 struct TalentBioView: View {
     let person: TalentPerson
 
+    @Environment(ShowsStore.self) private var shows
     @State private var webLink: WebLink?
+    @Namespace private var zoom
 
     var body: some View {
         ScrollView {
@@ -28,11 +31,17 @@ struct TalentBioView: View {
                     .font(.title.bold())
                     .multilineTextAlignment(.center)
 
-                HStack(spacing: 8) {
-                    ForEach(person.groupLabels, id: \.self) { label in
-                        MetaChip(text: label, systemImage: symbol(for: label), tint: Theme.accent)
-                    }
+                MetaChip(text: person.cityLabel, systemImage: "theatermasks", tint: Theme.accent)
+
+                if !person.bio.isEmpty {
+                    Text(person.bio)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .padding(.top, 4)
                 }
+
+                upcomingShows
 
                 NavigationLink(value: TalentRoute.directory(initialSearch: "")) {
                     Label("Browse UCB Talent", systemImage: "person.3")
@@ -51,11 +60,36 @@ struct TalentBioView: View {
         }
     }
 
-    private func symbol(for label: String) -> String {
-        switch label {
-        case "Teacher": return "graduationcap"
-        case "DCM":     return "star"
-        default:        return "theatermasks"
+    /// Feed shows whose cast includes this person, soonest first.
+    private var matchingShows: [Show] {
+        let key = TalentPerson.nameKey(person.name)
+        return shows.allShows
+            .filter { show in
+                show.castMembers.contains { TalentPerson.nameKey($0) == key }
+            }
+            .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+    }
+
+    @ViewBuilder
+    private var upcomingShows: some View {
+        let upcoming = matchingShows
+        if !upcoming.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Upcoming Shows", systemImage: "calendar")
+                    .font(.headline)
+                    .padding(.bottom, 4)
+                ForEach(upcoming.prefix(8)) { show in
+                    NavigationLink(value: show) {
+                        ShowRow(show: show)
+                    }
+                    .buttonStyle(.plain)
+                    if show.id != upcoming.prefix(8).last?.id {
+                        Divider().padding(.leading, 104)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
         }
     }
 
@@ -192,7 +226,7 @@ private struct TalentRow: View {
                 Text(person.name)
                     .font(.body.weight(.medium))
                     .lineLimit(1)
-                Text(person.groupLabels.joined(separator: " · "))
+                Text(person.cityLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
