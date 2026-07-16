@@ -15,6 +15,8 @@ struct ShowDetailView: View {
     @State private var calendarMessage: String?
     @State private var showCalendarAlert = false
     @State private var showCalendarChooser = false
+    @State private var showShareSheet = false
+    @State private var shareImage: UIImage?
     /// Remembered Apple/Google choice; empty until the user picks on first use.
     @AppStorage("calendarProvider") private var calendarProvider = ""
 
@@ -76,6 +78,11 @@ struct ShowDetailView: View {
                         addToCalendar()
                     }
                 }
+                if ProcessInfo.processInfo.environment["UITEST_SHARE"] == "1" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                        prepareShare()
+                    }
+                }
                 #endif
                 // DEBUG-only: scroll the cast section into view for
                 // verification screenshots (UITEST_SCROLL_CAST=1).
@@ -109,16 +116,22 @@ struct ShowDetailView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                if let url = show.url {
-                    ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
-                } else {
-                    ShareLink(item: show.title) { Image(systemName: "square.and.arrow.up") }
+                Button {
+                    prepareShare()
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
                 }
+                .accessibilityLabel("Share")
             }
         }
         .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(item: $webLink) { link in
             SafariView(url: link.url).ignoresSafeArea()
+        }
+        .sheet(isPresented: $showShareSheet) {
+            ShowShareSheet(show: show, image: shareImage)
+                .presentationDetents([.medium, .large])
+                .ignoresSafeArea()
         }
         .alert(calendarMessage ?? "", isPresented: $showCalendarAlert) {
             Button("OK", role: .cancel) {}
@@ -131,6 +144,21 @@ struct ShowDetailView: View {
             Text("We'll remember your choice for next time.")
         }
         .onSwipeRight { dismiss() }   // swipe L→R anywhere goes back to the feed
+    }
+
+    /// Grab the (almost always already-cached) poster so the Messages preview
+    /// carries the artwork, then present the share sheet.
+    private func prepareShare() {
+        guard shareImage == nil, let imageURL = show.imageURL else {
+            showShareSheet = true
+            return
+        }
+        Task {
+            if let (data, _) = try? await URLSession.shared.data(from: imageURL) {
+                shareImage = UIImage(data: data)
+            }
+            showShareSheet = true
+        }
     }
 
     private func addToCalendar() {
