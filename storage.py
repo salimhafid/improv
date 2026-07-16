@@ -22,6 +22,7 @@ LOCAL_DIR = os.environ.get("LOCAL_STORE_DIR", "")
 BUCKET = os.environ.get("BUCKET", "")
 SHOWS_BLOB = os.environ.get("BLOB_NAME", "shows.json")
 CLASSES_BLOB = os.environ.get("CLASSES_BLOB_NAME", "classes.json")
+TALENT_BLOB = os.environ.get("TALENT_BLOB_NAME", "talent.json")
 
 
 def _blob(name: str):
@@ -97,3 +98,11 @@ def load_classes() -> dict | None:
 
 def save_classes(payload: dict) -> bool:
     return save(CLASSES_BLOB, payload)
+
+
+def load_talent() -> dict | None:
+    return load(TALENT_BLOB)
+
+
+def save_talent(payload: dict) -> bool:
+    return save(TALENT_BLOB, payload)

@@ -8,6 +8,8 @@ import SwiftUI
 /// Supported variables:
 ///   UITEST_TAB           — initial tab index (0 Shows, 1 I'm Going, 2 Classes)
 ///   UITEST_PUSH_SOURCE   — push the first show from this source id that has a cast
+///   UITEST_TALENT        — with UITEST_PUSH_SOURCE: "directory", "person", or a
+///                          performer name to push on top of the show detail
 ///   UITEST_CLASS_FILTER  — "1" to auto-present the Classes filter sheet
 ///   UITEST_SIDEBAR       — "1" to open the theater sidebar on launch
 struct UITestTabSelection: ViewModifier {
@@ -49,6 +51,14 @@ extension ProcessInfo {
     var uiTestPushSource: String? {
         #if DEBUG
         environment["UITEST_PUSH_SOURCE"]
+        #else
+        nil
+        #endif
+    }
+
+    var uiTestTalent: String? {
+        #if DEBUG
+        environment["UITEST_TALENT"]
         #else
         nil
         #endif

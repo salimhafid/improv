@@ -10,6 +10,7 @@ struct RootView: View {
     @Environment(ShowsStore.self) private var store
     @Environment(ClassesStore.self) private var classesStore
     @Environment(GoingStore.self) private var going
+    @Environment(TalentStore.self) private var talent
     @Environment(AppState.self) private var app
     @Environment(\.horizontalSizeClass) private var hSize
     @AppStorage("hasCompletedSetup") private var hasCompletedSetup = false
@@ -35,6 +36,7 @@ struct RootView: View {
         }
         .task { await store.loadInitial() }
         .task { await classesStore.loadInitial() }
+        .task { await talent.loadInitial() }
         .modifier(UITestTabSelection(selection: $app.activeTab))
         .modifier(UITestSidebar())
         .fullScreenCover(isPresented: Binding(

@@ -18,6 +18,7 @@ import sys
 import storage
 from classes import aggregate_classes
 from scraper import scrape
+from talent import aggregate_talent
 
 
 def main() -> int:
@@ -27,8 +28,11 @@ def main() -> int:
     storage.save_payload(payload)
     classes_payload = aggregate_classes()
     storage.save_classes(classes_payload)
+    talent_payload = aggregate_talent()
+    storage.save_talent(talent_payload)
 
-    print(f"shows: {payload.get('count')} · classes: {classes_payload.get('count')}")
+    print(f"shows: {payload.get('count')} · classes: {classes_payload.get('count')}"
+          f" · talent: {talent_payload.get('count')}")
     ok, failed = [], []
     for s in payload.get("sources", []):
         (ok if s.get("ok") else failed).append(s.get("id"))

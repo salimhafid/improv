@@ -6,10 +6,11 @@ import SwiftUI
 struct ShowsFeedView: View {
     @Environment(ShowsStore.self) private var store
     @Environment(AppState.self) private var app
+    @Environment(TalentStore.self) private var talent
     @Environment(\.horizontalSizeClass) private var hSize
     @State private var showFilters = false
     @State private var query = ""
-    @State private var path: [Show] = []
+    @State private var path = NavigationPath()
     @Namespace private var zoom
 
     private var city: String { app.selectedCity.rawValue }
@@ -57,6 +58,9 @@ struct ShowsFeedView: View {
                 // not the count, so a same-count refresh still reconciles).
                 maybeAutoPush()
                 store.reconcileFilters(city: city, theater: theater)
+            }
+            .onChange(of: talent.loaded) { _, _ in
+                maybeAutoPushTalent()
             }
         }
     }
@@ -170,7 +174,29 @@ struct ShowsFeedView: View {
         guard path.isEmpty, let src = ProcessInfo.processInfo.uiTestPushSource else { return }
         let pick = store.allShows.first { $0.source == src && $0.hasCast }
             ?? store.allShows.first { $0.source == src }
-        if let pick { path = [pick] }
+        if let pick {
+            path.append(pick)
+            maybeAutoPushTalent()
+        }
+    }
+
+    /// DEBUG-only: push the talent directory or a performer bio on top of the
+    /// auto-pushed show (verification screenshots).
+    private func maybeAutoPushTalent() {
+        guard path.count == 1, talent.loaded,
+              let what = ProcessInfo.processInfo.uiTestTalent else { return }
+        switch what {
+        case "directory":
+            path.append(TalentRoute.directory(initialSearch: ""))
+        case "person":
+            if let person = talent.allPeople.first {
+                path.append(TalentRoute.person(person))
+            }
+        default:
+            if let person = talent.person(named: what) {
+                path.append(TalentRoute.person(person))
+            }
+        }
     }
 }
 
