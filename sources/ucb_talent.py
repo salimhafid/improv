@@ -1,6 +1,6 @@
 """UCB talent directory adapter.
 
-The NY performers and teachers pages share the same WordPress "dt_team" grid
+The NY, LA, and teachers pages share the same WordPress "dt_team" grid
 markup: each person is a `div.wf-cell` carrying `data-name`, a
 `/people/<slug>/` profile link, a lazy-loaded headshot in `data-src`, and
 category classes (`dt_team_category-dcm`, house-team names, …) on the inner
@@ -21,6 +21,7 @@ from common import clean, fetch_html, safe_url
 
 PAGES = [
     ("ny",       "https://ucbcomedy.com/talent/new-york/"),
+    ("la",       "https://ucbcomedy.com/talent/los-angeles/"),
     ("teachers", "https://ucbcomedy.com/talent/teachers/"),
 ]
 
