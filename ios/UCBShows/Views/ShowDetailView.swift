@@ -21,6 +21,7 @@ struct ShowDetailView: View {
         ZStack(alignment: .top) {
             ambient.ignoresSafeArea()
 
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     StretchyPoster(show: show)
@@ -54,10 +55,20 @@ struct ShowDetailView: View {
 
                         if show.hasCast {
                             castSection
+                                .id("cast")
                         }
                     }
                     .padding(Theme.Space.gutter)
                 }
+            }
+            .onAppear {
+                // DEBUG-only: scroll the cast section into view for
+                // verification screenshots (UITEST_SCROLL_CAST=1).
+                guard ProcessInfo.processInfo.uiTestScrollCast else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    withAnimation { proxy.scrollTo("cast", anchor: .center) }
+                }
+            }
             }
         }
         .navigationTitle("")
