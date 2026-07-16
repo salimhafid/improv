@@ -28,6 +28,16 @@ PAGES = [
 _SLUG = re.compile(r"/people/([^/]+)/?")
 
 
+def bio(url: str) -> str:
+    """Fetch a /people/<slug>/ profile page → bio text. Best-effort."""
+    try:
+        soup = BeautifulSoup(fetch_html(url), "lxml")
+    except RuntimeError:
+        return ""
+    el = soup.select_one(".ucb-talent-individual__bio")
+    return clean(el.get_text(" "))[:1500] if el else ""
+
+
 def fetch_page(url: str) -> list[dict]:
     """One dt_team talent page → [{name, slug, url, image, dcm}]."""
     soup = BeautifulSoup(fetch_html(url), "lxml")

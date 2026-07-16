@@ -21,12 +21,12 @@ struct TalentPerson: Decodable, Identifiable, Hashable {
     let urlString: String?
     let imageString: String?
     let groups: [String]
+    let bio: String
 
     enum CodingKeys: String, CodingKey {
-        case name, slug
+        case name, slug, groups, bio
         case urlString = "url"
         case imageString = "image"
-        case groups
     }
 
     init(from decoder: Decoder) throws {
@@ -36,6 +36,7 @@ struct TalentPerson: Decodable, Identifiable, Hashable {
         urlString = try c.decodeIfPresent(String.self, forKey: .urlString)
         imageString = try c.decodeIfPresent(String.self, forKey: .imageString)
         groups = (try c.decodeIfPresent([String].self, forKey: .groups)) ?? []
+        bio = (try c.decodeIfPresent(String.self, forKey: .bio)) ?? ""
     }
 
     var id: String { slug }
@@ -52,14 +53,11 @@ struct TalentPerson: Decodable, Identifiable, Hashable {
         return u
     }
 
-    /// Display labels for the person's groups, in a stable order.
-    var groupLabels: [String] {
-        var out: [String] = []
-        if groups.contains("ny") { out.append("NY Cast") }
-        if groups.contains("la") { out.append("LA Cast") }
-        if groups.contains("dcm") { out.append("DCM") }
-        if groups.contains("teachers") { out.append("Teacher") }
-        return out
+    /// The one city tag shown in the UI. LA membership wins (matches the
+    /// directory's mutually exclusive city filters); everyone else — NY
+    /// roster, DCM talent, teachers — reads as New York.
+    var cityLabel: String {
+        groups.contains("la") ? "LA" : "New York"
     }
 
     /// Normalized key for matching cast-line names to directory entries:
