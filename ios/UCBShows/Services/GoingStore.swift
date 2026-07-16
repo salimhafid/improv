@@ -17,7 +17,7 @@ final class GoingStore {
     private let fileURL: URL
 
     /// Lead time for the pre-show reminder notification.
-    private static let reminderLead: TimeInterval = 3 * 3600
+    private static let reminderLead: TimeInterval = 3600
     /// Keep a show listed until well after it has started (people arrive late,
     /// and "what was that show called?" outlives the start time by a bit).
     private static let expiryGrace: TimeInterval = 6 * 3600
@@ -62,6 +62,12 @@ final class GoingStore {
         ids = Set(shows.map(\.id))
         sort()
         if shows.count != saved.count { save() }
+        // Re-schedule pending reminders so lead-time changes apply to shows
+        // saved under an older lead (cancel + add is idempotent per show id).
+        for show in shows {
+            cancelReminder(for: show)
+            scheduleReminder(for: show)
+        }
     }
 
     private func save() {
@@ -76,9 +82,9 @@ final class GoingStore {
 
     // MARK: Reminders
 
-    /// Best-effort local notification ~3h before showtime. Asks for permission on
-    /// the first heart; if the user declines, hearting still works — there's just
-    /// no reminder.
+    /// Best-effort local notification one hour before showtime. Asks for
+    /// permission on the first heart; if the user declines, hearting still
+    /// works — there's just no reminder.
     private func scheduleReminder(for show: Show) {
         guard let start = show.startDate else { return }
         let fireDate = start.addingTimeInterval(-Self.reminderLead)
