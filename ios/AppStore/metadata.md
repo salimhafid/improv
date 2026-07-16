@@ -27,8 +27,8 @@ Chicago — with showtime reminders and every theater in one feed.
 ```
 One app for the improv scene. Improv gathers upcoming shows and classes from
 the theaters you love — UCB New York, Brooklyn Comedy Collective, Magnet
-Theater, and WGIS in New York; UCB and WGIS in Los Angeles; The Annoyance and
-iO in Chicago — and puts them in a single, fast, native feed.
+Theater, and WGIS in New York; UCB and WGIS in Los Angeles; The Annoyance,
+iO, and The Second City in Chicago — and puts them in a single, fast, native feed.
 
 SHOWS, ORGANIZED BY NIGHT
 Browse a clean, date-sectioned feed for one theater or your whole city. Every

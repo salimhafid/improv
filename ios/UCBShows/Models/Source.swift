@@ -72,6 +72,7 @@ enum SourceCatalog {
         .init(id: "wgis_la", name: "WGIS Los Angeles", blurb: "World’s Greatest Improv School", city: .losAngeles),
         .init(id: "annoyance", name: "The Annoyance", blurb: "Lakeview, Chicago", city: .chicago),
         .init(id: "io_chicago", name: "iO Theater", blurb: "Chicago", city: .chicago),
+        .init(id: "second_city", name: "The Second City", blurb: "Old Town, Chicago", city: .chicago),
     ]
 
     static let allIDs = Set(all.map(\.id))
