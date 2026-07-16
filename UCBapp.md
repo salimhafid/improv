@@ -11,7 +11,7 @@ Python scrapers (one adapter per source)
         │  every 3h, GitHub Actions cron
         ▼
 Static JSON feeds committed to docs/   ←  the repo itself is the database
-        │  GitHub Pages + Fastly CDN (free, ETags automatic)
+        │  raw.githubusercontent.com CDN (free, ETags automatic)
         ▼
 SwiftUI app (offline-first, no accounts, no server of its own)
 ```
@@ -56,7 +56,7 @@ We started on Cloud Run (+ GCS + Scheduler) and migrated off. Lessons:
    day one** (keep last 3, delete >30 days).
 2. **GCP requires a billing account even for free-tier usage.** No card, no
    Cloud Run. That constraint, not cost, forced the better architecture.
-3. **GitHub Actions (public repo) + GitHub Pages is genuinely $0**: unlimited
+3. **GitHub Actions (public repo) + raw/Pages serving is genuinely $0**: unlimited
    Actions minutes, ~100 GB/mo Pages bandwidth over Fastly's CDN, automatic
    ETag/304 handling. The workflow scrapes, commits changed JSON to `docs/`,
    Pages serves it.
@@ -66,7 +66,7 @@ We started on Cloud Run (+ GCS + Scheduler) and migrated off. Lessons:
    Watch the per-source log lines, not just the exit code — a "successful" run
    can be 100% cadence carry-over that scraped nothing.
 5. **Serve from a domain you own** (Pages custom domain). The app points at
-   `salimhafid.com/improv/...`, so hosting can move again without an app
+   a stable URL you control, so hosting can move again without an app
    update.
 6. Caveats to remember: scheduled workflows can lag minutes-to-an-hour at busy
    times, and GitHub disables crons after 60 days of repo inactivity — the

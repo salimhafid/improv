@@ -3,8 +3,8 @@ import Foundation
 /// Fetches the UCB talent directory feed and keeps a local "last-good" copy.
 /// Mirrors `ShowsService`.
 struct TalentService {
-    /// Talent directory published to GitHub Pages by the scrape workflow.
-    static let feedURL = URL(string: "https://salimhafid.com/improv/talent.json")!
+    /// Talent directory committed to the repo by the scrape workflow.
+    static let feedURL = URL(string: "https://raw.githubusercontent.com/salimhafid/improv/main/docs/talent.json")!
 
     private let session: URLSession
     private let cacheURL: URL
