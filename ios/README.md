@@ -107,6 +107,8 @@ under `UCBShows/` are picked up automatically — no `.pbxproj` edits needed.
 
 ## Data source
 
-`ShowsService.feedURL` / `ClassesService.feedURL` point at the static feeds on
-GitHub Pages (published by the repo's scheduled scrape workflow). To point at a
-different backend (e.g. a local `python app.py`), change those constants.
+`ShowsService.feedURL` / `ClassesService.feedURL` / `TalentService.feedURL`
+point at the static feeds in this repo's `docs/` folder, served via
+raw.githubusercontent.com (committed by the scheduled scrape workflow). To
+point at a different backend (e.g. a local `python app.py`), change those
+constants.

@@ -6,7 +6,7 @@ import Foundation
 struct ClassesService {
     /// Live classes feed published to GitHub Pages by the scheduled scraper
     /// workflow (see `ShowsService.feedURL`).
-    static let feedURL = URL(string: "https://salimhafid.com/improv/classes.json")!
+    static let feedURL = URL(string: "https://raw.githubusercontent.com/salimhafid/improv/main/docs/classes.json")!
 
     enum LoadError: LocalizedError {
         case offlineNoCache
