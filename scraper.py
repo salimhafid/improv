@@ -69,14 +69,16 @@ def _enrich_details(shows, detail_fn, prev_detail, budget) -> int:
         try:
             return detail_fn(url)
         except Exception:  # noqa: BLE001
-            return "", "", None
+            return "", "", None, []
     to_fetch = []
     for show in shows:
         cached = prev_detail.get(show.get("url"))
         if cached is not None:
-            show["description"], show["cast"], img = cached  # reuse even if empty
+            show["description"], show["cast"], img, members = cached  # reuse even if empty
             if img and not show.get("image"):
                 show["image"] = img
+            if members:
+                show["cast_members"] = members
             show["detail_done"] = True
         elif show.get("url"):
             to_fetch.append(show)
@@ -84,13 +86,15 @@ def _enrich_details(shows, detail_fn, prev_detail, budget) -> int:
     if to_fetch:
         with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as ex:
             results = list(ex.map(lambda s: safe(s["url"]), to_fetch))
-        for s, (desc, cast, img) in zip(to_fetch, results):
+        for s, (desc, cast, img, members) in zip(to_fetch, results):
             if desc:
                 s["description"] = desc
             if cast:
                 s["cast"] = cast
             if img and not s.get("image"):
                 s["image"] = img
+            if members:
+                s["cast_members"] = members
             s["detail_done"] = True   # attempted; don't re-fetch next run
     return len(to_fetch)
 
@@ -114,7 +118,8 @@ def aggregate(today: date | None = None, now: datetime | None = None) -> dict:
     # counts as already-attempted if it was flagged detail_done OR already has a
     # description/cast (covers payloads written before detail_done existed), so we
     # neither re-fetch description-less pages forever nor drop cast-only results.
-    prev_detail = {s.get("url"): (s.get("description", ""), s.get("cast", ""), s.get("image"))
+    prev_detail = {s.get("url"): (s.get("description", ""), s.get("cast", ""), s.get("image"),
+                                  s.get("cast_members") or [])
                    for s in previous.get("shows", [])
                    if s.get("url") and (s.get("detail_done") or s.get("description") or s.get("cast"))}
     detail_budget = _DETAIL_BUDGET

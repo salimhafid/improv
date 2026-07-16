@@ -136,10 +136,10 @@ struct ShowDetailView: View {
                 .font(.headline)
                 .foregroundStyle(.primary)
 
-            if hasTalentDirectory, !show.castMembers.isEmpty {
+            if hasTalentDirectory, !show.castEntries.isEmpty {
                 FlowLayout(spacing: 8) {
-                    ForEach(show.castMembers, id: \.self) { name in
-                        castChip(name)
+                    ForEach(show.castEntries, id: \.self) { member in
+                        castChip(member)
                     }
                 }
                 NavigationLink(value: TalentRoute.directory(initialSearch: "")) {
@@ -162,12 +162,12 @@ struct ShowDetailView: View {
     }
 
     @ViewBuilder
-    private func castChip(_ name: String) -> some View {
-        let match = talent.person(named: name)
+    private func castChip(_ member: CastMember) -> some View {
+        let match = talent.person(for: member)
         NavigationLink(value: match.map(TalentRoute.person)
-                        ?? TalentRoute.directory(initialSearch: name)) {
+                        ?? TalentRoute.directory(initialSearch: member.name)) {
             HStack(spacing: 4) {
-                Text(name)
+                Text(member.name)
                 if match != nil {
                     Image(systemName: "chevron.right")
                         .font(.caption2.weight(.bold))

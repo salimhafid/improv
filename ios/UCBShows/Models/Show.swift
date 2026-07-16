@@ -17,6 +17,25 @@ struct ShowsPayload: Decodable {
     }
 }
 
+/// One performer (or billed team) in a show's structured cast, straight from
+/// the show page's /people/ profile links. `slug` keys into the talent
+/// directory for exact matching.
+struct CastMember: Codable, Hashable {
+    let name: String
+    let slug: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = (try c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        slug = try c.decodeIfPresent(String.self, forKey: .slug)
+    }
+
+    init(name: String, slug: String?) {
+        self.name = name
+        self.slug = slug
+    }
+}
+
 /// A single upcoming UCB show. Decoding is defensive: the scraper can emit
 /// `null`/empty for `start`, `end`, `image`, or `post_id`, so those are optional
 /// and never abort decoding.
@@ -40,6 +59,9 @@ struct Show: Codable, Identifiable, Hashable {
     let fullDescription: String
     /// Cast / lineup line (e.g. "Featuring: …"), best-effort and source-dependent.
     let cast: String
+    /// Structured cast (names + talent-directory slugs) from the show page's
+    /// profile links; empty when the page has none.
+    let castList: [CastMember]
     let isFree: Bool
     let source: String
     let org: String
@@ -62,6 +84,7 @@ struct Show: Codable, Identifiable, Hashable {
         case excerpt
         case fullDescription = "description"
         case cast
+        case castList = "cast_members"
         case isFree = "is_free"
         case source
         case org
@@ -86,6 +109,8 @@ struct Show: Codable, Identifiable, Hashable {
         excerpt = (try c.decodeIfPresent(String.self, forKey: .excerpt)) ?? ""
         fullDescription = (try c.decodeIfPresent(String.self, forKey: .fullDescription)) ?? ""
         cast = (try c.decodeIfPresent(String.self, forKey: .cast)) ?? ""
+        castList = ((try c.decodeIfPresent([CastMember].self, forKey: .castList)) ?? [])
+            .filter { !$0.name.isEmpty }
         isFree = (try c.decodeIfPresent(Bool.self, forKey: .isFree)) ?? false
         source = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "ucb_ny"
         org = (try c.decodeIfPresent(String.self, forKey: .org)) ?? "UCB"
@@ -117,6 +142,7 @@ struct Show: Codable, Identifiable, Hashable {
         try c.encode(excerpt, forKey: .excerpt)
         try c.encode(fullDescription, forKey: .fullDescription)
         try c.encode(cast, forKey: .cast)
+        try c.encode(castList, forKey: .castList)
         try c.encode(isFree, forKey: .isFree)
         try c.encode(source, forKey: .source)
         try c.encode(org, forKey: .org)
@@ -226,11 +252,20 @@ extension Show {
 
     var hasCast: Bool { !detailParts.cast.isEmpty }
 
+    /// Cast entries for display/matching: the structured list (names +
+    /// directory slugs) when the show page provided profile links, otherwise
+    /// names parsed out of the cast text line with nil slugs.
+    var castEntries: [CastMember] {
+        if !castList.isEmpty { return castList }
+        return castMembers.map { CastMember(name: $0, slug: nil) }
+    }
+
     /// Individual performer names split out of the cast line ("A, B & C" /
     /// "A, B, and C" → ["A", "B", "C"]). Parenthetical credits — "Connor
     /// Ratliff (Dead Eyes, The Marvelous Mrs. Maisel)" — are dropped before
     /// splitting so their inner commas don't shred the name. Best-effort;
     /// entries that don't look like names (too long/short) are dropped.
+    /// Used as a fallback when the page had no structured cast links.
     var castMembers: [String] {
         guard hasCast else { return [] }
         let unified = castLine

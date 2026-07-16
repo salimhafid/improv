@@ -94,19 +94,20 @@ def _parse_month(html: str, year: int, month: int) -> list[dict]:
     return shows
 
 
-def detail(url: str) -> tuple[str, str, str | None]:
-    """Fetch a Magnet show page → (description, cast, hero image). Cast isn't
-    structured, so only description + og:image are returned. The calendar grid
-    has no images at all, so the og:image here is each show's only artwork."""
+def detail(url: str) -> tuple[str, str, str | None, list[dict]]:
+    """Fetch a Magnet show page → (description, cast, hero image, structured
+    cast). Cast isn't structured on Magnet, so only description + og:image are
+    returned. The calendar grid has no images at all, so the og:image here is
+    each show's only artwork."""
     try:
         soup = BeautifulSoup(fetch_html(url), "lxml")
     except RuntimeError:
-        return "", "", None
+        return "", "", None, []
     el = soup.select_one("#content") or soup.select_one(".summary") or soup
     text = re.sub(r"^\s*About the Show\s*", "", clean(el.get_text(" ")))
     og = soup.select_one('meta[property="og:image"]')
     image = safe_url(og.get("content")) if og else None
-    return text[:2000], "", image
+    return text[:2000], "", image, []
 
 
 def fetch(today: date | None = None) -> list[dict]:

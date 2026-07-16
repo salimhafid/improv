@@ -60,12 +60,15 @@ struct TalentBioView: View {
         }
     }
 
-    /// Feed shows whose cast includes this person, soonest first.
+    /// Feed shows whose cast includes this person — exact slug match when the
+    /// show has structured cast, name match otherwise — soonest first.
     private var matchingShows: [Show] {
         let key = TalentPerson.nameKey(person.name)
         return shows.allShows
             .filter { show in
-                show.castMembers.contains { TalentPerson.nameKey($0) == key }
+                show.castEntries.contains {
+                    $0.slug == person.slug || TalentPerson.nameKey($0.name) == key
+                }
             }
             .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
     }

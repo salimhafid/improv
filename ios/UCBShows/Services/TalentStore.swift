@@ -12,6 +12,8 @@ final class TalentStore {
 
     /// Normalized full name → person.
     private var byName: [String: TalentPerson] = [:]
+    /// Profile slug → person (exact matches for structured cast).
+    private var bySlug: [String: TalentPerson] = [:]
 
     private let service: TalentService
 
@@ -35,12 +37,25 @@ final class TalentStore {
         allPeople = payload.people.filter { !$0.slug.isEmpty && !$0.name.isEmpty }
         byName = Dictionary(allPeople.map { (TalentPerson.nameKey($0.name), $0) },
                             uniquingKeysWith: { first, _ in first })
+        bySlug = Dictionary(allPeople.map { ($0.slug, $0) },
+                            uniquingKeysWith: { first, _ in first })
         loaded = !allPeople.isEmpty
     }
 
     /// Directory entry for a cast-line name, if we can match it.
     func person(named raw: String) -> TalentPerson? {
         byName[TalentPerson.nameKey(raw)]
+    }
+
+    /// Exact directory entry for a structured cast member.
+    func person(slug: String) -> TalentPerson? {
+        bySlug[slug]
+    }
+
+    /// Best match for a cast entry: exact slug first, then normalized name.
+    func person(for member: CastMember) -> TalentPerson? {
+        if let slug = member.slug, let hit = bySlug[slug] { return hit }
+        return person(named: member.name)
     }
 
     /// Directory filtered by search text and an optional city tag. The city
