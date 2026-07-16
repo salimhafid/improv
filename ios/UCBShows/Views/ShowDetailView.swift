@@ -8,11 +8,15 @@ struct ShowDetailView: View {
     let namespace: Namespace.ID
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Environment(GoingStore.self) private var going
     @Environment(TalentStore.self) private var talent
     @State private var webLink: WebLink?
     @State private var calendarMessage: String?
     @State private var showCalendarAlert = false
+    @State private var showCalendarChooser = false
+    /// Remembered Apple/Google choice; empty until the user picks on first use.
+    @AppStorage("calendarProvider") private var calendarProvider = ""
 
     /// The talent directory covers UCB's own theaters (NY + LA rosters).
     private var hasTalentDirectory: Bool {
@@ -64,6 +68,15 @@ struct ShowDetailView: View {
                 }
             }
             .onAppear {
+                #if DEBUG
+                // Verification-screenshot hook: simulate tapping Add to
+                // Calendar (see UITestSupport).
+                if ProcessInfo.processInfo.environment["UITEST_CALENDAR_DIALOG"] == "1" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                        addToCalendar()
+                    }
+                }
+                #endif
                 // DEBUG-only: scroll the cast section into view for
                 // verification screenshots (UITEST_SCROLL_CAST=1).
                 guard ProcessInfo.processInfo.uiTestScrollCast else { return }
@@ -110,18 +123,45 @@ struct ShowDetailView: View {
         .alert(calendarMessage ?? "", isPresented: $showCalendarAlert) {
             Button("OK", role: .cancel) {}
         }
+        .confirmationDialog("Add to which calendar?",
+                            isPresented: $showCalendarChooser, titleVisibility: .visible) {
+            Button("Apple Calendar") { setProviderAndAdd(.apple) }
+            Button("Google Calendar") { setProviderAndAdd(.google) }
+        } message: {
+            Text("We'll remember your choice for next time.")
+        }
         .onSwipeRight { dismiss() }   // swipe L→R anywhere goes back to the feed
     }
 
     private func addToCalendar() {
-        Task {
-            do {
-                try await CalendarService.add(show)
-                calendarMessage = "Added to your calendar."
-            } catch {
-                calendarMessage = error.localizedDescription
+        guard let provider = CalendarProvider(rawValue: calendarProvider) else {
+            showCalendarChooser = true   // first use — ask and remember
+            return
+        }
+        add(to: provider)
+    }
+
+    private func setProviderAndAdd(_ provider: CalendarProvider) {
+        calendarProvider = provider.rawValue
+        add(to: provider)
+    }
+
+    private func add(to provider: CalendarProvider) {
+        switch provider {
+        case .google:
+            if let url = CalendarService.googleCalendarURL(for: show) {
+                openURL(url)   // routes to the Google Calendar app when installed
             }
-            showCalendarAlert = true
+        case .apple:
+            Task {
+                do {
+                    try await CalendarService.add(show)
+                    calendarMessage = "Added to your calendar."
+                } catch {
+                    calendarMessage = error.localizedDescription
+                }
+                showCalendarAlert = true
+            }
         }
     }
 
