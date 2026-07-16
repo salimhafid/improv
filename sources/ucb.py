@@ -118,14 +118,40 @@ def og_image(soup: BeautifulSoup) -> str | None:
     return safe_url(el.get("content")) if el else None
 
 
-def detail(url: str) -> tuple[str, str, str | None]:
-    """Fetch a UCB show page → (full description, cast, hero image).
-    Best-effort."""
+_PEOPLE_SLUG = re.compile(r"/people/([^/]+)/?")
+
+
+def _linked_cast(soup: BeautifulSoup) -> list[dict]:
+    """Structured cast from the show page's /people/ profile links (inside
+    #main so the site nav's team links don't leak in). Preserves page order
+    (billed teams first, then members), dedupes by slug."""
+    main = soup.select_one("#main") or soup
+    members: list[dict] = []
+    seen: set[str] = set()
+    for a in main.select("a[href*='/people/']"):
+        m = _PEOPLE_SLUG.search(a.get("href", ""))
+        name = clean(a.get_text()) or clean(a.get("aria-label", ""))
+        if not m or not name or m.group(1) in seen:
+            continue
+        seen.add(m.group(1))
+        members.append({"name": name, "slug": m.group(1)})
+    return members[:24]
+
+
+def detail(url: str) -> tuple[str, str, str | None, list[dict]]:
+    """Fetch a UCB show page → (full description, cast text, hero image,
+    structured cast members). The structured list (names + profile slugs) is
+    preferred; the text heuristic remains for pages with no people links
+    (e.g. unannounced ASSSSCAT guests). Best-effort."""
     try:
         soup = BeautifulSoup(fetch_html(url), "lxml")
     except RuntimeError:
-        return "", "", None
+        return "", "", None, []
     el = soup.select_one(".ucb-event-description")
     description = clean(el.get_text(" ")) if el else ""
-    cast = _extract_cast(soup.get_text("\n"))
-    return description[:2000], cast, og_image(soup)
+    members = _linked_cast(soup)
+    if members:
+        cast = ", ".join(m["name"] for m in members)[:400]
+    else:
+        cast = _extract_cast(soup.get_text("\n"))
+    return description[:2000], cast, og_image(soup), members
