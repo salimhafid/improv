@@ -114,8 +114,7 @@ struct TalentDirectoryView: View {
     @State private var group: String?
 
     private let filters: [(label: String, tag: String?)] = [
-        ("All", nil), ("NY Cast", "ny"), ("LA Cast", "la"),
-        ("DCM", "dcm"), ("Teachers", "teachers"),
+        ("All", nil), ("New York", "ny"), ("Los Angeles", "la"),
     ]
 
     var body: some View {
