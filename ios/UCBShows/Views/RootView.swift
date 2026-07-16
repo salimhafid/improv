@@ -43,7 +43,7 @@ struct RootView: View {
             get: { !hasCompletedSetup },
             set: { if !$0 { hasCompletedSetup = true } }
         )) {
-            SetupView(app: app, isOnboarding: true) { hasCompletedSetup = true }
+            SetupFlowView(app: app) { hasCompletedSetup = true }
         }
         .sheet(isPresented: $app.showCityPicker) {
             SetupView(app: app, isOnboarding: false) { app.showCityPicker = false }
