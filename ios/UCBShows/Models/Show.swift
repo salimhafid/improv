@@ -227,17 +227,21 @@ extension Show {
     var hasCast: Bool { !detailParts.cast.isEmpty }
 
     /// Individual performer names split out of the cast line ("A, B & C" /
-    /// "A, B, and C" → ["A", "B", "C"]). Best-effort; entries that don't look
-    /// like names (too long/short) are dropped.
+    /// "A, B, and C" → ["A", "B", "C"]). Parenthetical credits — "Connor
+    /// Ratliff (Dead Eyes, The Marvelous Mrs. Maisel)" — are dropped before
+    /// splitting so their inner commas don't shred the name. Best-effort;
+    /// entries that don't look like names (too long/short) are dropped.
     var castMembers: [String] {
         guard hasCast else { return [] }
         let unified = castLine
+            .replacingOccurrences(of: #"\([^)]*\)"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"\s*&\s*"#, with: ", ", options: .regularExpression)
             .replacingOccurrences(of: #",?\s+and\s+"#, with: ", ", options: .regularExpression)
+        var seen = Set<String>()
         return unified.split(separator: ",").compactMap { piece in
             let name = piece.trimmingCharacters(in: .whitespacesAndNewlines)
                 .trimmingCharacters(in: CharacterSet(charactersIn: ".!"))
-            guard name.count >= 3, name.count <= 50 else { return nil }
+            guard name.count >= 3, name.count <= 50, seen.insert(name).inserted else { return nil }
             return name
         }
     }

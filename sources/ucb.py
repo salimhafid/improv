@@ -80,8 +80,36 @@ def fetch(region: str) -> list[dict]:
     return _parse_cards(fetch_html(url), source, org, city)
 
 
-_CAST_RE = re.compile(r"(?:Featuring|Cast|Line\s*-?up)\s*:\s*(.+)", re.I)
+_CAST_LABEL = re.compile(r"(?:Featuring|Cast|Line\s*-?up)\s*:\s*", re.I)
+_CAST_SEPARATOR = re.compile(r"^\s*[—–-]+\s*$")
+_CAST_STOP_WORDS = ("ticket", "$", "http", "livestream", "doors", "advance",
+                    "in-person", "buyers")
 _WP_SIZE_SUFFIX = re.compile(r"-\d+x\d+(?=\.(?:jpe?g|png|webp|gif)$)", re.I)
+
+
+def _extract_cast(text: str) -> str:
+    """Cast list after a Featuring:/Cast:/Lineup: label. UCB pages usually put
+    one performer per line, ending at an em-dash separator or the ticket-info
+    block, so we walk lines instead of capturing a single one."""
+    m = _CAST_LABEL.search(text)
+    if not m:
+        return ""
+    names: list[str] = []
+    for raw in text[m.end():].split("\n")[:14]:
+        line = clean(raw)
+        if not line or _CAST_SEPARATOR.match(line):
+            if names:
+                break
+            continue    # blank right after the label — keep looking
+        low = line.lower()
+        if len(line) > 80 or any(w in low for w in _CAST_STOP_WORDS):
+            break
+        if line[-1] in ".!?" and len(line.split()) > 5:
+            break       # reads like a sentence, not a name
+        names.append(line)
+        if len(names) >= 12:
+            break
+    return clean(", ".join(names))[:400]
 
 
 def og_image(soup: BeautifulSoup) -> str | None:
@@ -99,8 +127,5 @@ def detail(url: str) -> tuple[str, str, str | None]:
         return "", "", None
     el = soup.select_one(".ucb-event-description")
     description = clean(el.get_text(" ")) if el else ""
-    cast = ""
-    m = _CAST_RE.search(soup.get_text("\n"))
-    if m:
-        cast = clean(m.group(1))[:300]
+    cast = _extract_cast(soup.get_text("\n"))
     return description[:2000], cast, og_image(soup)
