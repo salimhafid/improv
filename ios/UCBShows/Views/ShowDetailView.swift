@@ -14,8 +14,10 @@ struct ShowDetailView: View {
     @State private var calendarMessage: String?
     @State private var showCalendarAlert = false
 
-    /// The talent directory only covers UCB New York.
-    private var hasTalentDirectory: Bool { show.source == "ucb_ny" }
+    /// The talent directory covers UCB's own theaters (NY + LA rosters).
+    private var hasTalentDirectory: Bool {
+        show.source == "ucb_ny" || show.source == "ucb_la"
+    }
 
     var body: some View {
         ZStack(alignment: .top) {

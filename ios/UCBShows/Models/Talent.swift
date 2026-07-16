@@ -56,6 +56,7 @@ struct TalentPerson: Decodable, Identifiable, Hashable {
     var groupLabels: [String] {
         var out: [String] = []
         if groups.contains("ny") { out.append("NY Cast") }
+        if groups.contains("la") { out.append("LA Cast") }
         if groups.contains("dcm") { out.append("DCM") }
         if groups.contains("teachers") { out.append("Teacher") }
         return out
