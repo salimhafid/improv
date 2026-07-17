@@ -2,8 +2,9 @@
 
 A native **SwiftUI** app for browsing upcoming improv/comedy shows and classes
 across multiple theaters in New York, Los Angeles, and Chicago. It reads the
-scheduled multi-source feeds from the Cloud Run backend (`/shows.json` and
-`/classes.json`) and presents them with a first-party, Apple-clean aesthetic.
+repo's scheduled multi-source feeds (`docs/shows.json`, `docs/classes.json`,
+`docs/talent.json` via GitHub's raw CDN) and presents them with a first-party,
+Apple-clean aesthetic.
 
 <p>
   <img src="UCBShows/Assets.xcassets/AppIcon.appiconset/icon-1024.png" width="96" alt="App icon">
