@@ -1,13 +1,15 @@
 """The Annoyance Theatre (Chicago) adapter.
 
-Two-stage scrape for full coverage: the theatre's Wix site (/shows) is the
-index — every production links to its ThunderTix event page — and each event's
-ThunderTix pages provide the reliable data: schema.org Event JSON-LD for
-metadata plus a /performances page listing every upcoming showtime. The old
-single-page ThunderTix calendar only ever exposes ~one week of instances
-(its month parameters are ignored server-side), so it remains only as a
-fallback for when the Wix index serves a data-less page (which it has
-historically done intermittently).
+Primary source: ThunderTix's own calendar-feed endpoint
+(/reports/calendar?start=<epoch>&end=<epoch>) — the JSON the theatre's
+show-calendar widget renders from. One request returns every public
+performance in the window (~215 across ~54 productions for two months),
+including per-performance sold-out state and a poster. Descriptions and
+higher-quality art are enriched once per production from the event page's
+schema.org JSON-LD (politely: ThunderTix 429s at ~8 concurrent requests).
+
+Fallback: the calendar page's embedded JSON-LD, which only ever exposes about
+one week of instances.
 """
 from __future__ import annotations
 
@@ -23,12 +25,9 @@ from . import crowdwork
 
 TT = "https://theannoyance.thundertix.com"
 URL = f"{TT}/events?display=calendar"
-WIX_INDEX = "https://www.theannoyance.com/shows"
 
-_HORIZON_DAYS = 42
-_WORKERS = 3   # ThunderTix rate-limits aggressively (429s at ~8 concurrent)
-_PERF_ROW = re.compile(
-    r"(\w+day),?\s+(\w+ \d{1,2},? \d{4})[^<]{0,40}?(\d{1,2}:\d{2}\s*[AP]M)")
+_HORIZON_DAYS = 62   # two months, per the show-calendar view
+_WORKERS = 3         # ThunderTix rate-limits aggressively (429s at ~8 concurrent)
 
 # Classes live on Crowdwork (the ThunderTix calendar is shows-only).
 CLASSES_SLUG = "annoyancetrial"
@@ -65,45 +64,78 @@ def _event_ld(html: str) -> dict | None:
     return None
 
 
-def _fetch_production(eid: str, today: date, horizon: date) -> list[dict]:
-    """One production → one show per upcoming performance within the horizon."""
-    ev = _event_ld(fetch_html(f"{TT}/events/{eid}"))
+def _event_meta(eid: int) -> dict:
+    """Description / image / venue / free flag from a production's event page."""
+    try:
+        ev = _event_ld(fetch_html(f"{TT}/events/{eid}"))
+    except RuntimeError:
+        ev = None
     if not ev:
-        return []
-    title = clean(ev.get("name"))
-    if not title:
-        return []
-    status = ev.get("eventStatus") or ""
-    if "Cancelled" in status or "Postponed" in status:
-        return []
-
+        return {}
     img = ev.get("image")
     if isinstance(img, list):
         img = img[0] if img else None
-    image = safe_url(img) if isinstance(img, str) else None
-    venue = clean((ev.get("location") or {}).get("name")) or "The Annoyance Theatre"
     offers = ev.get("offers") or {}
-    is_free = bool(ev.get("isAccessibleForFree")) or str(offers.get("lowPrice")) in ("0", "0.0", "0.00")
-    description = strip_html(ev.get("description"))
-    url = f"{TT}/events/{eid}"
+    return {
+        "image": safe_url(img) if isinstance(img, str) else None,
+        "venue": clean((ev.get("location") or {}).get("name")),
+        "description": strip_html(ev.get("description")),
+        "is_free": bool(ev.get("isAccessibleForFree"))
+                   or str(offers.get("lowPrice")) in ("0", "0.0", "0.00"),
+    }
 
-    perf_html = fetch_html(f"{TT}/events/{eid}/performances")
+
+def fetch(today: date | None = None) -> list[dict]:
+    import time as _time
+
+    today = today or date.today()
+    horizon = today + timedelta(days=_HORIZON_DAYS)
+
+    start_epoch = int(_time.mktime(_time.strptime(today.isoformat(), "%Y-%m-%d")))
+    end_epoch = start_epoch + (_HORIZON_DAYS + 1) * 86400
+    try:
+        raw = fetch_html(f"{TT}/reports/calendar?start={start_epoch}&end={end_epoch}")
+        performances = json.loads(raw)
+    except (RuntimeError, json.JSONDecodeError):
+        performances = []
+    performances = [p for p in performances
+                    if isinstance(p, dict) and p.get("event_id") and p.get("start")
+                    and p.get("access_type", "public") == "public"]
+    if not performances:
+        return _fetch_week_calendar()
+
+    # One metadata fetch per production (not per performance), politely.
+    event_ids = sorted({p["event_id"] for p in performances})
+    with ThreadPoolExecutor(max_workers=_WORKERS) as ex:
+        metas = dict(zip(event_ids, ex.map(_event_meta, event_ids)))
+
     shows: list[dict] = []
     seen: set[str] = set()
-    for _, date_txt, time_txt in _PERF_ROW.findall(perf_html):
+    for p in performances:
         try:
-            dt = dateparser.parse(f"{date_txt} {time_txt}")
+            dt = dateparser.parse(p["start"]).replace(tzinfo=None, microsecond=0)
         except (ValueError, OverflowError, TypeError):
             continue
-        if not (today <= dt.date() <= horizon) or dt.isoformat() in seen:
+        if not (today <= dt.date() <= horizon):
             continue
-        seen.add(dt.isoformat())
+        eid = p["event_id"]
+        key = f"{eid}/{dt.isoformat()}"
+        if key in seen:
+            continue
+        seen.add(key)
+        title = clean(p.get("longTitle") or p.get("title"))
+        if not title:
+            continue
+        meta = metas.get(eid) or {}
+        image = meta.get("image") or safe_url(p.get("picture"))
+        description = meta.get("description", "")
+        venue = meta.get("venue") or "The Annoyance Theatre"
         shows.append(make_show(
             title=title,
-            url=url,
+            url=f"{TT}/events/{eid}",
             slug=f"{eid}/{dt.strftime('%Y%m%d%H%M')}",
             date_raw=dt.strftime("%A, %B %-d @ %-I:%M %p"),
-            start=dt.replace(microsecond=0).isoformat(),
+            start=dt.isoformat(),
             has_time=True,
             venue=venue,
             venues=[venue],
@@ -111,38 +143,12 @@ def _fetch_production(eid: str, today: date, horizon: date) -> list[dict]:
             image=image,
             description=description,
             excerpt=description[:240],
-            is_free=is_free,
+            is_free=bool(meta.get("is_free")),
             source="annoyance",
             org="The Annoyance",
             city="Chicago",
         ))
-    return shows
-
-
-def fetch(today: date | None = None) -> list[dict]:
-    today = today or date.today()
-    horizon = today + timedelta(days=_HORIZON_DAYS)
-
-    try:
-        ids = sorted(set(re.findall(r"thundertix\.com/events/(\d+)", fetch_html(WIX_INDEX))))
-    except RuntimeError:
-        ids = []
-
-    if ids:
-        shows: list[dict] = []
-        def safe(eid):
-            try:
-                return _fetch_production(eid, today, horizon)
-            except Exception:  # noqa: BLE001 - one bad production must not break the source
-                return []
-        with ThreadPoolExecutor(max_workers=_WORKERS) as ex:
-            for result in ex.map(safe, ids):
-                shows.extend(result)
-        if shows:
-            return shows
-        # fall through to the one-week calendar rather than fail empty
-
-    return _fetch_week_calendar()
+    return shows or _fetch_week_calendar()
 
 
 def _fetch_week_calendar(today: date | None = None) -> list[dict]:

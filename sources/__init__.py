@@ -3,7 +3,7 @@ Each entry has a stable id, display org, city, and a `fetch()` returning
 normalized dicts. The aggregators run them resiliently with per-source cadence."""
 from __future__ import annotations
 
-from . import annoyance, brooklyn_cc, io_chicago, magnet, second_city, ucb, ucb_classes, wgis
+from . import annoyance, brooklyn_cc, io_chicago, logan_square, magnet, second_city, ucb, ucb_classes, wgis
 
 SOURCES = [
     {"id": "ucb_ny", "org": "UCB", "city": "New York", "fetch": lambda: ucb.fetch("ny"), "detail": ucb.detail},
@@ -15,6 +15,7 @@ SOURCES = [
     {"id": "annoyance", "org": "The Annoyance", "city": "Chicago", "fetch": annoyance.fetch},
     {"id": "io_chicago", "org": "iO Theater", "city": "Chicago", "fetch": io_chicago.fetch},
     {"id": "second_city", "org": "The Second City", "city": "Chicago", "fetch": second_city.fetch},
+    {"id": "logan_square", "org": "Logan Square Improv", "city": "Chicago", "fetch": logan_square.fetch},
 ]
 
 CLASS_SOURCES = [
