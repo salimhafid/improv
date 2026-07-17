@@ -11,7 +11,7 @@ scheduled multi-source feeds from the Cloud Run backend (`/shows.json` and
 
 **Theaters**: UCB New York, Brooklyn Comedy Collective, Magnet Theater,
 WGIS New York (NYC); UCB Los Angeles, WGIS Los Angeles (LA); The Annoyance,
-iO Theater, The Second City, Logan Square Improv (Chicago).
+iO Theater, The Second City, Logan Square Improv, The Playground Theater (Chicago).
 
 ## Run it
 
