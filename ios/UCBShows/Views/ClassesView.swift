@@ -9,6 +9,9 @@ struct ClassesView: View {
     @Environment(\.horizontalSizeClass) private var hSize
     @State private var showFilters = false
     @State private var query = ""
+    /// Collapsed state of the UCB Core Curriculum section, remembered across
+    /// launches. Search always renders it expanded so matches can't hide.
+    @AppStorage("ucbCoreExpanded") private var coreExpanded = true
 
     private var city: String { app.selectedCity.rawValue }
     private var theater: String { app.selectedTheater }
@@ -72,18 +75,22 @@ struct ClassesView: View {
                 }
 
                 ForEach(store.sections(city: city, theater: theater, searchText: query)) { section in
-                    Section {
-                        ForEach(Array(section.classes.enumerated()), id: \.element.id) { index, item in
-                            VStack(spacing: 0) {
-                                rowButton(item)
-                                if index < section.classes.count - 1 {
-                                    Divider().padding(.leading, 64)
-                                }
+                    if section.id == ClassesStore.coreSectionID {
+                        Section {
+                            if coreExpanded || !query.isEmpty {
+                                sectionRows(section)
                             }
-                            .padding(.horizontal, Theme.Space.gutter)
+                        } header: {
+                            CollapsibleSectionHeader(title: section.title,
+                                                     count: section.classes.count,
+                                                     isExpanded: $coreExpanded)
                         }
-                    } header: {
-                        SectionHeaderView(title: section.title)
+                    } else {
+                        Section {
+                            sectionRows(section)
+                        } header: {
+                            SectionHeaderView(title: section.title)
+                        }
                     }
                 }
 
@@ -97,6 +104,18 @@ struct ClassesView: View {
             }
             .padding(.top, Theme.Space.gutter)
             .padding(.bottom, Theme.Space.section)
+        }
+    }
+
+    private func sectionRows(_ section: ClassSection) -> some View {
+        ForEach(Array(section.classes.enumerated()), id: \.element.id) { index, item in
+            VStack(spacing: 0) {
+                rowButton(item)
+                if index < section.classes.count - 1 {
+                    Divider().padding(.leading, 64)
+                }
+            }
+            .padding(.horizontal, Theme.Space.gutter)
         }
     }
 
@@ -180,6 +199,41 @@ struct ClassesView: View {
                 FilterToolbarIcon(activeCount: store.filters.activeCount)
             }
         }
+    }
+}
+
+/// Pinned header for the Core Curriculum section — tap anywhere on it to
+/// collapse or expand. Mirrors SectionHeaderView's styling with a count and a
+/// rotating chevron so the collapsed state is legible at a glance.
+private struct CollapsibleSectionHeader: View {
+    let title: String
+    let count: Int
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.snappy) { isExpanded.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.title3.weight(.bold))
+                Text("\(count)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 0 : -90))
+            }
+            .padding(.horizontal, Theme.Space.gutter)
+            .padding(.vertical, 8)
+            .background(.bar)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(count) classes")
+        .accessibilityHint(isExpanded ? "Collapses the section" : "Expands the section")
     }
 }
 
