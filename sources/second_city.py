@@ -21,13 +21,16 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from common import clean, fetch_html, make_show, safe_url
+from common import clean, fetch_html, fetch_json, make_class, make_show, safe_url, strip_html
 
 BASE = "https://www.secondcity.com"
 INDEX = f"{BASE}/shows/chicago"
+FIND_A_CLASS = f"{BASE}/find-a-class/chicago"
 
 _CHICAGO = ZoneInfo("America/Chicago")
-_HORIZON_DAYS = 42
+_HORIZON_DAYS = 180  # the patronticket blobs already carry each show's full
+                     # on-sale run, so a longer cap costs zero extra requests
+                     # and picks up announced holiday/limited runs
 _WORKERS = 6
 
 _NEXT_DATA = re.compile(
@@ -161,6 +164,119 @@ def _parse_show_page(path: str, today: date) -> list[dict]:
         if description:
             shows[-1]["description"] = description[:2000]
     return shows
+
+
+# MARK: Classes (Training Center)
+
+_BUILD_ID = re.compile(r'"buildId":"([^"]+)"')
+
+
+def _find_class_nodes(obj):
+    """The find-a-class payload's class list: the (only) array of dicts that
+    carry an activenetData key, wherever the dehydrated queries nest it."""
+    if isinstance(obj, list) and obj and isinstance(obj[0], dict) and "activenetData" in obj[0]:
+        return obj
+    if isinstance(obj, dict):
+        for v in obj.values():
+            found = _find_class_nodes(v)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _find_class_nodes(v)
+            if found:
+                return found
+    return None
+
+
+def _hero(node: dict) -> dict:
+    """The flexibleLayout Hero block (description, image, price, address)."""
+    layout = ((node.get("classes") or {}).get("flexibleLayout")) or []
+    for block in layout:
+        if isinstance(block, dict) and ("price" in block or "description" in block):
+            return block
+    return {}
+
+
+def _section_start(row: dict) -> str | None:
+    """'2026-08-29T12:00:00r' → '2026-08-29T12:00:00' (Activenet appends a
+    stray letter); falls back to the bare beginning date."""
+    m = re.match(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", row.get("activity_valid_from") or "")
+    if m:
+        return m.group(1)
+    d = row.get("default_beginning_date") or ""
+    return d if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) else None
+
+
+def _section_schedule(row: dict) -> str:
+    """'Saturday,12:00 PM,3h' + the date range → 'Saturdays 12:00 PM · Aug 29 – Oct 17 · 7 sessions'."""
+    parts = [p.strip() for p in (row.get("default_pattern_dates") or "").split(",")]
+    pattern = f"{parts[0]}s {parts[1]}" if len(parts) >= 2 and parts[0] else ""
+    rng = ""
+    try:
+        b = date.fromisoformat(row.get("default_beginning_date") or "")
+        e = date.fromisoformat(row.get("default_ending_date") or "")
+        rng = f"{b.strftime('%b %-d')} – {e.strftime('%b %-d')}"
+    except ValueError:
+        pass
+    bits = " · ".join(x for x in (pattern, rng) if x)
+    sessions = row.get("NUMBEROFSESSIONS")
+    return f"{bits} · {sessions} sessions" if bits and sessions else bits
+
+
+def fetch_classes(today: date | None = None) -> list[dict]:
+    """Training-center catalog via the same Next.js data layer as shows:
+    /_next/data/<buildId>/find-a-class/chicago.json returns every Chicago
+    class page with its Activenet section rows (dates, weekly pattern, open
+    seats) plus hero metadata (description, image, price). One item per open,
+    not-yet-started section; two HTTP requests total."""
+    today = today or date.today()
+    m = _BUILD_ID.search(fetch_html(FIND_A_CLASS))
+    if not m:
+        raise RuntimeError("second_city: no buildId on the find-a-class page")
+    data = fetch_json(f"{BASE}/_next/data/{m.group(1)}/find-a-class/chicago.json")
+    nodes = _find_class_nodes(data)
+    if not nodes:
+        raise RuntimeError("second_city: no class nodes in the find-a-class payload")
+
+    out: list[dict] = []
+    for node in nodes:
+        try:
+            rows = json.loads(((node.get("activenetData") or {}).get("activenetData")) or "[]")
+        except (json.JSONDecodeError, TypeError):
+            rows = []
+        hero = _hero(node)
+        cats = ((node.get("classesCategories") or {}).get("nodes")) or []
+        level = clean(cats[0].get("name")) if cats else ""
+        image = safe_url((hero.get("imageDesktop") or {}).get("mediaItemUrl") or "") or None
+        price = clean(hero.get("price"))
+        if price and not price.startswith("$"):
+            price = f"${price}"
+        description = strip_html(hero.get("description"))
+        uri = node.get("uri") or ""
+        url = f"{BASE}{uri}" if uri.startswith("/") else safe_url(uri)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if (row.get("activity_status") or "").lower() != "open":
+                continue
+            start = _section_start(row)
+            if not start or start[:10] < today.isoformat():
+                continue
+            out.append(make_class(
+                id=f"second_city/{row.get('activity_id') or row.get('activity_number')}",
+                title=clean(row.get("activity_name")) or clean(node.get("title")),
+                url=url,
+                schedule=_section_schedule(row),
+                start=start,
+                price=price,
+                level=level,
+                image=image,
+                description=description[:2000],
+                is_full=(row.get("NUMBER_OPEN") == "0"),
+                source="second_city", org="The Second City", city="Chicago",
+            ))
+    return out
 
 
 def fetch(today: date | None = None) -> list[dict]:

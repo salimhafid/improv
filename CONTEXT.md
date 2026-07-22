@@ -24,8 +24,8 @@ app reads it from GitHub's raw CDN. No accounts, no analytics, no server.
 ```
 GitHub Actions cron (.github/workflows/scrape.yml, "17 */3 * * *")
   → publish_static.py  (LOCAL_STORE_DIR=docs — the checkout IS the state)
-      scraper.py    → docs/shows.json    (~1,169 shows, 10 sources)
-      classes.py    → docs/classes.json  (~293 classes, 8 sources)
+      scraper.py    → docs/shows.json    (~2,600 shows, 11 sources)
+      classes.py    → docs/classes.json  (~444 classes, 10 sources)
       talent.py     → docs/talent.json   (~2,086 people, ~1,586 bios)
   → commits changed feeds (bot commits keep the cron alive past GitHub's
     60-day-inactivity auto-disable)
@@ -38,7 +38,11 @@ App fetch URLs (ETag + max-age≈300 revalidation, ~5-min freshness):
 Key pipeline behaviors (scraper.py / talent.py):
 - **Per-source cadence**: `_SCRAPE_INTERVALS` — ucb_ny every 3h, everything
   else 24h. Sources not due carry last-good data from the previous payload;
-  failures carry stale data (flagged) instead of wiping a source.
+  failures carry stale data (flagged) instead of wiping a source. Class
+  sources all refresh daily (`classes.py`).
+- **Crowdwork shows expand per-performance**: the shared adapter emits one
+  item per future date in each show's `dates[]` (90-day cap, slug suffixed
+  `/<YYYYMMDDHHMM>`), not just `next_date` — a weekly show is ~13 items.
 - **Detail enrichment budget** (UCB + Magnet): 400 detail-page fetches/run,
   cached per URL via `detail_done` in the payload — converges, never
   re-fetches. Carries (description, cast, image, cast_members).
@@ -55,14 +59,14 @@ Key pipeline behaviors (scraper.py / talent.py):
 
 | id | Theater | Method & quirks |
 |---|---|---|
-| ucb_ny / ucb_la | UCB NY / LA | WP Grid Builder listing (`ucbcomedy.com/shows/<city>`) + detail pages. Images: strip WP `-WxH` suffix for full-size; detail `og:image` fills gaps. **Structured cast** from detail-page `/people/<slug>/` anchors inside `#main` (nav has team links — never scan outside #main); text "Featuring:" heuristic (multi-LINE — one name per line, stop at `—`/ticket words) is fallback only. ~135/176 shows have structured cast. |
+| ucb_ny / ucb_la | UCB NY / LA | WP Grid Builder listing (`ucbcomedy.com/shows/<city>`) + detail pages. **Paginated**: the grid serves 88 cards/page and `?_page=N` is server-rendered — walk pages until a short page (LA runs to 3 pages / ~185 shows; reading only page 1 once silently dropped 54% of LA). Images: strip WP `-WxH` suffix for full-size; detail `og:image` fills gaps. **Structured cast** from detail-page `/people/<slug>/` anchors inside `#main` (nav has team links — never scan outside #main); text "Featuring:" heuristic (multi-LINE — one name per line, stop at `—`/ticket words) is fallback only. Classes via the **Arlo registration API** (`ucbcomedy.arlo.co/api/.../eventsearch`, LOC_NY/LOC_LA tags); LOC_Online + satellite cities (Austin/Pittsburgh/Edinburgh) exist in Arlo but are deliberately unscoped. |
 | brooklyn_cc | Brooklyn Comedy Collective | Squarespace (pre-existing adapter). |
-| magnet | Magnet Theater | Month-calendar tables (3 months) + detail pages; **calendar has zero images — og:image from detail is the only artwork**. |
-| wgis_ny / wgis_la | WGIS | Pre-existing adapter. wgis_ny legitimately lists 0 shows some periods. |
-| annoyance | The Annoyance | **ThunderTix calendar-feed endpoint**: `GET theannoyance.thundertix.com/reports/calendar?start=<epoch>&end=<epoch>` → JSON, one call = 2 months (~210 perfs / 54 productions). Per-production meta (desc/img/free) from event-page JSON-LD, `_WORKERS=3` — **ThunderTix 429s aggressively** (~400 reqs in 15 min triggers it; partial meta self-heals on the next daily run). Fallback: the calendar page's JSON-LD (only ~1 week; its `month=` params are ignored server-side). Classes via Crowdwork slug `annoyancetrial`. |
-| io_chicago | iO Theater | Pre-existing adapter (fourthwall). |
-| second_city | The Second City | Crawl `/shows/chicago` index (~90 pages); each show page's `__NEXT_DATA__` has a **base64 `patronticketData`** blob with the full run (ISO UTC → convert to America/Chicago). Filter `custom.Event_City__c == "Chicago"` (Toronto leaks in). The show-finder page's `?dates=` filter is **client-side only** — never use it for enumeration. 42-day horizon. Stage from slug heuristic (mainstage/e.t.c./skybox). |
-| logan_square | Logan Square Improv | **Crowdwork public API**: `crowdwork.com/api/v2/lsi/shows?start=…&end=…` (their /events/ page is FullCalendar on this feed). Ranges cap ~1 month → query 28-day windows over 62 days. `tags` are visibility flags, NOT genres. Response `data[]`: name, url (crowdwork event page), img.large, description.body (HTML), dates[] with -05:00 offsets. |
+| magnet | Magnet Theater | Month-calendar tables (3 months) + detail pages; **calendar has zero images — og:image from detail is the only artwork**. Classes: the all-classes-in-session index PLUS ~14 per-discipline `/class/<slug>/` pages (nav-discovered, same `div.class-holder` markup, deduped by WP id) — upcoming/enrolling sections only appear on the discipline pages. |
+| wgis_ny / wgis_la | WGIS | Crowdwork slug `wgis` split by timezone offset. **wgis_ny = 0 shows is correct**: all Crowdwork items are Pacific — WGIS NY runs classes only (HTML `/nycclasses`, `/laclasses`; `/onlineclasses` deliberately unscoped). |
+| annoyance | The Annoyance | **ThunderTix calendar-feed endpoint**: `GET theannoyance.thundertix.com/reports/calendar?start=<epoch>&end=<epoch>` → JSON, one call serves 6+ months (**180-day horizon**, ~450 perfs / ~80 productions). Per-production meta (desc/img/free) from event-page JSON-LD, `_WORKERS=3` — **ThunderTix 429s aggressively** (~400 reqs in 15 min triggers it; partial meta self-heals on the next daily run). Fallback: the calendar page's JSON-LD (only ~1 week; its `month=` params are ignored server-side). Classes via Crowdwork slug `annoyancetrial`. |
+| io_chicago | iO Theater | Crowdwork slug `iotheater` for shows AND classes. |
+| second_city | The Second City | Crawl `/shows/chicago` index (~90 pages); each show page's `__NEXT_DATA__` has a **base64 `patronticketData`** blob with the full run (ISO UTC → convert to America/Chicago). Filter `custom.Event_City__c == "Chicago"` (Toronto leaks in). The show-finder page's `?dates=` filter is **client-side only** — never use it for enumeration. **180-day horizon** (blobs carry full on-sale runs incl. holiday shows — no extra requests). Stage from slug heuristic (mainstage/e.t.c./skybox). **Classes**: `/_next/data/<buildId>/find-a-class/chicago.json` (buildId from the find-a-class page's `__NEXT_DATA__`) → 86 class nodes, each with an Activenet section-rows JSON string (dates, weekly pattern, open seats) + hero (desc/image/price) — one item per open future section, 2 requests total. |
+| logan_square | Logan Square Improv | **Crowdwork public API**: `crowdwork.com/api/v2/lsi/shows?start=…&end=…` (their /events/ page is FullCalendar on this feed). Ranges cap ~1 month → query 28-day windows over 62 days. `tags` are visibility flags, NOT genres. Response `data[]`: name, url (crowdwork event page), img.large, description.body (HTML), dates[] with -05:00 offsets. Classes via the shared Crowdwork adapter (slug `lsi`). |
 | playground | The Playground Theater | Site is **Canva**; show-calendar embeds a public **Google Calendar** — adapter reads the ICS (`calendar id c_eb31…@group.calendar.google.com`, hardcoded in sources/playground.py). Full RRULE expansion (dateutil) + EXDATE / RECURRENCE-ID overrides / CANCELLED. All shows free. No images (app's GeneratedCover handles). If they regenerate the calendar id, the source fails loudly and carries. |
 
 **Talent** (talent.py + sources/ucb_talent.py): NY + LA + Teachers pages are

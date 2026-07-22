@@ -1,6 +1,6 @@
 # TODO.md — open items, watchlist, and likely next steps
 
-Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-07-17.
+Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-07-22.
 
 ## Blocking release (user actions in App Store Connect)
 
@@ -15,11 +15,23 @@ Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-07-17.
 
 ## Watchlist (check occasionally; all fail-soft)
 
-- [ ] `wgis_ny` has listed 0 upcoming shows for a while — the adapter works;
-      verify on their site whether that's still true or the markup moved.
+- [x] ~~`wgis_ny` 0 upcoming shows~~ — RESOLVED 2026-07-22: verified correct.
+      All WGIS Crowdwork shows are Pacific-timezone; WGIS NY runs classes
+      only. 0 is the right answer, not a breakage.
 - [ ] Annoyance meta enrichment (descriptions/images) is partial whenever
       ThunderTix 429s mid-run; self-heals daily. If chronically bad, add
-      per-URL carry-over like the UCB detail cache.
+      per-URL carry-over like the UCB detail cache. (The 180-day horizon
+      raised productions-per-run from ~49 to ~80 — watch 429 frequency.)
+- [ ] UCB shows pagination (`?_page=N`, 88 cards/page) assumes WPGB keeps
+      server-rendering history pages; if UCB's feed count ever snaps back to
+      exactly 88/city, the walk broke — check `_PAGE_SIZE` still matches.
+- [ ] Second City classes ride `/_next/data/<buildId>/find-a-class/chicago.json`;
+      a Next.js build mid-scrape 404s once (fail-soft, carries). Chronic
+      failure likely means the route or payload shape changed.
+- [ ] UCB detail-enrichment budget is 400 fetches/run vs ~413 first-time
+      targets after pagination (281 UCB shows + 132 Magnet) — new-show
+      backlogs converge on the second run via `detail_done`; fine unless
+      the budget is lowered.
 - [ ] Playground depends on a hardcoded Google Calendar id (in
       sources/playground.py). If the theater regenerates it, the source
       raises and carries; re-extract the id from their show-calendar page
@@ -35,8 +47,28 @@ Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-07-17.
 
 ## Nice-to-haves (discussed, not committed)
 
-- [ ] Classes for the newer Chicago sources (Second City training center,
-      Logan Square's Crowdwork classes, Playground) — shows-only today.
+- [x] ~~Classes for the newer Chicago sources~~ — DONE 2026-07-22: Second City
+      (Next.js find-a-class data route, ~109 sections) and Logan Square
+      (Crowdwork `lsi`) shipped. Playground verified to have NO classes
+      program (sitemap + rendered site) — nothing to add.
+- [ ] **UCB online classes** (Arlo tag LOC_Online, ~15 offerings incl. core
+      levels): bookable from anywhere but the app's model is city-scoped —
+      needs a product decision (attach to both cities? an "Online" scope?).
+      Same question for WGIS `/onlineclasses` (~7 open workshops).
+- [ ] Arlo satellite locations (Austin 12, Pittsburgh 10, Edinburgh 7
+      classes) if the app ever expands beyond NY/LA/Chicago.
+- [ ] Second City stage/venue: 84% of show items have blank venue (slug
+      heuristic only matches Mainstage/e.t.c./Skybox) — the patronticket
+      blob or page data may carry the real stage; needs field spelunking.
+- [ ] Brooklyn CC polish: map Squarespace categories (Eris Mainstage / Deep
+      Space / Pig Pen + two street addresses) into venue instead of
+      comedy_types; parse class start dates out of product titles.
+- [ ] WGIS class enrichment (0% descriptions/images — needs per-workshop
+      detail-page fetches) and show prices (cost.formatted is in the API;
+      shows have no price field in the feed model today).
+- [ ] iO Fest passes appear as "shows" (they're ticket bundles); Annoyance
+      "CLASS:"-titled ThunderTix entries duplicate Crowdwork classes —
+      both could use tagging/dedupe.
 - [ ] Cast/talent for non-UCB theaters (no structured data found so far;
       Second City's patronticket blob has no lineup info).
 - [ ] Hosted OG interstitial pages so *pasted* links get custom previews —

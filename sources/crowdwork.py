@@ -7,11 +7,16 @@ where kind is "shows" or "classes". Each item carries a full description
 from __future__ import annotations
 
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from common import clean, fetch_json, make_class, make_show, safe_url, strip_html
 
 API = "https://www.crowdwork.com/api/v2/%s/%s?cache=1"
+
+# Recurring shows list their full run in `dates` (a weekly show carries months
+# of future performances); cap how far out we expand so a 2027 tail doesn't
+# swamp the feed.
+_SHOW_HORIZON_DAYS = 90
 
 # Short in-process memo so e.g. wgis_ny + wgis_la don't double-fetch the feed.
 _memo: dict[tuple[str, str], tuple[float, list]] = {}
@@ -87,34 +92,47 @@ def _common(it: dict):
 
 
 def fetch_shows(slug: str, source: str, org: str, city: str, *, city_from_tz: bool = False) -> list[dict]:
+    today = date.today()
+    horizon = today + timedelta(days=_SHOW_HORIZON_DAYS)
     shows: list[dict] = []
     for it in _fetch(slug, "shows"):
         c = _common(it)
         if not c["active"] or not c["title"]:
             continue
-        start = _naive_local(c["next_date"])
-        if not start:
-            continue
-        item_city = (_city_from_offset(c["next_date"]) if city_from_tz else city)
-        if city_from_tz:
-            # Unrecognized/absent offset → city is unknown. Drop it rather than
-            # fall back to this source's city, which would otherwise place the
-            # same event in BOTH the NY and LA feeds (both runs share one feed).
-            if item_city is None or item_city != city:
+        # One item per future performance: `dates` carries the show's full run
+        # (next_date unioned in for shows that publish no array), so a weekly
+        # show yields every upcoming date instead of only its next one.
+        occurrences = {d for d in (it.get("dates") or []) if isinstance(d, str)}
+        if isinstance(c["next_date"], str):
+            occurrences.add(c["next_date"])
+        for iso in sorted(occurrences):
+            start = _naive_local(iso)
+            if not start:
                 continue
-        try:
-            dt = datetime.strptime(start, "%Y-%m-%dT%H:%M:%S")
-            date_raw = dt.strftime("%A, %B %-d @ %-I:%M %p")
-        except ValueError:
-            date_raw = start
-        shows.append(make_show(
-            title=c["title"], url=c["url"], slug=c["slug"], date_raw=date_raw,
-            start=start, has_time=True, venue=c["venue"] or org, venues=[c["venue"] or org],
-            comedy_types=c["tags"], image=c["image"],
-            excerpt=strip_html(it.get("description_short")), description=_full_description(it),
-            is_free="free" in f"{c['title']} {c['cost']}".lower(),
-            source=source, org=org, city=item_city,
-        ))
+            try:
+                dt = datetime.strptime(start, "%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                continue
+            if not (today <= dt.date() <= horizon):
+                continue
+            item_city = (_city_from_offset(iso) if city_from_tz else city)
+            if city_from_tz:
+                # Unrecognized/absent offset → city is unknown. Drop it rather
+                # than fall back to this source's city, which would otherwise
+                # place the same event in BOTH the NY and LA feeds (both runs
+                # share one feed).
+                if item_city is None or item_city != city:
+                    continue
+            shows.append(make_show(
+                title=c["title"], url=c["url"],
+                slug=f"{c['slug']}/{dt.strftime('%Y%m%d%H%M')}",
+                date_raw=dt.strftime("%A, %B %-d @ %-I:%M %p"),
+                start=start, has_time=True, venue=c["venue"] or org, venues=[c["venue"] or org],
+                comedy_types=c["tags"], image=c["image"],
+                excerpt=strip_html(it.get("description_short")), description=_full_description(it),
+                is_free="free" in f"{c['title']} {c['cost']}".lower(),
+                source=source, org=org, city=item_city,
+            ))
     return shows
 
 
