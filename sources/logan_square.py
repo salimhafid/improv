@@ -15,9 +15,17 @@ import json
 
 from common import clean, fetch_html, make_show, safe_url, strip_html
 
+from . import crowdwork
+
 API = "https://crowdwork.com/api/v2/lsi/shows"
 _HORIZON_DAYS = 62
 _WINDOW_DAYS = 28
+
+
+def fetch_classes() -> list[dict]:
+    """LSI's training program registers through the same Crowdwork account the
+    shows calendar uses (slug 'lsi'); the shared adapter handles the shape."""
+    return crowdwork.fetch_classes("lsi", "logan_square", "Logan Square Improv", "Chicago")
 
 
 def _windows(today: date):

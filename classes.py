@@ -1,9 +1,10 @@
 """Classes aggregator.
 
-Mirrors scraper.aggregate() for the class data type: runs each adapter in
-CLASS_SOURCES only when due per its cadence (UCB NY + WGIS every 24h, others
-every 7 days), carries over last-good data for sources not due or that fail, and
-filters to upcoming (start >= today, undated kept).
+Mirrors scraper.aggregate() for the class data type: runs each adapter daily
+(the heaviest source is Magnet at ~15 requests/run, and a 24h cadence keeps
+freshly announced sections and sold-out states at most a day stale), carries
+over last-good data for sources not due or that fail, and filters to upcoming
+(start >= today, undated kept).
 """
 from __future__ import annotations
 
@@ -19,8 +20,8 @@ from sources import CLASS_SOURCES
 
 log = logging.getLogger("ucb.classes")
 
-_CLASS_INTERVALS = {"ucb_ny": 24 * 3600, "wgis_ny": 24 * 3600, "wgis_la": 24 * 3600}
-_DEFAULT_CLASS_INTERVAL = 7 * 24 * 3600   # other theaters: weekly
+_CLASS_INTERVALS: dict[str, int] = {}     # per-source overrides, none currently
+_DEFAULT_CLASS_INTERVAL = 24 * 3600       # daily for every class source
 _GRACE = 30 * 60
 
 
