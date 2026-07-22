@@ -28,4 +28,6 @@ CLASS_SOURCES = [
     {"id": "wgis_la", "org": "WGIS", "city": "Los Angeles", "fetch": wgis.fetch_classes_la},
     {"id": "annoyance", "org": "The Annoyance", "city": "Chicago", "fetch": annoyance.fetch_classes},
     {"id": "io_chicago", "org": "iO Theater", "city": "Chicago", "fetch": io_chicago.fetch_classes},
+    {"id": "second_city", "org": "The Second City", "city": "Chicago", "fetch": second_city.fetch_classes},
+    {"id": "logan_square", "org": "Logan Square Improv", "city": "Chicago", "fetch": logan_square.fetch_classes},
 ]

@@ -26,7 +26,9 @@ from . import crowdwork
 TT = "https://theannoyance.thundertix.com"
 URL = f"{TT}/events?display=calendar"
 
-_HORIZON_DAYS = 62   # two months, per the show-calendar view
+_HORIZON_DAYS = 180  # the calendar endpoint serves ~6 months in one request;
+                     # covers announced holiday runs (one meta fetch per
+                     # production keeps the request count modest)
 _WORKERS = 3         # ThunderTix rate-limits aggressively (429s at ~8 concurrent)
 
 # Classes live on Crowdwork (the ThunderTix calendar is shows-only).

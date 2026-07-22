@@ -153,14 +153,63 @@ def _infer_date(txt: str, today: date):
     return best
 
 
+# Confirmed per-discipline listing slugs, used only if nav discovery finds
+# nothing (the nav and this list both change rarely).
+_KNOWN_DISCIPLINES = [
+    "improv-level-one", "improv-level-two", "improv-level-three",
+    "advanced-improv-level-one", "advanced-improv-level-two",
+    "musical-improv-one", "musical-improv-two", "musical-improv-three",
+    "sketch-writing-one", "sketch-writing-two", "sketch-writing-three",
+    "storytelling",
+]
+_DISCIPLINE_URL = re.compile(r"https://magnettheater\.com/class/([a-z0-9-]+)/?$")
+_MAX_DISCIPLINE_PAGES = 20
+
+
+def _discipline_urls(soup: BeautifulSoup) -> list[str]:
+    """Per-discipline listing pages (/class/<slug>/) from the index page's nav.
+    These carry upcoming sections open for enrollment, which the in-session
+    index never shows."""
+    urls: list[str] = []
+    seen: set[str] = set()
+    for a in soup.select("a[href*='/class/']"):
+        href = urljoin(CLASS_INDEX, a.get("href", "")).split("?")[0].split("#")[0]
+        m = _DISCIPLINE_URL.match(href.rstrip("/") if href.endswith("/") else href)
+        if not m:
+            continue
+        slug = m.group(1)
+        if slug == "all-classes-in-session" or slug in seen:
+            continue
+        seen.add(slug)
+        urls.append(f"https://magnettheater.com/class/{slug}/")
+    if not urls:
+        urls = [f"https://magnettheater.com/class/{s}/" for s in _KNOWN_DISCIPLINES]
+    return urls[:_MAX_DISCIPLINE_PAGES]
+
+
 def fetch_classes(today: date | None = None) -> list[dict]:
-    """Magnet's 'All Classes In Session' page lists every currently running /
-    enrolling section as a div.class-holder (instructor + type + schedule + dates
-    + status). No price is published there, so price is left blank. Sections whose
-    run has already ended are dropped."""
+    """Class sections from the 'All Classes In Session' index plus every
+    per-discipline /class/<slug>/ page — upcoming sections open for enrollment
+    only appear on the latter. All pages share the div.class-holder markup
+    (instructor + type + schedule + dates + status); sections dedupe by their
+    WordPress id. No price is published anywhere, so price stays blank.
+    Sections whose run has already ended are dropped."""
     today = today or date.today()
-    soup = BeautifulSoup(fetch_html(CLASS_INDEX), "lxml")
+    index_soup = BeautifulSoup(fetch_html(CLASS_INDEX), "lxml")
     out: list[dict] = []
+    seen_ids: set[str] = set()
+    _collect_cards(index_soup, today, out, seen_ids)
+    for url in _discipline_urls(index_soup):
+        try:
+            soup = BeautifulSoup(fetch_html(url), "lxml")
+        except RuntimeError:
+            continue    # one dead discipline page must not sink the source
+        _collect_cards(soup, today, out, seen_ids)
+    return out
+
+
+def _collect_cards(soup: BeautifulSoup, today: date,
+                   out: list[dict], seen_ids: set[str]) -> None:
     for card in soup.select("div.class-holder"):
         det = card.select_one("div.details")
         type_a = det.select_one("strong a") if det else None
@@ -169,6 +218,8 @@ def fetch_classes(today: date | None = None) -> list[dict]:
             continue
         href = type_a.get("href", "")
         cid = re.sub(r"\D", "", href) or href
+        if cid in seen_ids:
+            continue    # same section listed on both the index and its discipline page
         # The href is a bare relative WordPress id; resolve it against the index
         # URL (a fabricated /class/<id> 404s/redirects to a generic page).
         url = urljoin(CLASS_INDEX, href)
@@ -207,17 +258,22 @@ def fetch_classes(today: date | None = None) -> list[dict]:
         status = lines[-1].lower() if lines else ""
         is_full = any(w in status for w in ("full", "sold", "wait"))
 
+        # Upcoming sections get a real start so the app can sort/filter by it;
+        # in-session sections have past starts and stay undated (always shown).
+        start_date = _infer_date(start_txt, today)
+        start = start_date.isoformat() if start_date and start_date >= today else None
+
+        seen_ids.add(cid)
         out.append(make_class(
             id=f"magnet/{cid}",
             title=ctype,
             url=safe_url(url),
             instructor=instructor,
             schedule=schedule,
-            start=None,  # in-session sections have past start dates; keep undated
+            start=start,
             price="",
             level=_class_discipline(ctype),
             description="",
             is_full=is_full,
             source="magnet", org="Magnet Theater", city="New York",
         ))
-    return out

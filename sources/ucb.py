@@ -75,9 +75,32 @@ def _parse_cards(html: str, source: str, org: str, city: str) -> list[dict]:
     return shows
 
 
+# WP Grid Builder serves 88 cards per page; ?_page=N is server-rendered (the
+# grid runs with history=1), so the "Load more" tail is plain GETs away. A
+# short page marks the end. LA regularly runs to 3 pages (~185 shows).
+_PAGE_SIZE = 88
+_MAX_PAGES = 8
+
+
 def fetch(region: str) -> list[dict]:
     source, org, city, url = REGIONS[region]
-    return _parse_cards(fetch_html(url), source, org, city)
+    shows: list[dict] = []
+    seen: set[tuple] = set()
+    for page in range(1, _MAX_PAGES + 1):
+        page_url = url if page == 1 else f"{url}?_page={page}"
+        cards = _parse_cards(fetch_html(page_url), source, org, city)
+        added = 0
+        for s in cards:
+            key = (s["url"], s["start"], s["title"])
+            if key not in seen:
+                seen.add(key)
+                shows.append(s)
+                added += 1
+        # Out-of-range pages re-serve page 1, so a page of pure repeats also ends
+        # the walk (added == 0 guards against looping on them).
+        if len(cards) < _PAGE_SIZE or added == 0:
+            break
+    return shows
 
 
 _CAST_LABEL = re.compile(r"(?:Featuring|Cast|Line\s*-?up)\s*:\s*", re.I)
