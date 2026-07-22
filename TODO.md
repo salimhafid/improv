@@ -5,10 +5,12 @@ Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-07-22.
 ## Blocking release (user actions in App Store Connect)
 
 - [ ] **Ship v1.2**: create version 1.2 on the app's page, add What's New
-      (Second City*, Logan Square Improv, The Playground, two months of
-      Annoyance shows, rich share previews, Apple/Google calendar choice,
-      1-hour reminders — *trim to whatever the approved 1.1 build lacked),
-      select build **1.2 (15)**, Submit for Review.
+      (Second City*, Logan Square Improv, The Playground, six months of
+      Annoyance + Second City shows, Second City & Logan Square classes,
+      collapsible UCB Core Curriculum section, rich share previews,
+      Apple/Google calendar choice, 1-hour reminders — *trim to whatever
+      the approved 1.1 build lacked), select build **1.2 (16)** (build 15
+      predates the Core Curriculum UI), Submit for Review.
 - [ ] Confirm ASC Support URL = `https://github.com/salimhafid/improv` and
       Privacy Policy URL = `.../blob/main/PRIVACY.md` (changed after 1.1 was
       prepared; may still show old salimhafid.com values).
