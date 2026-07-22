@@ -135,16 +135,53 @@ final class ClassesStore {
         return true
     }
 
+    // MARK: Core curriculum (UCB Improv 101–401)
+
+    static let coreSectionID = "__core__"
+
+    /// Rank in UCB's core improv sequence: 101 → 0 … 401 → 3, nil for
+    /// everything else. Matched on title or level prefix so a renamed feed
+    /// subtitle ("Improv 101: Improv Basics") still qualifies; "Musical
+    /// Improv 101" etc. don't (prefix is anchored at the start).
+    static func coreRank(_ item: ClassItem) -> Int? {
+        guard item.source == "ucb_ny" || item.source == "ucb_la" else { return nil }
+        for (rank, number) in ["101", "201", "301", "401"].enumerated() {
+            let prefix = "Improv \(number)"
+            if item.title.hasPrefix(prefix) || item.level.hasPrefix(prefix) { return rank }
+        }
+        return nil
+    }
+
     // MARK: Sections (grouped by level within the city+theater scope)
 
     func sections(city: String, theater: String, searchText: String = "") -> [ClassSection] {
-        let items = filtered(city: city, theater: theater, searchText: searchText)
+        var items = filtered(city: city, theater: theater, searchText: searchText)
+
+        // UCB's core sequence gets its own pinned section up top (collapsible
+        // in the view) so students tracking 101→401 skip the electives.
+        var sections: [ClassSection] = []
+        let core = items.filter { Self.coreRank($0) != nil }
+        if !core.isEmpty {
+            items.removeAll { Self.coreRank($0) != nil }
+            let sorted = core.sorted { lhs, rhs in
+                let lr = Self.coreRank(lhs) ?? 0
+                let rr = Self.coreRank(rhs) ?? 0
+                if lr != rr { return lr < rr }
+                let ld = lhs.startDate ?? .distantFuture
+                let rd = rhs.startDate ?? .distantFuture
+                if ld != rd { return ld < rd }
+                return lhs.title < rhs.title
+            }
+            sections.append(ClassSection(id: Self.coreSectionID, title: "Core Curriculum",
+                                         symbol: "graduationcap", classes: sorted))
+        }
+
         let byLevel = Dictionary(grouping: items, by: \.level)
         let keys = byLevel.keys.sorted { a, b in
             if a.isEmpty != b.isEmpty { return !a.isEmpty }  // empty ("Other") last
             return a < b
         }
-        return keys.map { key in
+        sections += keys.map { key in
             let sorted = (byLevel[key] ?? []).sorted { lhs, rhs in
                 let ld = lhs.startDate ?? .distantFuture
                 let rd = rhs.startDate ?? .distantFuture
@@ -156,5 +193,6 @@ final class ClassesStore {
                                 symbol: "graduationcap",
                                 classes: sorted)
         }
+        return sections
     }
 }
