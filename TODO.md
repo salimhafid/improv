@@ -86,13 +86,18 @@ Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-07-22.
 
 ## Docs debt
 
-- [ ] Root README.md still describes the Cloud Host era in places (deploy.sh,
-      Flask serving). The Flask app still works for local dev, and deploy.sh
-      is legacy-but-functional; a rewrite reflecting the Actions+raw
-      architecture would help outside readers. (ios/README.md and
-      CONTEXT.md are current.)
-- [ ] ios/README.md line ~5 still says feeds come from "the Cloud Host
-      backend" in its intro sentence — cosmetic, one line.
+- [x] ~~Root README.md describes the Cloud Host era~~ — DONE 2026-08-08:
+      README rewritten for the Actions+raw architecture, and the entire
+      legacy stack (app.py, build_local.py, Dockerfile, deploy.sh,
+      serve-local.sh, templates/, site/, storage.py's object storage backend, Flask/
+      gunicorn/objectstore-client deps) was deleted — git history has it.
+- [x] ~~ios/README.md "Cloud Host backend" intro line~~ — already fixed; no
+      Cloud Host mention remains in ios/README.md.
+- [ ] Deferred from the 2026-08-08 review: ShowsService / ClassesService /
+      TalentService are three near-identical fetch+cache copies (with dead
+      `offlineNoCache` cases) that could collapse into one generic feed
+      service — pure simplification, some regression risk, do it early in a
+      train, then run ./run_tests.sh + a sim smoke test.
 - [ ] UCBapp.md (the future-apps playbook) predates the raw-CDN move, the
       LPLinkMetadata share pattern, and several scraping protocols
       (patronticket blobs, WPGB ajax, ThunderTix reports/calendar, Crowdwork

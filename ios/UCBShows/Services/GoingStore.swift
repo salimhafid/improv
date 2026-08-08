@@ -54,8 +54,17 @@ final class GoingStore {
     // MARK: Persistence
 
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let saved = try? JSONDecoder().decode([Show].self, from: data) else { return }
+        guard let data = try? Data(contentsOf: fileURL) else { return }
+        guard let saved = try? JSONDecoder().decode([Show].self, from: data) else {
+            // The file exists but won't decode. Starting empty is fine, but the
+            // next toggle()'s save() would then overwrite the user's whole list
+            // with one show — park the unreadable file aside first so the data
+            // survives for a future recovery/migration.
+            let backup = fileURL.deletingPathExtension().appendingPathExtension("bak.json")
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.moveItem(at: fileURL, to: backup)
+            return
+        }
         // Quietly drop shows that are long over.
         let cutoff = Date().addingTimeInterval(-Self.expiryGrace)
         shows = saved.filter { ($0.startDate ?? .distantFuture) > cutoff }

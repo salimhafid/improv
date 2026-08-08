@@ -113,7 +113,15 @@ struct TheaterListPanel: View {
     }
 
     private func theaterRow(_ entry: SourceCatalogEntry) -> some View {
-        let available = store.isAvailable(entry.id)
+        // Availability follows the active tab like count(for:) does — a failed
+        // shows scraper must not dim a theater whose classes feed is healthy
+        // (an absent classes entry just means "no classes source", not broken).
+        let available: Bool
+        if app.activeTab == 2 {
+            available = classesStore.sourcesInfo.first { $0.id == entry.id }.map(\.ok) ?? true
+        } else {
+            available = store.isAvailable(entry.id)
+        }
         return row(
             title: entry.name,
             subtitle: available ? entry.blurb : "Temporarily unavailable",

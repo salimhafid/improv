@@ -73,12 +73,14 @@ def fetch_dcm_roster() -> list[dict]:
     return list(seen.values())
 
 
-def bio(url: str) -> str:
-    """Fetch a /people/<slug>/ profile page → bio text. Best-effort."""
+def bio(url: str) -> str | None:
+    """Fetch a /people/<slug>/ profile page → bio text; "" when the page has
+    no bio, None when the FETCH failed (so the enrichment cache retries next
+    run instead of remembering an empty bio forever)."""
     try:
         soup = BeautifulSoup(fetch_html(url), "lxml")
     except RuntimeError:
-        return ""
+        return None
     el = soup.select_one(".ucb-talent-individual__bio")
     return clean(el.get_text(" "))[:1500] if el else ""
 

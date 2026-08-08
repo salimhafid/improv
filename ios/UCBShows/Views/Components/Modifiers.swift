@@ -1,14 +1,18 @@
 import SwiftUI
 
 extension View {
-    /// Recognizes a left-to-right swipe anywhere on the view and runs `action`.
-    /// Uses `simultaneousGesture` so it doesn't block the vertical ScrollView, and
-    /// only fires for a clearly horizontal rightward drag/flick. Used for the
-    /// "open theater drawer" (feed) and "go back" (detail) swipes.
+    /// Recognizes a left-to-right swipe that STARTS near the leading edge and
+    /// runs `action`. Uses `simultaneousGesture` so it doesn't block the
+    /// vertical ScrollView, and only fires for a clearly horizontal rightward
+    /// drag/flick. The edge requirement matches the system back gesture and
+    /// keeps rightward drags inside horizontal content (cast chips, carousels)
+    /// from popping the page. Used for "open theater drawer" (feed) and
+    /// "go back" (detail).
     func onSwipeRight(perform action: @escaping () -> Void) -> some View {
         simultaneousGesture(
             DragGesture(minimumDistance: 20)
                 .onEnded { value in
+                    guard value.startLocation.x < 44 else { return }
                     let t = value.translation
                     let p = value.predictedEndTranslation
                     let horizontalDominant = abs(t.width) > abs(t.height) * 1.5

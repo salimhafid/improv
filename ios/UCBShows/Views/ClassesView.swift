@@ -18,6 +18,9 @@ struct ClassesView: View {
     private var theaterName: String { app.scopeTitle }
 
     var body: some View {
+        // One filter+group pass per body evaluation, shared by the emptiness
+        // check and the list.
+        let sections = store.sections(city: city, theater: theater, searchText: query)
         NavigationStack {
             Group {
                 if store.allClasses.isEmpty {
@@ -26,10 +29,10 @@ struct ClassesView: View {
                     case .failed(let message): errorState(message)
                     default: emptyDataState
                     }
-                } else if store.filtered(city: city, theater: theater, searchText: query).isEmpty {
+                } else if sections.isEmpty {
                     emptyState
                 } else {
-                    list
+                    list(sections)
                 }
             }
             .navigationTitle(theaterName)
@@ -66,7 +69,7 @@ struct ClassesView: View {
 
     // MARK: List
 
-    private var list: some View {
+    private func list(_ sections: [ClassSection]) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.Space.section,
                        pinnedViews: [.sectionHeaders]) {
@@ -74,16 +77,20 @@ struct ClassesView: View {
                     OfflineBanner(updatedLabel: store.updatedLabel)
                 }
 
-                ForEach(store.sections(city: city, theater: theater, searchText: query)) { section in
+                ForEach(sections) { section in
                     if section.id == ClassesStore.coreSectionID {
                         Section {
                             if coreExpanded || !query.isEmpty {
                                 sectionRows(section)
                             }
                         } header: {
-                            CollapsibleSectionHeader(title: section.title,
-                                                     count: section.classes.count,
-                                                     isExpanded: $coreExpanded)
+                            // While searching, rows are force-expanded — bind the
+                            // header to a constant so the chevron matches reality
+                            // and a tap can't silently flip the persisted state.
+                            CollapsibleSectionHeader(
+                                title: section.title,
+                                count: section.classes.count,
+                                isExpanded: query.isEmpty ? $coreExpanded : .constant(true))
                         }
                     } else {
                         Section {
@@ -154,8 +161,12 @@ struct ClassesView: View {
         } description: {
             Text("\(theaterName) has no classes listed. Try another theater.")
         } actions: {
-            Button("Choose Theater") { app.sidebarOpen = true }
-                .buttonStyle(.borderedProminent)
+            // Drawer exists only on compact width — iPad shows the persistent
+            // theater column, so the button would do nothing there.
+            if hSize == .compact {
+                Button("Choose Theater") { app.sidebarOpen = true }
+                    .buttonStyle(.borderedProminent)
+            }
         }
     }
 

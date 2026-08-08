@@ -126,12 +126,7 @@ final class ClassesStore {
         if theater != SourceCatalog.allTheatersID, item.source != theater { return false }
         if let level = filters.level, item.level != level { return false }
         if filters.openOnly, item.isFull { return false }
-        if !query.isEmpty {
-            let hay = ([item.title, item.instructor, item.level, item.org,
-                        item.classDescription].joined(separator: " "))
-                .folding(options: .diacriticInsensitive, locale: .current).lowercased()
-            if !hay.contains(query) { return false }
-        }
+        if !query.isEmpty, !item.searchHay.contains(query) { return false }
         return true
     }
 
@@ -155,23 +150,31 @@ final class ClassesStore {
     // MARK: Sections (grouped by level within the city+theater scope)
 
     func sections(city: String, theater: String, searchText: String = "") -> [ClassSection] {
-        var items = filtered(city: city, theater: theater, searchText: searchText)
+        Self.buildSections(from: filtered(city: city, theater: theater, searchText: searchText))
+    }
+
+    /// Pure grouping core, static so tests can drive it without a store: the
+    /// UCB core sequence first (when present), then level groups A→Z, "Other"
+    /// (levelless) last, each sorted by start date then title.
+    static func buildSections(from allItems: [ClassItem]) -> [ClassSection] {
+        var items = allItems
 
         // UCB's core sequence gets its own pinned section up top (collapsible
         // in the view) so students tracking 101→401 skip the electives.
         var sections: [ClassSection] = []
-        let core = items.filter { Self.coreRank($0) != nil }
+        // Rank each item once (decorate–sort–undecorate) instead of matching
+        // title prefixes inside the comparator.
+        let ranked = items.map { (rank: Self.coreRank($0), item: $0) }
+        let core = ranked.filter { $0.rank != nil }
         if !core.isEmpty {
-            items.removeAll { Self.coreRank($0) != nil }
+            items = ranked.filter { $0.rank == nil }.map(\.item)
             let sorted = core.sorted { lhs, rhs in
-                let lr = Self.coreRank(lhs) ?? 0
-                let rr = Self.coreRank(rhs) ?? 0
-                if lr != rr { return lr < rr }
-                let ld = lhs.startDate ?? .distantFuture
-                let rd = rhs.startDate ?? .distantFuture
+                if lhs.rank != rhs.rank { return (lhs.rank ?? 0) < (rhs.rank ?? 0) }
+                let ld = lhs.item.startDate ?? .distantFuture
+                let rd = rhs.item.startDate ?? .distantFuture
                 if ld != rd { return ld < rd }
-                return lhs.title < rhs.title
-            }
+                return lhs.item.title < rhs.item.title
+            }.map(\.item)
             sections.append(ClassSection(id: Self.coreSectionID, title: "Core Curriculum",
                                          symbol: "graduationcap", classes: sorted))
         }

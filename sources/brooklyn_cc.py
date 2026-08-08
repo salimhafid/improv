@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
@@ -123,16 +124,35 @@ def _class_schedule(title: str) -> str:
 def fetch_classes() -> list[dict]:
     # 1) Which class-registration products are currently offered (the marketing
     #    page lists the live ones; the collection also holds archived products).
+    #    Hrefs are matched by path so a Squarespace template switch to absolute
+    #    URLs can't silently empty the set.
     soup = BeautifulSoup(fetch_html(CLASSES_PAGE), "lxml")
     current: set[str] = set()
-    for a in soup.select('a[href^="/class-registration/"]'):
-        href = a.get("href", "").split("?")[0]
-        if href and "gift" not in href:
-            current.add(href)
+    for a in soup.select('a[href*="/class-registration/"]'):
+        path = urlparse(a.get("href", "")).path.rstrip("/")
+        if path.startswith("/class-registration/") and "gift" not in path:
+            current.add(path)
 
-    # 2) Structured title/price/body/stock keyed by product url.
-    data = fetch_json(REG_COLLECTION)
-    items = {it.get("fullUrl"): it for it in (data.get("items") or [])}
+    # 2) Structured title/price/body/stock keyed by product url path, following
+    #    Squarespace pagination (the collection retains archived products and
+    #    grows without bound).
+    items: dict = {}
+    url = REG_COLLECTION
+    for _ in range(20):
+        data = fetch_json(url)
+        for it in (data.get("items") or []):
+            full = (it.get("fullUrl") or "").rstrip("/")
+            if full:
+                items[full] = it
+        next_page = (data.get("pagination") or {}).get("nextPageUrl")
+        if not next_page:
+            break
+        url = next_page if next_page.startswith("http") else BASE + next_page
+
+    if current and not (current & set(items)):
+        # Every linked product missing from the collection JSON can only mean
+        # the URL scheme or collection moved — raise so last-good data carries.
+        raise RuntimeError("brooklyn_cc: no marketing-page class link matches the collection JSON")
 
     out: list[dict] = []
     for href in sorted(current):

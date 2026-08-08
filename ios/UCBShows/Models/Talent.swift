@@ -11,6 +11,14 @@ struct TalentPayload: Decodable {
         case count
         case people
     }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try c.decodeIfPresent(String.self, forKey: .generatedAt)
+        count = try c.decodeIfPresent(Int.self, forKey: .count)
+        // Element-lossy: one malformed person never aborts the directory.
+        people = (try c.decodeIfPresent(Lossy<TalentPerson>.self, forKey: .people))?.elements ?? []
+    }
 }
 
 /// One person in the UCB talent directory (NY performers / DCM / teachers).

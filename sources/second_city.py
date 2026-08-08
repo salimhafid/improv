@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from common import clean, fetch_html, fetch_json, make_class, make_show, safe_url, strip_html
+from common import clean, fetch_html, fetch_json, local_today, make_class, make_show, safe_url, strip_html
 
 BASE = "https://www.secondcity.com"
 INDEX = f"{BASE}/shows/chicago"
@@ -230,7 +230,7 @@ def fetch_classes(today: date | None = None) -> list[dict]:
     class page with its Activenet section rows (dates, weekly pattern, open
     seats) plus hero metadata (description, image, price). One item per open,
     not-yet-started section; two HTTP requests total."""
-    today = today or date.today()
+    today = today or local_today("Chicago")
     m = _BUILD_ID.search(fetch_html(FIND_A_CLASS))
     if not m:
         raise RuntimeError("second_city: no buildId on the find-a-class page")
@@ -280,7 +280,7 @@ def fetch_classes(today: date | None = None) -> list[dict]:
 
 
 def fetch(today: date | None = None) -> list[dict]:
-    today = today or date.today()
+    today = today or local_today("Chicago")
     index_html = fetch_html(INDEX)
     paths = sorted(set(re.findall(r'href="(/shows/chicago/[^"#?]+)"', index_html)))
     if not paths:

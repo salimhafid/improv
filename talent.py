@@ -55,6 +55,8 @@ def _enrich_bios(people: list[dict], prev_people: list[dict]) -> int:
         with ThreadPoolExecutor(max_workers=_BIO_WORKERS) as ex:
             results = list(ex.map(lambda p: bio(p["url"]), to_fetch))
         for person, text in zip(to_fetch, results):
+            if text is None:
+                continue    # fetch failed — leave unflagged so next run retries
             person["bio"] = text
             person["bio_done"] = True
     return len(to_fetch)
@@ -88,61 +90,59 @@ def aggregate_talent(now: datetime | None = None) -> dict:
     people: dict[str, dict] = {}   # slug → person
     summary: list[dict] = []
 
+    def merge(p: dict, group: str, extra_dcm: bool = False) -> None:
+        entry = people.setdefault(p["slug"], {**p, "groups": []})
+        if group not in entry["groups"]:
+            entry["groups"].append(group)
+        if extra_dcm and "dcm" not in entry["groups"]:
+            entry["groups"].append("dcm")
+        if not entry.get("image") and p.get("image"):
+            entry["image"] = p["image"]
+
+    def carry_group(group: str, error: Exception) -> None:
+        carried = 0
+        for prev in prev_people:
+            if group in prev.get("groups", []):
+                merge(prev, group)
+                carried += 1
+        summary.append({"id": group, "count": carried, "ok": bool(carried), "error": str(error)})
+        log.warning("talent group %s failed: %r (carried %d)", group, error, carried)
+
     for group, url in PAGES:
         try:
             page_people = fetch_page(url)
             for p in page_people:
-                dcm = p.pop("dcm", False)
-                entry = people.setdefault(p["slug"], {**p, "groups": []})
-                if group not in entry["groups"]:
-                    entry["groups"].append(group)
-                if dcm and "dcm" not in entry["groups"]:
-                    entry["groups"].append("dcm")
-                if not entry.get("image") and p.get("image"):
-                    entry["image"] = p["image"]
+                merge(p, group, extra_dcm=p.pop("dcm", False))
             summary.append({"id": group, "count": len(page_people), "ok": True, "error": None})
             log.info("talent page %s: %d people", group, len(page_people))
         except Exception as e:  # noqa: BLE001 - carry the group from last-good
-            carried = 0
-            for prev in prev_people:
-                if group in prev.get("groups", []):
-                    entry = people.setdefault(prev["slug"], {**prev, "groups": []})
-                    if group not in entry["groups"]:
-                        entry["groups"].append(group)
-                    carried += 1
-            summary.append({"id": group, "count": carried, "ok": bool(carried), "error": str(e)})
-            log.warning("talent page %s failed: %r (carried %d)", group, e, carried)
+            carry_group(group, e)
 
     # Full DCM roster from the grid's load-more endpoint (the category-class
     # tags above only cover DCM people who are also on the NY/LA/teacher pages).
     try:
         roster = fetch_dcm_roster()
         for p in roster:
-            entry = people.setdefault(p["slug"], {**p, "groups": []})
-            if "dcm" not in entry["groups"]:
-                entry["groups"].append("dcm")
-            if not entry.get("image") and p.get("image"):
-                entry["image"] = p["image"]
+            merge(p, "dcm")
         summary.append({"id": "dcm", "count": len(roster), "ok": True, "error": None})
         log.info("talent dcm roster: %d people", len(roster))
     except Exception as e:  # noqa: BLE001 - carry the group from last-good
-        carried = 0
-        for prev in prev_people:
-            if "dcm" in prev.get("groups", []):
-                entry = people.setdefault(prev["slug"], {**prev, "groups": []})
-                if "dcm" not in entry["groups"]:
-                    entry["groups"].append("dcm")
-                carried += 1
-        summary.append({"id": "dcm", "count": carried, "ok": bool(carried), "error": str(e)})
-        log.warning("talent dcm roster failed: %r (carried %d)", e, carried)
+        carry_group("dcm", e)
 
     ordered = sorted(people.values(), key=lambda p: p["name"].lower())
     fetched = _enrich_bios(ordered, prev_people)
     if fetched:
         log.info("talent bios: fetched %d new (budget %d)", fetched, _BIO_BUDGET)
+
+    # Only bump the roster clock when something actually scraped; a total
+    # failure keeps the previous stamp so the next 3h run retries instead of
+    # waiting out the full 24h interval.
+    any_scraped = any(s["ok"] and not s["error"] for s in summary)
+    roster_scraped_at = (now.isoformat() if any_scraped
+                         else previous.get("roster_scraped_at"))
     return {
         "generated_at": now.isoformat(),
-        "roster_scraped_at": now.isoformat(),
+        "roster_scraped_at": roster_scraped_at,
         "count": len(ordered),
         "sources": summary,
         "people": ordered,

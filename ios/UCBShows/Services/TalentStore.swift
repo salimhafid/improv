@@ -12,6 +12,9 @@ final class TalentStore {
 
     /// Normalized full name → person.
     private var byName: [String: TalentPerson] = [:]
+    /// (nameKey, person) pairs precomputed at apply() — the directory search
+    /// filters on these instead of re-normalizing every name per keystroke.
+    private var keyedPeople: [(String, TalentPerson)] = []
     /// Profile slug → person (exact matches for structured cast).
     private var bySlug: [String: TalentPerson] = [:]
 
@@ -35,7 +38,8 @@ final class TalentStore {
 
     private func apply(_ payload: TalentPayload) {
         allPeople = payload.people.filter { !$0.slug.isEmpty && !$0.name.isEmpty }
-        byName = Dictionary(allPeople.map { (TalentPerson.nameKey($0.name), $0) },
+        keyedPeople = allPeople.map { (TalentPerson.nameKey($0.name), $0) }
+        byName = Dictionary(keyedPeople,
                             uniquingKeysWith: { first, _ in first })
         bySlug = Dictionary(allPeople.map { ($0.slug, $0) },
                             uniquingKeysWith: { first, _ in first })
@@ -63,17 +67,20 @@ final class TalentStore {
     /// performers appear only under Los Angeles. DCM talent counts as New York
     /// (the marathon is a NY institution) unless they're also on the LA roster.
     func people(matching query: String, group: String? = nil) -> [TalentPerson] {
-        var out = allPeople
+        // Filter on the name keys precomputed at apply() time — nameKey runs
+        // two regex replacements, and recomputing it for ~1,700 people per
+        // keystroke made search typing visibly laggy.
+        var out = keyedPeople
         if let group {
-            out = out.filter {
+            out = out.filter { _, person in
                 group == "ny"
-                    ? (($0.groups.contains("ny") || $0.groups.contains("dcm"))
-                        && !$0.groups.contains("la"))
-                    : $0.groups.contains(group)
+                    ? ((person.groups.contains("ny") || person.groups.contains("dcm"))
+                        && !person.groups.contains("la"))
+                    : person.groups.contains(group)
             }
         }
         let q = TalentPerson.nameKey(query)
-        if !q.isEmpty { out = out.filter { TalentPerson.nameKey($0.name).contains(q) } }
-        return out
+        if !q.isEmpty { out = out.filter { key, _ in key.contains(q) } }
+        return out.map(\.1)
     }
 }

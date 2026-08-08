@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests as cffi_requests
@@ -23,6 +25,23 @@ _MONTHS = (
     "January|February|March|April|May|June|July|August|"
     "September|October|November|December"
 )
+
+
+CITY_TZ = {
+    "New York": ZoneInfo("America/New_York"),
+    "Los Angeles": ZoneInfo("America/Los_Angeles"),
+    "Chicago": ZoneInfo("America/Chicago"),
+}
+
+
+def local_today(city: str, now: datetime | None = None) -> date:
+    """Today in the venue's own timezone. The feed stores venue-local naive
+    times, but GitHub runners live in UTC — a bare date.today() there is
+    already 'tomorrow' from 5pm PT onward, which used to wipe every remaining
+    same-night show from the evening feed builds. Unknown cities fall back to
+    New York (the earliest US zone we cover, so the most conservative cut)."""
+    now = now or datetime.now(timezone.utc)
+    return now.astimezone(CITY_TZ.get(city, CITY_TZ["New York"])).date()
 
 
 def fetch_html(url: str, retries: int = 3) -> str:
@@ -86,16 +105,6 @@ def strip_html(s) -> str:
     return clean(BeautifulSoup(s, "lxml").get_text(" "))
 
 
-def wix_image_url(s: str | None) -> str | None:
-    """Convert a Wix image ref ('wix:image://v1/<mediaId>/name#...') to an https URL."""
-    if not s:
-        return None
-    m = re.match(r"wix:image://v1/([^/]+)/", s)
-    if m:
-        return f"https://static.wixstatic.com/media/{m.group(1)}"
-    return safe_url(s) or None
-
-
 def parse_datetime(date_raw: str):
     """Parse a date string into (start_iso, end_iso, has_time).
 
@@ -107,9 +116,11 @@ def parse_datetime(date_raw: str):
     text = date_raw.replace("\xa0", " ").strip()
 
     if re.search(r"\d\s*[–—-]\s*[A-Za-z0-9]", text):
+        # The optional day-name eater must not swallow a month name, or
+        # "June 28 - July 2" would parse its end date as June 2.
         m = re.search(
             rf"({_MONTHS})\s+(\d{{1,2}})\s*[–—-]\s*"
-            rf"(?:[A-Za-z]+,?\s*)?(?:({_MONTHS})\s+)?(\d{{1,2}}),?\s+(\d{{4}})",
+            rf"(?:(?!(?:{_MONTHS})\b)[A-Za-z]+,?\s*)?(?:({_MONTHS})\s+)?(\d{{1,2}}),?\s+(\d{{4}})",
             text,
         )
         if m:

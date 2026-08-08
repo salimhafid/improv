@@ -17,6 +17,7 @@ struct ShowDetailView: View {
     @State private var showCalendarChooser = false
     @State private var showShareSheet = false
     @State private var shareImage: UIImage?
+    @State private var preparingShare = false
     /// Remembered Apple/Google choice; empty until the user picks on first use.
     @AppStorage("calendarProvider") private var calendarProvider = ""
 
@@ -147,16 +148,32 @@ struct ShowDetailView: View {
     }
 
     /// Grab the (almost always already-cached) poster so the Messages preview
-    /// carries the artwork, then present the share sheet.
+    /// carries the artwork, then present the share sheet. Bounded: the fetch
+    /// races a 2s timeout so a slow poster degrades to a text-only preview
+    /// instead of a sheet that never appears; an in-flight flag keeps repeated
+    /// taps from stacking tasks.
     private func prepareShare() {
+        guard !preparingShare else { return }
         guard shareImage == nil, let imageURL = show.imageURL else {
             showShareSheet = true
             return
         }
+        preparingShare = true
         Task {
-            if let (data, _) = try? await URLSession.shared.data(from: imageURL) {
-                shareImage = UIImage(data: data)
+            shareImage = await withTaskGroup(of: UIImage?.self) { group in
+                group.addTask {
+                    (try? await URLSession.shared.data(from: imageURL))
+                        .flatMap { UIImage(data: $0.0) }
+                }
+                group.addTask {
+                    try? await Task.sleep(for: .seconds(2))
+                    return nil
+                }
+                let first = await group.next() ?? nil
+                group.cancelAll()
+                return first
             }
+            preparingShare = false
             showShareSheet = true
         }
     }
@@ -336,7 +353,7 @@ private struct StretchyPoster: View {
             let minY = geo.frame(in: .global).minY
             let stretch = max(0, minY)
             Color.clear
-                .overlay { PosterImage(show: show) }
+                .overlay { PosterImage(show: show, maxPixel: 1600) }
                 .frame(width: geo.size.width, height: baseHeight + stretch)
                 .clipped()
                 .offset(y: -stretch)

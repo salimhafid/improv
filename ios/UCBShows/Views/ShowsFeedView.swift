@@ -18,6 +18,9 @@ struct ShowsFeedView: View {
     private var theaterName: String { app.scopeTitle }
 
     var body: some View {
+        // One filter+group pass per body evaluation — the emptiness check and
+        // the feed both read it (filtering twice was measurable at feed scale).
+        let sections = store.sections(city: city, theater: theater, searchText: query)
         NavigationStack(path: $path) {
             Group {
                 if store.allShows.isEmpty {
@@ -26,10 +29,10 @@ struct ShowsFeedView: View {
                     case .failed(let message): errorState(message)
                     default: emptyDataState
                     }
-                } else if store.filtered(city: city, theater: theater, searchText: query).isEmpty {
+                } else if sections.isEmpty {
                     emptyState
                 } else {
-                    feed
+                    feed(sections)
                 }
             }
             .navigationTitle(theaterName)
@@ -67,17 +70,14 @@ struct ShowsFeedView: View {
 
     // MARK: Feed
 
-    private var feed: some View {
+    private func feed(_ sections: [DaySection]) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.Space.section, pinnedViews: [.sectionHeaders]) {
                 if store.phase == .offline {
                     OfflineBanner(updatedLabel: store.updatedLabel)
                 }
 
-                ShowSectionsList(
-                    sections: store.sections(city: city, theater: theater, searchText: query),
-                    namespace: zoom
-                )
+                ShowSectionsList(sections: sections, namespace: zoom)
 
                 if let updated = store.updatedLabel, store.phase != .offline {
                     Text(updated)
@@ -122,8 +122,12 @@ struct ShowsFeedView: View {
         } description: {
             Text("\(theaterName) has no upcoming shows right now. Try another theater.")
         } actions: {
-            Button("Choose Theater") { app.sidebarOpen = true }
-                .buttonStyle(.borderedProminent)
+            // The drawer only exists on compact width — iPad already shows the
+            // persistent theater column, so the button would be a dead control.
+            if hSize == .compact {
+                Button("Choose Theater") { app.sidebarOpen = true }
+                    .buttonStyle(.borderedProminent)
+            }
         }
     }
 
