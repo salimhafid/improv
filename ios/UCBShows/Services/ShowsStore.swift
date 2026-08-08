@@ -168,11 +168,7 @@ final class ShowsStore {
         if filters.livestreamOnly, !show.isLivestream { return false }
         if filters.freeOnly, !show.isFree { return false }
         if filters.dateWindow != .all, !inDateWindow(show) { return false }
-        if !query.isEmpty {
-            let hay = (show.title + " " + show.excerpt + " " + show.comedyTypes.joined(separator: " "))
-                .folding(options: .diacriticInsensitive, locale: .current).lowercased()
-            if !hay.contains(query) { return false }
-        }
+        if !query.isEmpty, !show.searchHay.contains(query) { return false }
         return true
     }
 

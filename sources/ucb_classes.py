@@ -42,7 +42,9 @@ def _events() -> list[dict]:
         items.extend(batch)
         if not data.get("NextPageUri") or not batch:
             break
-        skip += 100
+        # Advance by what Arlo actually returned — if it ever pages at <100,
+        # a fixed +100 stride would silently skip records.
+        skip += len(batch)
     _memo = (time.monotonic(), items)
     return items
 

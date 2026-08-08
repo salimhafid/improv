@@ -48,7 +48,9 @@ struct SourceCatalogEntry: Identifiable, Hashable {
     let city: City
 }
 
-/// Per-source availability + counts from the feed's `sources` array.
+/// Per-source availability + counts from the feed's `sources` array. Decoded
+/// defensively like every other feed model — one malformed row must not abort
+/// the payload.
 struct SourceInfo: Decodable, Identifiable, Hashable {
     let id: String
     let org: String
@@ -56,6 +58,40 @@ struct SourceInfo: Decodable, Identifiable, Hashable {
     let count: Int
     let ok: Bool
     let error: String?
+
+    enum CodingKeys: String, CodingKey { case id, org, city, count, ok, error }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try c.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        org = (try c.decodeIfPresent(String.self, forKey: .org)) ?? ""
+        city = (try c.decodeIfPresent(String.self, forKey: .city)) ?? ""
+        count = (try c.decodeIfPresent(Int.self, forKey: .count)) ?? 0
+        ok = (try c.decodeIfPresent(Bool.self, forKey: .ok)) ?? false
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+    }
+}
+
+/// Element-lossy array decoding: a single undecodable element (schema drift in
+/// one show/class/person) drops that element instead of aborting the whole
+/// payload — the "never abort decoding" intent, applied to arrays too.
+struct Lossy<Element: Decodable>: Decodable {
+    let elements: [Element]
+
+    private struct AnyDecodable: Decodable {}
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var out: [Element] = []
+        while !container.isAtEnd {
+            if let element = try? container.decode(Element.self) {
+                out.append(element)
+            } else {
+                _ = try? container.decode(AnyDecodable.self)  // skip the bad element
+            }
+        }
+        elements = out
+    }
 }
 
 /// The supported sources (the 4 wired venues + iO, which is currently unavailable).

@@ -19,11 +19,10 @@ from datetime import date, datetime, timezone
 from dateutil import parser as dateparser
 
 import storage
+from aggregation import run_sources
 from sources import SOURCES
 
 log = logging.getLogger("ucb.scraper")
-
-SOURCE_URL = "https://ucbcomedy.com/shows/new-york/"
 
 # Detail-page enrichment: reuse cached details for known shows, fetch only new
 # ones, capped per run (parallelized) so a scrape stays bounded.
@@ -47,66 +46,69 @@ def _is_upcoming(show: dict, today: date) -> bool:
         return True
 
 
-def _parse_dt(value):
-    if not value:
-        return None
-    try:
-        d = dateparser.parse(value)
-        return d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d
-    except (ValueError, OverflowError, TypeError):
-        return None
-
-
 def _enrich_details(shows, detail_fn, prev_detail, budget) -> int:
     """Fill description/cast/hero image: reuse cached details by url for shows
-    already attempted in a prior run, fetch (in parallel, up to `budget`) only
-    shows not yet attempted. The detail page's og:image only fills in when the
-    listing gave no artwork (Magnet's calendar grid has none). Each processed
-    show is flagged `detail_done` so a page that legitimately has no
-    description/cast (or a transient fetch failure) is not re-fetched on every
-    run — the cache converges. Returns the number fetched."""
+    already fetched in a prior run; fetch each *unique* uncached url once (in
+    parallel, up to `budget` — per-occurrence sources like Magnet share one
+    page across many calendar dates). The detail page's og:image only fills in
+    when the listing gave no artwork. Successful fetches are flagged
+    `detail_done` so pages that legitimately have no description/cast still
+    converge; a FAILED fetch (detail_fn returns None) is left unflagged so the
+    next run retries instead of caching emptiness forever. Returns the number
+    of unique pages fetched."""
     def safe(url):
         try:
             return detail_fn(url)
         except Exception:  # noqa: BLE001
-            return "", "", None, []
-    to_fetch = []
+            return None    # failure — retry next run
+
+    def apply(show, desc, cast, img, members):
+        if desc:
+            show["description"] = desc
+        if cast:
+            show["cast"] = cast
+        if img and not show.get("image"):
+            show["image"] = img
+        if members:
+            show["cast_members"] = members
+        show["detail_done"] = True
+
+    urls_to_fetch: list[str] = []
+    pending: dict[str, list[dict]] = {}
     for show in shows:
-        cached = prev_detail.get(show.get("url"))
+        url = show.get("url")
+        if not url:
+            continue
+        cached = prev_detail.get(url)
         if cached is not None:
-            show["description"], show["cast"], img, members = cached  # reuse even if empty
-            if img and not show.get("image"):
-                show["image"] = img
-            if members:
-                show["cast_members"] = members
-            show["detail_done"] = True
-        elif show.get("url"):
-            to_fetch.append(show)
-    to_fetch = to_fetch[:max(0, budget)]
-    if to_fetch:
+            apply(show, *cached)  # reuse even if empty — it was fetched OK once
+        else:
+            if url not in pending:
+                urls_to_fetch.append(url)
+            pending.setdefault(url, []).append(show)
+
+    urls_to_fetch = urls_to_fetch[:max(0, budget)]
+    if urls_to_fetch:
         with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as ex:
-            results = list(ex.map(lambda s: safe(s["url"]), to_fetch))
-        for s, (desc, cast, img, members) in zip(to_fetch, results):
-            if desc:
-                s["description"] = desc
-            if cast:
-                s["cast"] = cast
-            if img and not s.get("image"):
-                s["image"] = img
-            if members:
-                s["cast_members"] = members
-            s["detail_done"] = True   # attempted; don't re-fetch next run
-    return len(to_fetch)
+            results = list(ex.map(safe, urls_to_fetch))
+        for url, result in zip(urls_to_fetch, results):
+            if result is None:
+                continue           # transient failure: no detail_done, retried next run
+            prev_detail[url] = result  # in-run cache for later sources/occurrences
+            for show in pending[url]:
+                apply(show, *result)
+    return len(urls_to_fetch)
 
 
-def aggregate(today: date | None = None, now: datetime | None = None) -> dict:
+def aggregate(now: datetime | None = None) -> dict:
     """Build the payload, scraping each source only when it's due per its cadence.
 
-    Sources not due, or that fail, carry over their last-good shows from the
-    previous payload — so we honor the 24h/6h cadence and a transient failure
-    (e.g. a Cloudflare blip on UCB) never wipes a source from the feed.
+    Sources not due, or that fail (or suspiciously scrape zero items), carry
+    over their last-good shows from the previous payload — so we honor the
+    cadence and a transient failure (e.g. a Cloudflare blip on UCB) never
+    wipes a source from the feed. Upcoming-ness is judged against each
+    source's own city-local today.
     """
-    today = today or date.today()
     now = now or datetime.now(timezone.utc)
 
     previous = storage.load_payload() or {}
@@ -122,48 +124,21 @@ def aggregate(today: date | None = None, now: datetime | None = None) -> dict:
                                   s.get("cast_members") or [])
                    for s in previous.get("shows", [])
                    if s.get("url") and (s.get("detail_done") or s.get("description") or s.get("cast"))}
-    detail_budget = _DETAIL_BUDGET
 
-    all_shows: list[dict] = []
-    summary: list[dict] = []
+    # Detail enrichment rides the shared loop as a post-scrape hook; the budget
+    # is shared across sources within one run.
+    budget = [_DETAIL_BUDGET]
 
-    for src in SOURCES:
-        sid, org, city = src["id"], src["org"], src["city"]
-        interval = _SCRAPE_INTERVALS.get(sid, _DEFAULT_SCRAPE_INTERVAL)
-        last = _parse_dt(prev_scraped.get(sid))
-        due = last is None or (now - last).total_seconds() >= (interval - _SCRAPE_GRACE)
-        carried = [s for s in prev_by_source.get(sid, []) if _is_upcoming(s, today)]
+    def enrich(src, shows):
+        if src.get("detail"):
+            budget[0] -= _enrich_details(shows, src["detail"], prev_detail, budget[0])
 
-        if not due:
-            all_shows.extend(carried)
-            summary.append({"id": sid, "org": org, "city": city, "count": len(carried),
-                            "ok": True, "stale": False,
-                            "scraped_at": prev_scraped.get(sid), "error": None})
-            log.info("source %s: not due (cadence), carried %d", sid, len(carried))
-            continue
-
-        try:
-            shows = src["fetch"]() or []
-            for s in shows:  # defensive: ensure every show is tagged
-                s.setdefault("source", sid)
-                s.setdefault("org", org)
-                s.setdefault("city", city)
-            upcoming = [s for s in shows if _is_upcoming(s, today)]
-            if src.get("detail"):
-                fetched = _enrich_details(upcoming, src["detail"], prev_detail, detail_budget)
-                detail_budget -= fetched
-            all_shows.extend(upcoming)
-            summary.append({"id": sid, "org": org, "city": city, "count": len(upcoming),
-                            "ok": True, "stale": False,
-                            "scraped_at": now.isoformat(), "error": None})
-            log.info("source %s: scraped %d upcoming", sid, len(upcoming))
-        except Exception as e:  # noqa: BLE001 - one bad source must not break the feed
-            all_shows.extend(carried)
-            summary.append({"id": sid, "org": org, "city": city, "count": len(carried),
-                            "ok": bool(carried), "stale": bool(carried),
-                            "scraped_at": prev_scraped.get(sid), "error": str(e)})
-            log.warning("source %s failed: %r (carried %d stale shows)", sid, e, len(carried))
-
+    all_shows, summary = run_sources(
+        SOURCES, previous_items=prev_by_source, prev_scraped=prev_scraped,
+        now=now, intervals=_SCRAPE_INTERVALS,
+        default_interval=_DEFAULT_SCRAPE_INTERVAL, grace=_SCRAPE_GRACE,
+        keep=_is_upcoming, on_scraped=enrich, log=log,
+    )
     all_shows.sort(key=lambda s: (s.get("start") or s.get("end") or "9999-12-31"))
     return build_payload(all_shows, summary)
 
@@ -171,21 +146,10 @@ def aggregate(today: date | None = None, now: datetime | None = None) -> dict:
 def build_payload(shows: list[dict], sources: list[dict] | None = None) -> dict:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source_url": SOURCE_URL,
         "count": len(shows),
         "sources": sources or [],
         "shows": shows,
     }
-
-
-def filter_payload(payload: dict, source_ids: set[str]) -> dict:
-    """Subset a payload to specific source ids (old cache entries with no source
-    are treated as ucb_ny). Used to keep the web/local pages UCB-NY only."""
-    shows = [
-        s for s in payload.get("shows", [])
-        if s.get("source") in source_ids or (not s.get("source") and "ucb_ny" in source_ids)
-    ]
-    return {**payload, "count": len(shows), "shows": shows}
 
 
 def scrape() -> dict:

@@ -1,28 +1,66 @@
+import ImageIO
 import SwiftUI
 
-/// A poster that fills its frame, with a material shimmer while loading and a
+/// Downsampling poster loader. The feed's LazyVStack never recycles rows, so
+/// decoding every poster at source resolution (what AsyncImage does) let
+/// full-size bitmaps accumulate as the user scrolled. This decodes each poster
+/// at its display scale with ImageIO and caches the decoded thumbnail; bytes
+/// still come through URLSession.shared → the app's generous URLCache.
+enum PosterPipeline {
+    private static let decoded = NSCache<NSString, UIImage>()
+
+    static func image(for url: URL, maxPixel: Int) async -> UIImage? {
+        let key = "\(url.absoluteString)#\(maxPixel)" as NSString
+        if let hit = decoded.object(forKey: key) { return hit }
+        guard let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true
+        else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
+        let image = UIImage(cgImage: cg)
+        decoded.setObject(image, forKey: key, cost: cg.bytesPerRow * cg.height)
+        return image
+    }
+}
+
+/// A poster that fills its frame, with a quiet placeholder while loading and a
 /// first-class `GeneratedCover` fallback when the image is missing or fails —
-/// never a broken-image gap. The caller sizes and clips it.
+/// never a broken-image gap. The caller sizes and clips it. `maxPixel` bounds
+/// the decode: the row default comfortably covers 92×58pt thumbs @3x; the
+/// detail hero passes a larger budget.
 struct PosterImage: View {
     let show: Show
+    var maxPixel: Int = 640
+
+    @State private var image: UIImage?
+    @State private var failed = false
+
     var body: some View {
-        if let url = show.imageURL {
-            AsyncImage(url: url, transaction: Transaction(animation: .easeInOut(duration: 0.25))) { phase in
-                switch phase {
-                case .empty:
-                    // Plain placeholder — a spinner per thumbnail is visual noise
-                    // during fast scrolls.
-                    Rectangle().fill(.quaternary)
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .failure:
-                    GeneratedCover(show: show)
-                @unknown default:
-                    GeneratedCover(show: show)
-                }
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else if failed || show.imageURL == nil {
+                GeneratedCover(show: show)
+            } else {
+                // Plain placeholder — a spinner per thumbnail is visual noise
+                // during fast scrolls.
+                Rectangle().fill(.quaternary)
             }
-        } else {
-            GeneratedCover(show: show)
+        }
+        .task(id: show.imageURL) {
+            guard image == nil, let url = show.imageURL else { return }
+            if let loaded = await PosterPipeline.image(for: url, maxPixel: maxPixel) {
+                withAnimation(.easeInOut(duration: 0.25)) { image = loaded }
+            } else {
+                failed = true
+            }
         }
     }
 }

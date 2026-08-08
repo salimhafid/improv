@@ -8,13 +8,16 @@ Every show at The Playground is free (per the theater's own banner).
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from dateutil import rrule as du_rrule
 
-from common import clean, fetch_html, make_show
+from common import clean, fetch_html, local_today, make_show
+
+log = logging.getLogger("ucb.playground")
 
 ICS_URL = ("https://calendar.google.com/calendar/ical/"
            "c_eb31034f2f607e78639715490267dbb491e72cbd150c14e0269bf9adb111b126"
@@ -74,9 +77,12 @@ def _events(ics: str) -> list[dict]:
             elif name == "RRULE":
                 current["rrule"] = value
             elif name == "EXDATE":
-                dt = _parse_dt(value)
-                if dt:
-                    current["exdates"].add(dt)
+                # RFC 5545 allows several comma-separated values on one EXDATE
+                # line (Google emits this when multiple instances are deleted).
+                for part in value.split(","):
+                    dt = _parse_dt(part)
+                    if dt:
+                        current["exdates"].add(dt)
             elif name == "RECURRENCE-ID":
                 current["recurrence_id"] = _parse_dt(value)
             elif name in ("SUMMARY", "DESCRIPTION", "STATUS", "UID"):
@@ -85,7 +91,7 @@ def _events(ics: str) -> list[dict]:
 
 
 def fetch(today: date | None = None) -> list[dict]:
-    today = today or date.today()
+    today = today or local_today("Chicago")
     window_start = datetime.combine(today, datetime.min.time(), tzinfo=_CHICAGO)
     window_end = window_start + timedelta(days=_HORIZON_DAYS)
 
@@ -136,10 +142,20 @@ def fetch(today: date | None = None) -> list[dict]:
         description = clean(re.sub(r"<[^>]+>", " ", ev.get("description", "")))
 
         if ev.get("rrule"):
+            # All-day recurring events carry a date-only UNTIL (required by RFC
+            # 5545 when DTSTART is VALUE=DATE), which dateutil rejects against
+            # our aware dtstart — normalize any naive UNTIL to a UTC datetime.
+            rule_text = re.sub(
+                r"UNTIL=(\d{8})(T\d{6})?(?!\d|Z)",
+                lambda m: f"UNTIL={m.group(1)}{m.group(2) or 'T235959'}Z",
+                ev["rrule"],
+            )
             try:
-                rule = du_rrule.rrulestr(ev["rrule"], dtstart=start)
+                rule = du_rrule.rrulestr(rule_text, dtstart=start)
                 occurrences = rule.between(window_start, window_end, inc=True)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as e:
+                log.warning("playground: unparseable RRULE %r for %r: %r",
+                            ev["rrule"], title, e)
                 occurrences = []
             for occ in occurrences:
                 if occ in ev["exdates"] or (ev.get("uid"), occ) in overridden:

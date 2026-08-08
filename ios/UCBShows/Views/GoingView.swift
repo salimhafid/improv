@@ -4,7 +4,9 @@ import SwiftUI
 /// grouped by date. Shows are added from the heart button on a show's page.
 struct GoingView: View {
     @Environment(GoingStore.self) private var going
-    @State private var path: [Show] = []
+    /// NavigationPath (not [Show]) — detail pages push heterogeneous values
+    /// (TalentRoute from cast chips); a typed path silently disables them.
+    @State private var path = NavigationPath()
     @Namespace private var zoom
 
     var body: some View {

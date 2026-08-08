@@ -16,7 +16,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 
-from common import clean, fetch_html, make_class, make_show, safe_url
+from common import clean, fetch_html, local_today, make_class, make_show, safe_url
 
 CAL = "https://magnettheater.com/calendar/month/?date=%04d-%02d-01"
 CLASS_INDEX = "https://magnettheater.com/class/all-classes-in-session/"
@@ -94,34 +94,34 @@ def _parse_month(html: str, year: int, month: int) -> list[dict]:
     return shows
 
 
-def detail(url: str) -> tuple[str, str, str | None, list[dict]]:
+def detail(url: str) -> tuple[str, str, str | None, list[dict]] | None:
     """Fetch a Magnet show page → (description, cast, hero image, structured
-    cast). Cast isn't structured on Magnet, so only description + og:image are
-    returned. The calendar grid has no images at all, so the og:image here is
-    each show's only artwork."""
+    cast), or None when the fetch fails (so it's retried next run — the
+    calendar grid has no images at all, so the og:image here is each show's
+    only artwork and must not be cached away by one bad fetch). Cast isn't
+    structured on Magnet, so only description + og:image are returned. No
+    whole-page fallback for the description: nav/footer soup cached as a
+    'description' is worse than none."""
     try:
         soup = BeautifulSoup(fetch_html(url), "lxml")
     except RuntimeError:
-        return "", "", None, []
-    el = soup.select_one("#content") or soup.select_one(".summary") or soup
-    text = re.sub(r"^\s*About the Show\s*", "", clean(el.get_text(" ")))
+        return None
+    el = soup.select_one("#content") or soup.select_one(".summary")
+    text = re.sub(r"^\s*About the Show\s*", "", clean(el.get_text(" "))) if el else ""
     og = soup.select_one('meta[property="og:image"]')
     image = safe_url(og.get("content")) if og else None
     return text[:2000], "", image, []
 
 
 def fetch(today: date | None = None) -> list[dict]:
-    today = today or date.today()
+    today = today or local_today("New York")
     shows: list[dict] = []
-    errors = 0
     for year, month in _months(today, MONTHS_AHEAD):
-        try:
-            html = fetch_html(CAL % (year, month))
-            shows.extend(_parse_month(html, year, month))
-        except RuntimeError:
-            errors += 1
-    if not shows and errors:
-        raise RuntimeError("magnet: all month fetches failed")
+        # Any failed month raises: a silently truncated horizon would publish
+        # as fresh and wipe that month's carried shows. The aggregator keeps
+        # last-good data instead, and fetch_html's own retries absorb blips.
+        html = fetch_html(CAL % (year, month))
+        shows.extend(_parse_month(html, year, month))
     return shows
 
 
@@ -194,7 +194,7 @@ def fetch_classes(today: date | None = None) -> list[dict]:
     (instructor + type + schedule + dates + status); sections dedupe by their
     WordPress id. No price is published anywhere, so price stays blank.
     Sections whose run has already ended are dropped."""
-    today = today or date.today()
+    today = today or local_today("New York")
     index_soup = BeautifulSoup(fetch_html(CLASS_INDEX), "lxml")
     out: list[dict] = []
     seen_ids: set[str] = set()

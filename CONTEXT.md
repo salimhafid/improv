@@ -35,14 +35,32 @@ App fetch URLs (ETag + max-age≈300 revalidation, ~5-min freshness):
   …/classes.json  …/talent.json
 ```
 
-Key pipeline behaviors (scraper.py / talent.py):
+Key pipeline behaviors (aggregation.py shared loop + scraper.py / talent.py):
 - **Per-source cadence**: `_SCRAPE_INTERVALS` — ucb_ny every 3h, everything
   else 24h. Sources not due carry last-good data from the previous payload;
   failures carry stale data (flagged) instead of wiping a source. Class
-  sources all refresh daily (`classes.py`).
+  sources all refresh daily (`classes.py`). Both aggregators run on
+  `aggregation.run_sources()` — one loop, not two copies.
+- **Empty-scrape guard**: a due fetch that returns 0 items while carry-over
+  exists is treated like a failure (stale carry, scraped_at unchanged) — a
+  200-OK page parsing to nothing is indistinguishable from a markup change.
+  Adapters that KNOW empty is impossible raise instead (ucb page 1,
+  annoyance calendar, playground ICS, brooklyn_cc link/collection mismatch,
+  any failed magnet month).
+- **Venue-local today**: upcoming filtering uses `common.local_today(city)`
+  everywhere (aggregators AND adapters) — the runner's UTC date is already
+  "tomorrow" from 5pm PT, which used to wipe same-night shows from the
+  evening builds.
 - **Crowdwork shows expand per-performance**: the shared adapter emits one
   item per future date in each show's `dates[]` (90-day cap, slug suffixed
   `/<YYYYMMDDHHMM>`), not just `next_date` — a weekly show is ~13 items.
+- **Enrichment failure ≠ emptiness**: detail()/bio() return None on fetch
+  failure and only successful fetches set `detail_done`/`bio_done`, so a
+  Cloudflare burst is retried next run instead of cached as empty forever.
+  Detail fetches dedupe by URL (Magnet's per-occurrence items share pages).
+- **Tests**: `./run_tests.sh` = offline Python suite (tests/, synthetic
+  fixtures, no network) + Swift logic harness (tests/ios/, compiled straight
+  against app sources — no Xcode test target). Run it before committing.
 - **Detail enrichment budget** (UCB + Magnet): 400 detail-page fetches/run,
   cached per URL via `detail_done` in the payload — converges, never
   re-fetches. Carries (description, cast, image, cast_members).
@@ -63,10 +81,10 @@ Key pipeline behaviors (scraper.py / talent.py):
 | brooklyn_cc | Brooklyn Comedy Collective | Squarespace (pre-existing adapter). |
 | magnet | Magnet Theater | Month-calendar tables (3 months) + detail pages; **calendar has zero images — og:image from detail is the only artwork**. Classes: the all-classes-in-session index PLUS ~14 per-discipline `/class/<slug>/` pages (nav-discovered, same `div.class-holder` markup, deduped by WP id) — upcoming/enrolling sections only appear on the discipline pages. |
 | wgis_ny / wgis_la | WGIS | Crowdwork slug `wgis` split by timezone offset. **wgis_ny = 0 shows is correct**: all Crowdwork items are Pacific — WGIS NY runs classes only (HTML `/nycclasses`, `/laclasses`; `/onlineclasses` deliberately unscoped). |
-| annoyance | The Annoyance | **ThunderTix calendar-feed endpoint**: `GET theannoyance.thundertix.com/reports/calendar?start=<epoch>&end=<epoch>` → JSON, one call serves 6+ months (**180-day horizon**, ~450 perfs / ~80 productions). Per-production meta (desc/img/free) from event-page JSON-LD, `_WORKERS=3` — **ThunderTix 429s aggressively** (~400 reqs in 15 min triggers it; partial meta self-heals on the next daily run). Fallback: the calendar page's JSON-LD (only ~1 week; its `month=` params are ignored server-side). Classes via Crowdwork slug `annoyancetrial`. |
+| annoyance | The Annoyance | **ThunderTix calendar-feed endpoint**: `GET theannoyance.thundertix.com/reports/calendar?start=<epoch>&end=<epoch>` → JSON, one call serves 6+ months (**180-day horizon**, ~450 perfs / ~80 productions). Per-production meta (desc/img/free) from event-page JSON-LD, `_WORKERS=3` — **ThunderTix 429s aggressively** (~400 reqs in 15 min triggers it; partial meta self-heals on the next daily run). A calendar failure/empty RAISES (aggregator carries last-good) — the old ~1-week JSON-LD fallback was removed 2026-08-08: replacing 180 carried days with 1 fresh week was strictly worse. Classes via Crowdwork slug `annoyancetrial`. |
 | io_chicago | iO Theater | Crowdwork slug `iotheater` for shows AND classes. |
 | second_city | The Second City | Crawl `/shows/chicago` index (~90 pages); each show page's `__NEXT_DATA__` has a **base64 `patronticketData`** blob with the full run (ISO UTC → convert to America/Chicago). Filter `custom.Event_City__c == "Chicago"` (Toronto leaks in). The show-finder page's `?dates=` filter is **client-side only** — never use it for enumeration. **180-day horizon** (blobs carry full on-sale runs incl. holiday shows — no extra requests). Stage from slug heuristic (mainstage/e.t.c./skybox). **Classes**: `/_next/data/<buildId>/find-a-class/chicago.json` (buildId from the find-a-class page's `__NEXT_DATA__`) → 86 class nodes, each with an Activenet section-rows JSON string (dates, weekly pattern, open seats) + hero (desc/image/price) — one item per open future section, 2 requests total. |
-| logan_square | Logan Square Improv | **Crowdwork public API**: `crowdwork.com/api/v2/lsi/shows?start=…&end=…` (their /events/ page is FullCalendar on this feed). Ranges cap ~1 month → query 28-day windows over 62 days. `tags` are visibility flags, NOT genres. Response `data[]`: name, url (crowdwork event page), img.large, description.body (HTML), dates[] with -05:00 offsets. Classes via the shared Crowdwork adapter (slug `lsi`). |
+| logan_square | Logan Square Improv | Shared Crowdwork adapter, slug `lsi`, shows AND classes (their /events/ page is a Crowdwork widget on the same API). The old hand-rolled 28-day-window pagination was removed 2026-08-08 after verifying the bare endpoint returns a strict superset. `tags` are visibility flags, NOT genres. |
 | playground | The Playground Theater | Site is **Canva**; show-calendar embeds a public **Google Calendar** — adapter reads the ICS (`calendar id c_eb31…@group.calendar.google.com`, hardcoded in sources/playground.py). Full RRULE expansion (dateutil) + EXDATE / RECURRENCE-ID overrides / CANCELLED. All shows free. No images (app's GeneratedCover handles). If they regenerate the calendar id, the source fails loudly and carries. |
 
 **Talent** (talent.py + sources/ucb_talent.py): NY + LA + Teachers pages are
@@ -176,7 +194,9 @@ Gotchas learned the hard way:
   Pro Max (6.9" shots) and iPad Pro 13-inch (M5).
 - Scraping stack: python3 via `.venv/bin/python`, curl_cffi
   `impersonate="chrome"` everywhere (several sites block plain clients).
-- Commit trailer: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
+- **No AI co-author trailers on commits** (user decision 2026-07-22; the
+  full history was rewritten to strip them — Salim is the sole human
+  contributor).
 
 ## Money
 

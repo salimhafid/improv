@@ -1,6 +1,7 @@
 import Foundation
 
-/// Top-level payload returned by the `/classes.json` endpoint.
+/// Top-level payload returned by the `/classes.json` endpoint. Arrays decode
+/// element-lossily (see `Lossy`).
 struct ClassesPayload: Decodable {
     let generatedAt: String?
     let count: Int?
@@ -12,6 +13,14 @@ struct ClassesPayload: Decodable {
         case count
         case sources
         case classes
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try c.decodeIfPresent(String.self, forKey: .generatedAt)
+        count = try c.decodeIfPresent(Int.self, forKey: .count)
+        sources = (try c.decodeIfPresent(Lossy<SourceInfo>.self, forKey: .sources))?.elements
+        classes = (try c.decodeIfPresent(Lossy<ClassItem>.self, forKey: .classes))?.elements ?? []
     }
 }
 
@@ -33,6 +42,12 @@ struct ClassItem: Decodable, Identifiable, Hashable {
     let source: String
     let org: String
     let city: String
+
+    // Derived once at decode time (see Show for why): re-parsing dates and
+    // re-folding search text per access made section sorts O(n·parse).
+    let startDate: Date?
+    /// Pre-folded lowercase haystack for search matching.
+    let searchHay: String
 
     enum CodingKeys: String, CodingKey {
         case rawID = "id"
@@ -67,6 +82,12 @@ struct ClassItem: Decodable, Identifiable, Hashable {
         source = (try c.decodeIfPresent(String.self, forKey: .source)) ?? ""
         org = (try c.decodeIfPresent(String.self, forKey: .org)) ?? ""
         city = (try c.decodeIfPresent(String.self, forKey: .city)) ?? ""
+
+        let tz = City(rawValue: city)?.timeZone ?? .newYork
+        startDate = start.flatMap { DateUtils.parse($0, in: tz) }
+        searchHay = ([title, instructor, level, org, classDescription]
+            .joined(separator: " "))
+            .folding(options: .diacriticInsensitive, locale: .current).lowercased()
     }
 
     private static func nonEmpty(_ s: String?) -> String? {
@@ -95,15 +116,6 @@ extension ClassItem {
         guard let imageString, let u = URL(string: imageString),
               u.scheme == "http" || u.scheme == "https" else { return nil }
         return u
-    }
-
-    /// Start as a `Date`, interpreting the timezone-naive feed value in the
-    /// class's own city timezone (matches the shows feed convention). Nil if
-    /// undated/unparseable.
-    var startDate: Date? {
-        guard let start else { return nil }
-        let tz = City(rawValue: city)?.timeZone ?? .newYork
-        return DateUtils.parse(start, in: tz)
     }
 
     /// Short theater label for badges, e.g. "WGIS · LA".

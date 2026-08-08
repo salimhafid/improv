@@ -1,19 +1,27 @@
 import Foundation
 
-/// Top-level payload returned by the `/shows.json` endpoint.
+/// Top-level payload returned by the `/shows.json` endpoint. Arrays decode
+/// element-lossily: one malformed show or source row drops that row, never
+/// the whole feed.
 struct ShowsPayload: Decodable {
     let generatedAt: String?
-    let sourceURL: String?
     let count: Int?
     let sources: [SourceInfo]?
     let shows: [Show]
 
     enum CodingKeys: String, CodingKey {
         case generatedAt = "generated_at"
-        case sourceURL = "source_url"
         case count
         case sources
         case shows
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try c.decodeIfPresent(String.self, forKey: .generatedAt)
+        count = try c.decodeIfPresent(Int.self, forKey: .count)
+        sources = (try c.decodeIfPresent(Lossy<SourceInfo>.self, forKey: .sources))?.elements
+        shows = (try c.decodeIfPresent(Lossy<Show>.self, forKey: .shows))?.elements ?? []
     }
 }
 
@@ -67,6 +75,16 @@ struct Show: Codable, Identifiable, Hashable {
     let org: String
     let city: String
 
+    // Derived once at decode time and stored: parsing dates / folding search
+    // text on every access made each feed sort/filter re-run DateFormatter
+    // work per show — a measured main-actor stall at feed scale.
+    let startDate: Date?
+    let endDate: Date?
+    /// `yyyy-MM-dd` bucket key in venue-local time for grouping; "tba" when undated.
+    let dayKey: String
+    /// Pre-folded lowercase haystack for search matching.
+    let searchHay: String
+
     enum CodingKeys: String, CodingKey {
         case postID = "post_id"
         case title
@@ -115,6 +133,13 @@ struct Show: Codable, Identifiable, Hashable {
         source = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "ucb_ny"
         org = (try c.decodeIfPresent(String.self, forKey: .org)) ?? "UCB"
         city = (try c.decodeIfPresent(String.self, forKey: .city)) ?? "New York"
+
+        let tz = City(rawValue: city)?.timeZone ?? .newYork
+        startDate = start.flatMap { DateUtils.parse($0, in: tz) }
+        endDate = end.flatMap { DateUtils.parse($0, in: tz) }
+        dayKey = startDate.map { DateUtils.dayKey($0, in: tz) } ?? "tba"
+        searchHay = (title + " " + excerpt + " " + comedyTypes.joined(separator: " "))
+            .folding(options: .diacriticInsensitive, locale: .current).lowercased()
     }
 
     private static func nonEmpty(_ s: String?) -> String? {
@@ -179,29 +204,9 @@ extension Show {
         City(rawValue: city)?.timeZone ?? .newYork
     }
 
-    /// Event start as a `Date`, interpreting the timezone-naive feed value in the
-    /// venue's own timezone so day-grouping and "Today" labels are correct in
-    /// every city regardless of the device's timezone. Returns nil if unparseable.
-    var startDate: Date? {
-        guard let start else { return nil }
-        return DateUtils.parse(start, in: cityTimeZone)
-    }
-
-    /// Multi-day festival end date (date-only), if any.
-    var endDate: Date? {
-        guard let end else { return nil }
-        return DateUtils.parse(end, in: cityTimeZone)
-    }
-
     var isMultiDay: Bool {
         guard let endDate, let startDate else { return false }
         return !DateUtils.calendar(in: cityTimeZone).isDate(endDate, inSameDayAs: startDate)
-    }
-
-    /// `yyyy-MM-dd` bucket key in venue-local time for grouping; "tba" when undated.
-    var dayKey: String {
-        guard let startDate else { return "tba" }
-        return DateUtils.dayKey(startDate, in: cityTimeZone)
     }
 
     /// Short time shown on cards, e.g. "7:00 PM". Multi-day → "Multiple days";

@@ -75,10 +75,12 @@ def _parse_cards(html: str, source: str, org: str, city: str) -> list[dict]:
     return shows
 
 
-# WP Grid Builder serves 88 cards per page; ?_page=N is server-rendered (the
-# grid runs with history=1), so the "Load more" tail is plain GETs away. A
-# short page marks the end. LA regularly runs to 3 pages (~185 shows).
-_PAGE_SIZE = 88
+# The WP Grid Builder listing paginates via server-rendered ?_page=N (the grid
+# runs with history=1), so the "Load more" tail is plain GETs away. LA
+# regularly runs to 3 pages (~185 shows). Out-of-range pages re-serve page 1,
+# so the walk ends when a page contributes nothing new — deliberately NOT on a
+# page-size heuristic, which would silently truncate if UCB shrank the grid's
+# page length. Costs one extra request per region per run.
 _MAX_PAGES = 8
 
 
@@ -89,6 +91,10 @@ def fetch(region: str) -> list[dict]:
     for page in range(1, _MAX_PAGES + 1):
         page_url = url if page == 1 else f"{url}?_page={page}"
         cards = _parse_cards(fetch_html(page_url), source, org, city)
+        if page == 1 and not cards:
+            # The UCB grid is never legitimately empty — zero cards means the
+            # markup moved. Raise so the aggregator carries last-good data.
+            raise RuntimeError(f"ucb {region}: page 1 parsed no show cards")
         added = 0
         for s in cards:
             key = (s["url"], s["start"], s["title"])
@@ -96,9 +102,7 @@ def fetch(region: str) -> list[dict]:
                 seen.add(key)
                 shows.append(s)
                 added += 1
-        # Out-of-range pages re-serve page 1, so a page of pure repeats also ends
-        # the walk (added == 0 guards against looping on them).
-        if len(cards) < _PAGE_SIZE or added == 0:
+        if not cards or added == 0:
             break
     return shows
 
@@ -161,15 +165,16 @@ def _linked_cast(soup: BeautifulSoup) -> list[dict]:
     return members[:24]
 
 
-def detail(url: str) -> tuple[str, str, str | None, list[dict]]:
+def detail(url: str) -> tuple[str, str, str | None, list[dict]] | None:
     """Fetch a UCB show page → (full description, cast text, hero image,
-    structured cast members). The structured list (names + profile slugs) is
-    preferred; the text heuristic remains for pages with no people links
-    (e.g. unannounced ASSSSCAT guests). Best-effort."""
+    structured cast members), or None when the fetch fails so the enrichment
+    cache retries next run instead of remembering emptiness. The structured
+    list (names + profile slugs) is preferred; the text heuristic remains for
+    pages with no people links (e.g. unannounced ASSSSCAT guests)."""
     try:
         soup = BeautifulSoup(fetch_html(url), "lxml")
     except RuntimeError:
-        return "", "", None, []
+        return None
     el = soup.select_one(".ucb-event-description")
     description = clean(el.get_text(" ")) if el else ""
     members = _linked_cast(soup)

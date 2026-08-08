@@ -58,11 +58,19 @@ struct TalentBioView: View {
         .sheet(item: $webLink) { link in
             SafariView(url: link.url).ignoresSafeArea()
         }
+        .task(id: "\(person.slug)|\(shows.lastUpdated?.timeIntervalSince1970 ?? 0)") {
+            matchingShows = computeMatchingShows()
+        }
     }
 
     /// Feed shows whose cast includes this person — exact slug match when the
     /// show has structured cast, name match otherwise — soonest first.
-    private var matchingShows: [Show] {
+    /// Computed once per (person, feed) into state: scanning every show's cast
+    /// (with its regex-based fallback parsing) on each body evaluation was a
+    /// scroll hitch on bios with long feeds.
+    @State private var matchingShows: [Show] = []
+
+    private func computeMatchingShows() -> [Show] {
         let key = TalentPerson.nameKey(person.name)
         return shows.allShows
             .filter { show in
@@ -149,6 +157,7 @@ struct TalentDirectoryView: View {
     @Environment(TalentStore.self) private var talent
     @State private var query = ""
     @State private var group: String?
+    @State private var appliedInitialSearch = false
 
     private let filters: [(label: String, tag: String?)] = [
         ("All", nil), ("New York", "ny"), ("Los Angeles", "la"),
@@ -175,7 +184,13 @@ struct TalentDirectoryView: View {
         .searchable(text: $query, prompt: "Search performers & teachers")
         .safeAreaInset(edge: .top) { filterBar }
         .onAppear {
-            if query.isEmpty { query = initialSearch }
+            // Apply the pre-seeded search exactly once — re-applying whenever
+            // the field is empty would refill a search the user just cleared
+            // when they pop back from a bio.
+            if !appliedInitialSearch {
+                appliedInitialSearch = true
+                query = initialSearch
+            }
         }
     }
 

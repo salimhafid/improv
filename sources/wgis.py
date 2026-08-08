@@ -7,11 +7,12 @@ event's timezone offset. Classes are scraped from the static /nycclasses and
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
 
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 
-from common import clean, fetch_html, make_class
+from common import clean, fetch_html, local_today, make_class
 
 from . import crowdwork
 
@@ -32,12 +33,23 @@ def fetch_shows_la() -> list[dict]:
 
 # ---- Classes (static HTML) -------------------------------------------------
 
-def _parse_when_start(when: str):
-    head = when.split("(")[0].strip()  # "Thu Jul 9 7pm"
+def _parse_when_start(when: str, today: date | None = None):
+    """Start datetime from 'Thu Jul 9 7pm (2 hrs)'. The strings carry no year,
+    so around New Year a January workshop must not land 11 months in the past:
+    anything more than ~45 days behind today rolls into next year (the site
+    lists 'currently running' classes a few weeks back, never further)."""
+    today = today or local_today("New York")
+    head = when.split("(")[0].strip()
     try:
-        return dateparser.parse(head, fuzzy=True).isoformat()
+        dt = dateparser.parse(head, fuzzy=True, default=datetime(today.year, 1, 1))
     except (ValueError, OverflowError, TypeError):
         return None
+    if (today - dt.date()).days > 45:
+        try:
+            dt = dt.replace(year=dt.year + 1)
+        except ValueError:  # Feb 29 in a non-leap year
+            return None
+    return dt.isoformat()
 
 
 def _parse_classes(html: str, source: str, city: str) -> list[dict]:

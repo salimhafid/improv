@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from datetime import date, datetime, timedelta
 
-from common import clean, fetch_json, make_class, make_show, safe_url, strip_html
+from common import clean, fetch_json, local_today, make_class, make_show, safe_url, strip_html
 
 API = "https://www.crowdwork.com/api/v2/%s/%s?cache=1"
 
@@ -92,7 +92,7 @@ def _common(it: dict):
 
 
 def fetch_shows(slug: str, source: str, org: str, city: str, *, city_from_tz: bool = False) -> list[dict]:
-    today = date.today()
+    today = local_today(city)
     horizon = today + timedelta(days=_SHOW_HORIZON_DAYS)
     shows: list[dict] = []
     for it in _fetch(slug, "shows"):
@@ -137,7 +137,7 @@ def fetch_shows(slug: str, source: str, org: str, city: str, *, city_from_tz: bo
 
 
 def fetch_classes(slug: str, source: str, org: str, city: str) -> list[dict]:
-    today = date.today().isoformat()
+    today = local_today(city).isoformat()
     classes: list[dict] = []
     for it in _fetch(slug, "classes"):
         c = _common(it)
