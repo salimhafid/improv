@@ -48,5 +48,12 @@ jobs:
             echo "feeds unchanged — nothing to publish"
           else
             git commit -m "Update feeds"
-            git push
+            # A human push during the multi-minute scrape window would reject
+            # a bare push and silently discard this cycle's feeds — rebase our
+            # commit on top (the freshly written docs/*.json win any conflict)
+            # and retry once.
+            git push || {
+              git pull --rebase -X theirs origin main
+              git push
+            }
           fi
