@@ -11,6 +11,8 @@ struct ShowDetailView: View {
     @Environment(\.openURL) private var openURL
     @Environment(GoingStore.self) private var going
     @Environment(TalentStore.self) private var talent
+    @Environment(UCBAccountStore.self) private var account
+    @State private var showSignIn = false
     @State private var webLink: WebLink?
     @State private var calendarMessage: String?
     @State private var showCalendarAlert = false
@@ -128,6 +130,9 @@ struct ShowDetailView: View {
         .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(item: $webLink) { link in
             SafariView(url: link.url).ignoresSafeArea()
+        }
+        .sheet(isPresented: $showSignIn) {
+            UCBSignInView(account: account)
         }
         .sheet(isPresented: $showShareSheet) {
             ShowShareSheet(show: show, image: shareImage)
@@ -296,18 +301,22 @@ struct ShowDetailView: View {
     }
 
     private var bottomBar: some View {
-        HStack(spacing: 12) {
-            goingButton
-            if let url = show.url {
-                Button {
-                    webLink = WebLink(url: url)
-                } label: {
-                    Label(show.isFree ? "Reserve · Free" : "Get Tickets", systemImage: "ticket.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
+        VStack(spacing: 10) {
+            // Student-ticket CTA (renders only when it applies to this show).
+            StudentReserveButton(show: show, onSignIn: { showSignIn = true })
+            HStack(spacing: 12) {
+                goingButton
+                if let url = show.url {
+                    Button {
+                        webLink = WebLink(url: url)
+                    } label: {
+                        Label(show.isFree ? "Reserve · Free" : "Get Tickets", systemImage: "ticket.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
             }
         }
         .padding(.horizontal, Theme.Space.gutter)

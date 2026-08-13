@@ -27,9 +27,12 @@ final class AppState {
     /// Transient UI state (not persisted).
     var sidebarOpen = false
     var showCityPicker = false
-    /// Selected tab (0 Shows, 1 I'm Going, 2 Classes) — lets the sidebar show
-    /// counts for whichever list is on screen.
+    /// Selected tab (0 Shows, 1 I'm Going, 2 Classes, 3 Tickets) — lets the
+    /// sidebar show counts for whichever list is on screen.
     var activeTab = 0
+    /// Deep-link target: a ticket id to open in the wallet (set by a notification
+    /// tap), consumed by the Tickets tab.
+    var openTicketID: String?
 
     private static let cityKey = "selectedCity"
     private static let theaterKey = "selectedTheater"
