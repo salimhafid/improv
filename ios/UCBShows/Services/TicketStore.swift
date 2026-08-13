@@ -72,13 +72,8 @@ final class TicketStore {
             return .init(success: false, message: "Sign in to UCB to reserve.")
         }
         await proximity.requestAuthorization()
-        let avail = await account.session.claimAvailability(showURL: url)
-        guard avail.available, let event = avail.event, let nonce = avail.nonce else {
-            return .init(success: false,
-                         message: avail.alreadyClaimed ? "You’ve already reserved this show."
-                                                        : "No student tickets available for this show.")
-        }
-        let result = await account.session.claim(event: event, nonce: nonce)
+        // One atomic session op: load the show, read the live claim control, claim.
+        let result = await account.session.reserve(showURL: url)
         if result.success { await sync() }
         return result
     }

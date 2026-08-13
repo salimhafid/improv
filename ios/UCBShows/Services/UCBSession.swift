@@ -3,32 +3,34 @@ import WebKit
 
 /// The app's UCB "session engine." UCB has no API and sits behind Cloudflare
 /// Turnstile + JA3 binding, so credentials can't be POSTed natively and cookies
-/// can't be lifted into URLSession. Instead one persistent `WKWebView` (backed
+/// can't be lifted into URLSession. Instead ONE persistent `WKWebView` (backed
 /// by a named, on-device data store) is BOTH the login surface and the API
 /// client: the user signs in inside it once, and every authenticated call runs
-/// *inside* the web view via injected `fetch()` / DOM reads — so requests carry
-/// the real cookies and TLS fingerprint. Nothing hits a server we run.
+/// *inside the same web view* via injected `fetch()` / DOM reads — so requests
+/// carry the real cookies + TLS fingerprint, and the login the user just did is
+/// immediately visible to every later call. Nothing hits a server we run.
+///
+/// One web view means operations must not overlap, so they're serialized behind
+/// a small async lock.
 @MainActor
 final class UCBSession {
     static let accountURL = URL(string: "https://ucbcomedy.com/my-account/")!
     static let studentTicketsURL = URL(string: "https://ucbcomedy.com/my-account/student-tickets/")!
 
-    /// Stable identifier so the cookie jar (cf_clearance + WordPress login)
-    /// persists across launches.
     private static let storeID = UUID(uuidString: "B9F4C1A2-7E33-49D0-8C21-000000000001")!
-
     let dataStore: WKWebsiteDataStore = .init(forIdentifier: storeID)
 
-    /// Offscreen web view reused for authenticated reads/writes.
-    private lazy var web: WKWebView = {
+    /// Shared web view — hosted (visibly) by the sign-in sheet, then reused
+    /// off-screen for reads/writes. The sign-in and the API calls therefore
+    /// share one cookie jar with zero cross-instance sync lag.
+    let web: WKWebView
+
+    init() {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = dataStore
         cfg.defaultWebpagePreferences.allowsContentJavaScript = true
-        let w = WKWebView(frame: CGRect(x: 0, y: 0, width: 480, height: 900), configuration: cfg)
-        return w
-    }()
-
-    private var navDelegate: NavGate?
+        web = WKWebView(frame: CGRect(x: 0, y: 0, width: 480, height: 900), configuration: cfg)
+    }
 
     // MARK: Snapshots
 
@@ -37,7 +39,7 @@ final class UCBSession {
         var eligible: Bool
         var freeRemaining: Int
         var studentIDSVG: String
-        var tickets: [Ticket]        // reserved, upcoming
+        var tickets: [Ticket]
     }
 
     struct ClaimAvailability {
@@ -50,46 +52,55 @@ final class UCBSession {
     struct ActionResult {
         var success: Bool
         var message: String
+        var alreadyClaimed: Bool = false
     }
 
-    // MARK: Navigation + JS plumbing
+    // MARK: Serial lock (one web view, no overlapping navigations)
+
+    private var busy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    private func lock() async {
+        if busy { await withCheckedContinuation { waiters.append($0) } } else { busy = true }
+    }
+    private func unlock() {
+        if waiters.isEmpty { busy = false } else { waiters.removeFirst().resume() }
+    }
+
+    // MARK: Navigation + JS
+
+    private var gate: NavGate?
 
     private func load(_ url: URL) async throws {
-        let gate = NavGate()
-        navDelegate = gate
-        web.navigationDelegate = gate
+        let g = NavGate()
+        gate = g
+        web.navigationDelegate = g
         web.load(URLRequest(url: url))
-        try await gate.wait()
+        try await g.wait()
+        try? await Task.sleep(for: .milliseconds(300))  // let client-rendered QR SVG paint
     }
 
     @discardableResult
-    private func eval(_ js: String) async throws -> Any? {
-        try await web.evaluateJavaScript(js)
+    private func eval(_ js: String) async -> Any? {
+        try? await web.evaluateJavaScript(js)
     }
 
-    private func loadAndRead(_ url: URL, _ js: String) async throws -> Any? {
-        try await load(url)
-        // Give client-rendered bits (QR SVG) a beat to paint.
-        try? await Task.sleep(for: .milliseconds(250))
-        return try await eval(js)
-    }
+    private var onUCBOrigin: Bool { web.url?.host?.contains("ucbcomedy.com") ?? false }
 
-    // MARK: Public API
+    // MARK: Public API (each self-contained + locked)
 
-    /// Read the student-tickets page. Returns nil when not signed in (the page
-    /// falls back to the WooCommerce login form).
     func refresh() async -> AccountSnapshot? {
-        guard let raw = try? await loadAndRead(Self.studentTicketsURL, Self.readAccountJS),
-              let dict = raw as? [String: Any],
-              (dict["signedIn"] as? Bool) == true
-        else { return nil }
+        await lock(); defer { unlock() }
+        guard (try? await load(Self.studentTicketsURL)) != nil else { return nil }
+        guard let dict = await eval(Self.readAccountJS) as? [String: Any],
+              (dict["signedIn"] as? Bool) == true else { return nil }
         return Self.parseSnapshot(dict)
     }
 
-    /// Check a show page for a student claim control.
     func claimAvailability(showURL: URL) async -> ClaimAvailability {
-        guard let raw = try? await loadAndRead(showURL, Self.readClaimJS),
-              let d = raw as? [String: Any] else {
+        await lock(); defer { unlock() }
+        guard (try? await load(showURL)) != nil,
+              let d = await eval(Self.readClaimJS) as? [String: Any] else {
             return ClaimAvailability(available: false, alreadyClaimed: false, event: nil, nonce: nil)
         }
         return ClaimAvailability(
@@ -98,20 +109,34 @@ final class UCBSession {
             event: d["event"] as? String, nonce: d["nonce"] as? String)
     }
 
-    /// Fire the reserve (must already be on a page of the ucbcomedy.com origin,
-    /// which `claimAvailability` leaves us on).
-    func claim(event: String, nonce: String) async -> ActionResult {
-        await post(action: "ucb_student_claim", params: ["event": event, "nonce": nonce])
+    /// Load the show page, read the live claim control, and (if present) claim —
+    /// atomically, so nothing navigates away between the read and the POST.
+    func reserve(showURL: URL) async -> ActionResult {
+        await lock(); defer { unlock() }
+        guard (try? await load(showURL)) != nil,
+              let d = await eval(Self.readClaimJS) as? [String: Any] else {
+            return ActionResult(success: false, message: "Couldn’t reach UCB. Try again.")
+        }
+        if (d["alreadyClaimed"] as? Bool) == true {
+            return ActionResult(success: false, message: "Already reserved.", alreadyClaimed: true)
+        }
+        guard (d["available"] as? Bool) == true,
+              let event = d["event"] as? String, let nonce = d["nonce"] as? String else {
+            return ActionResult(success: false, message: "No student tickets available for this show.")
+        }
+        return await post(action: "ucb_student_claim", params: ["event": event, "nonce": nonce])
     }
 
     func release(order: String, nonce: String) async -> ActionResult {
-        await post(action: "ucb_student_release", params: ["order": order, "nonce": nonce])
+        await lock(); defer { unlock() }
+        if !onUCBOrigin { _ = try? await load(Self.studentTicketsURL) }
+        return await post(action: "ucb_student_release", params: ["order": order, "nonce": nonce])
     }
 
-    /// Sign out: drop the entire cookie jar for this store.
     func signOut() async {
-        let types = WKWebsiteDataStore.allWebsiteDataTypes()
-        await dataStore.removeData(ofTypes: types, modifiedSince: .distantPast)
+        await lock(); defer { unlock() }
+        await dataStore.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+                                   modifiedSince: .distantPast)
     }
 
     // MARK: admin-ajax POST (executed inside the web view)
@@ -134,15 +159,16 @@ final class UCBSession {
           } catch(e) { return JSON.stringify({ok:false, msg:'Network error'}); }
         })()
         """
-        guard let raw = try? await eval(js) as? String,
+        guard let raw = await eval(js) as? String,
               let data = raw.data(using: .utf8),
-              let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return ActionResult(success: false, message: "Something went wrong. Please try again.") }
+              let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return ActionResult(success: false, message: "Something went wrong. Please try again.")
+        }
         return ActionResult(success: (d["ok"] as? Bool) ?? false, message: (d["msg"] as? String) ?? "")
     }
 
     private func jsString(_ s: String) -> String {
-        (try? String(data: JSONSerialization.data(withJSONObject: [s], options: []), encoding: .utf8))
+        (try? String(data: JSONSerialization.data(withJSONObject: [s]), encoding: .utf8))
             .map { String($0.dropFirst().dropLast()) } ?? "''"
     }
 
@@ -151,11 +177,8 @@ final class UCBSession {
     private static func parseSnapshot(_ d: [String: Any]) -> AccountSnapshot {
         var tickets: [Ticket] = []
         for t in (d["tickets"] as? [[String: Any]]) ?? [] {
-            let order = t["order"] as? String
             tickets.append(Ticket(
-                kind: .reserved,
-                showID: nil,
-                orderID: order,
+                kind: .reserved, showID: nil, orderID: t["order"] as? String,
                 eventID: t["event"] as? String,
                 title: (t["title"] as? String) ?? "UCB show",
                 venueLabel: (t["venue"] as? String) ?? "",
@@ -174,39 +197,29 @@ final class UCBSession {
 
     // MARK: Injected JS
 
-    /// Reads the student-tickets page into a plain object. Defensive selectors:
-    /// the release button (data-order/data-nonce) is the anchor for each
-    /// reserved card, since the release controller keys off exactly those.
     private static let readAccountJS = """
     (() => {
       const q = (s, r=document) => r.querySelector(s);
-      const loginForm = q('.woocommerce-form-login');
-      if (loginForm) return {signedIn:false};
+      if (q('.woocommerce-form-login')) return {signedIn:false};
       const card = q('.ucb-student-id');
       const idSvg = card ? (q('.ucb-ticket__qr', card)?.outerHTML || q('svg', card)?.outerHTML || '') : '';
       const name = card?.getAttribute('data-name') || '';
-      // eligibility + remaining count
       const bodyText = (q('.woocommerce-MyAccount-content')?.innerText || document.body.innerText || '');
       const eligible = /enrolled/i.test(bodyText);
       const m = bodyText.match(/(\\d+)\\s+of\\s+(\\d+)\\s+free/i);
       const freeRemaining = m ? parseInt(m[1], 10) : (eligible ? 2 : 0);
-      // reserved tickets: one per release button
       const tickets = [];
       document.querySelectorAll('[data-order][data-nonce]').forEach(rel => {
-        const cardEl = rel.closest('li, .ucb-ticket, article, .ticket, div');
-        const scope = cardEl || document;
+        const scope = rel.closest('li, .ucb-ticket, article, .ticket, div') || document;
         const svg = (scope.querySelector('.ucb-ticket__qr')?.outerHTML) || (scope.querySelector('svg')?.outerHTML) || '';
         const title = (scope.querySelector('h1,h2,h3,h4,.ucb-ticket__title')?.innerText || '').trim();
         const meta = (scope.innerText || '');
         const stMatch = meta.match(/ST-(\\d+)/);
         const source = /\\bLA\\b|Franklin|Los Angeles/i.test(meta) ? 'ucb_la' : 'ucb_ny';
         tickets.push({
-          order: rel.getAttribute('data-order'),
-          nonce: rel.getAttribute('data-nonce'),
-          event: stMatch ? stMatch[1] : null,
-          title: title || 'UCB show',
-          venue: (meta.match(/NY[^\\n]*Mainstage|LA[^\\n]*|[0-9]+th St[^\\n]*/i)||[''])[0].trim(),
-          svg
+          order: rel.getAttribute('data-order'), nonce: rel.getAttribute('data-nonce'),
+          event: stMatch ? stMatch[1] : null, title: title || 'UCB show',
+          venue: (meta.match(/NY[^\\n]*Mainstage|LA[^\\n]*|[0-9]+th St[^\\n]*/i)||[''])[0].trim(), svg
         });
       });
       return {signedIn:true, name, eligible, freeRemaining, studentSVG:idSvg, tickets};

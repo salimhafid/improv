@@ -1,10 +1,11 @@
 import SwiftUI
 import WebKit
 
-/// Sign-in sheet: UCB's real `/my-account/` login inside a WebView that shares
-/// the session's persistent data store, so Cloudflare Turnstile passes normally
-/// and the resulting cookies stay for native reuse. We watch for the logged-in
-/// dashboard and hand back — we never see or handle the password.
+/// Sign-in sheet: UCB's real `/my-account/` login hosted in the SESSION's own
+/// web view — so Cloudflare Turnstile passes normally and the resulting cookies
+/// are already in the exact web view every later API call uses (no cross-instance
+/// sync lag, so the login persists app-wide immediately). We watch for the
+/// logged-in dashboard and hand back — we never see or handle the password.
 struct UCBSignInView: View {
     let account: UCBAccountStore
     @Environment(\.dismiss) private var dismiss
@@ -12,7 +13,7 @@ struct UCBSignInView: View {
 
     var body: some View {
         NavigationStack {
-            UCBLoginWebView(dataStore: account.session.dataStore) {
+            UCBLoginWebView(web: account.session.web) {
                 guard !signingIn else { return }
                 signingIn = true
                 Task {
@@ -41,15 +42,12 @@ struct UCBSignInView: View {
 }
 
 private struct UCBLoginWebView: UIViewRepresentable {
-    let dataStore: WKWebsiteDataStore
+    let web: WKWebView
     let onSignedIn: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onSignedIn: onSignedIn) }
 
     func makeUIView(context: Context) -> WKWebView {
-        let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = dataStore
-        let web = WKWebView(frame: .zero, configuration: cfg)
         web.navigationDelegate = context.coordinator
         web.load(URLRequest(url: UCBSession.accountURL))
         return web
@@ -63,7 +61,7 @@ private struct UCBLoginWebView: UIViewRepresentable {
         init(onSignedIn: @escaping () -> Void) { self.onSignedIn = onSignedIn }
 
         func webView(_ web: WKWebView, didFinish navigation: WKNavigation!) {
-            // Signed in once the account pages stop showing the login form.
+            // Signed in once an account page stops showing the login form.
             let js = "(!document.querySelector('.woocommerce-form-login') && /\\/my-account/.test(location.pathname))"
             web.evaluateJavaScript(js) { [weak self] result, _ in
                 guard let self, !self.fired, (result as? Bool) == true else { return }
