@@ -257,38 +257,64 @@ final class UCBSession {
       const card = q('.ucb-student-id');
       const accountMarker = card || q('.woocommerce-MyAccount-navigation') || q('.woocommerce-MyAccount-content');
       if (!accountMarker) return {state:'unknown'};
-      const idSvg = card ? (q('.ucb-ticket__qr', card)?.outerHTML || q('svg', card)?.outerHTML || '') : '';
+      const idSvg = card ? (q('svg.qr-svg', card)?.outerHTML || q('svg', card)?.outerHTML || '') : '';
       const name = card?.getAttribute('data-name') || '';
       const bodyText = (q('.woocommerce-MyAccount-content')?.innerText || document.body.innerText || '');
       const eligible = /enrolled/i.test(bodyText);
       const m = bodyText.match(/(\\d+)\\s+of\\s+(\\d+)\\s+free/i);
       const freeRemaining = m ? parseInt(m[1], 10) : (eligible ? 2 : 0);
+      // Reserved cards, verified against the live DOM (2026-08-13):
+      //   .ucb-student-claim-item[data-order]           the card
+      //     .ucb-ticket__header-title                   "THE PROPHECY"
+      //     .ucb-ticket__header-meta                    "FRI AUGUST 14, 2026 · 7:00 PM · NY - 14TH ST. MAINSTAGE"
+      //     svg.qr-svg.qrcode                           inline QR (path-drawn), present without expanding VIEW TICKET
+      //     button.ucb-student-release[data-order][data-nonce]
+      const MONTHS = {JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12};
+      const parseStart = line => {
+        const dm = line.match(/\\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\\.?\\s+(\\d{1,2}),?\\s*(\\d{4})/i);
+        const tm = line.match(/(\\d{1,2}):(\\d{2})\\s*(AM|PM)/i);
+        if (!dm || !tm) return null;
+        let h = parseInt(tm[1], 10) % 12;
+        if (/pm/i.test(tm[3])) h += 12;
+        const p2 = n => String(n).padStart(2, '0');
+        return `${dm[3]}-${p2(MONTHS[dm[1].slice(0,3).toUpperCase()])}-${p2(dm[2])}T${p2(h)}:${tm[2]}`;
+      };
       const tickets = [];
       const seen = new Set();
-      // Anchor on data-order alone (the release control), not data-order AND
-      // data-nonce on one element — the nonce may live on a sibling. Scope to
-      // the nearest card-like ancestor, not the first div.
-      document.querySelectorAll('[data-order]').forEach(rel => {
-        const order = rel.getAttribute('data-order');
+      const pushTicket = (order, nonce, svg, title, metaLine) => {
         if (!order || seen.has(order)) return;
         seen.add(order);
-        const scope = rel.closest('.ucb-ticket, .ticket, li, article, tr, section')
-          || rel.parentElement?.parentElement || document;
-        const meta = (scope.innerText || '');
-        if (/cancell?ed/i.test(meta)) return;   // released shows keep an order row under "Cancelled"
-        const nonce = rel.getAttribute('data-nonce')
-          || scope.querySelector('[data-nonce]')?.getAttribute('data-nonce') || null;
-        const svg = (scope.querySelector('.qr-svg, .ucb-ticket__qr')?.outerHTML)
-          || (scope.querySelector('svg')?.outerHTML) || '';
-        const title = (scope.querySelector('h1,h2,h3,h4,h5,.ucb-ticket__title,[class*="title"]')?.innerText || '').trim();
-        const stMatch = meta.match(/ST-(\\d+)/);
-        const source = /\\bLA\\b|Franklin|Los Angeles/i.test(meta) ? 'ucb_la' : 'ucb_ny';
+        const parts = metaLine.split('·').map(s => s.trim());
         tickets.push({
-          order, nonce,
-          event: stMatch ? stMatch[1] : null, title: title || 'UCB show',
-          venue: (meta.match(/NY[^\\n]*Mainstage|LA[^\\n]*|[0-9]+th St[^\\n]*/i)||[''])[0].trim(), svg, source
+          order, nonce, event: null,
+          title: title || 'UCB show',
+          venue: parts[2] || '',
+          start: parseStart(metaLine),
+          source: /\\bLA\\b|FRANKLIN|LOS ANGELES/i.test(metaLine) ? 'ucb_la' : 'ucb_ny',
+          svg
         });
+      };
+      document.querySelectorAll('.ucb-student-claim-item[data-order]').forEach(item => {
+        pushTicket(
+          item.getAttribute('data-order'),
+          item.querySelector('[data-nonce]')?.getAttribute('data-nonce') || null,
+          item.querySelector('svg.qr-svg')?.outerHTML || '',
+          (item.querySelector('.ucb-ticket__header-title')?.innerText || '').trim(),
+          (item.querySelector('.ucb-ticket__header-meta')?.innerText || '').trim());
       });
+      // Fallback if UCB renames the card class: anchor on the release control.
+      if (!tickets.length) {
+        document.querySelectorAll('.ucb-student-release[data-order], [data-order][data-nonce]').forEach(rel => {
+          const scope = rel.closest('[data-order]')?.parentElement?.closest('div, li, article') || rel.parentElement || document;
+          if (/cancell?ed|released/i.test(scope.innerText || '')) return;
+          pushTicket(
+            rel.getAttribute('data-order'),
+            rel.getAttribute('data-nonce'),
+            scope.querySelector('svg.qr-svg')?.outerHTML || '',
+            (scope.querySelector('[class*="title"], h1, h2, h3, h4')?.innerText || '').trim(),
+            (scope.querySelector('[class*="meta"], [class*="when"]')?.innerText || scope.innerText || '').trim());
+        });
+      }
       return {state:'signedIn', name, eligible, freeRemaining, studentSVG:idSvg, tickets};
     })()
     """
