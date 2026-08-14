@@ -27,8 +27,11 @@ struct AddToWalletButton: View {
                     }
                 }
                 // Apple's badge artwork is ~3.1:1 — an off-ratio frame stretches
-                // it. Keep the canonical proportions and let it breathe.
+                // it. Keep the canonical proportions, and clip to a larger
+                // continuous corner (the artwork's own rounding is tighter, so
+                // the clip defines the softer pill shape).
                 .frame(width: 180, height: 58)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
                 .opacity(building ? 0.5 : 1)
                 .animation(.easeInOut(duration: 0.15), value: building)
