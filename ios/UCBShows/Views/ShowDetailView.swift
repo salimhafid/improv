@@ -57,7 +57,10 @@ struct ShowDetailView: View {
                         chips
 
                         if !show.detailText.isEmpty {
+                            // Descriptions carry the site's paragraph breaks;
+                            // a little leading keeps multi-paragraph copy airy.
                             Text(show.detailText)
+                                .lineSpacing(3)
                                 .font(.body)
                                 .foregroundStyle(.primary)
                                 .padding(.top, 2)

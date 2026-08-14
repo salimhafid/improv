@@ -40,8 +40,6 @@ struct RootView: View {
         .task { await store.loadInitial() }
         .task { await classesStore.loadInitial() }
         .task { await talent.loadInitial() }
-        .task { updateVenues() }
-        .onChange(of: store.lastUpdated) { _, _ in updateVenues() }
         .modifier(UITestTabSelection(selection: $app.activeTab))
         .modifier(UITestSidebar())
         .fullScreenCover(isPresented: Binding(
@@ -73,21 +71,4 @@ struct RootView: View {
         }
     }
 
-    /// Which UCB venues have a show today (in the venue's own timezone) — gates
-    /// the standby geofence so it only arms when at-the-door entry is possible.
-    private func updateVenues() {
-        var out: Set<String> = []
-        for venue in Venue.all {
-            let tz = (venue.id == "ucb_la" ? City.losAngeles : City.newYork).timeZone
-            let cal = DateUtils.calendar(in: tz)
-            let now = Date()
-            let hasShow = store.allShows.contains { show in
-                show.source == venue.id
-                    && (show.startDate.map { cal.isDate($0, inSameDayAs: now) } ?? false)
-            }
-            if hasShow { out.insert(venue.id) }
-        }
-        tickets.venuesWithShowsToday = out
-        if account.isSignedIn { Task { await tickets.rearmGeofences() } }
-    }
 }

@@ -77,21 +77,24 @@ enum WalletPass {
         var errorDescription: String? {
             switch self {
             case .noSigningIdentity: return "Wallet passes aren’t set up in this build."
-            case .qrUndecodable: return "Couldn’t read the Student ID QR payload."
+            case .qrUndecodable: return "Couldn’t read the ticket’s QR payload."
             case .signingFailed: return "Couldn’t sign the Wallet pass."
             }
         }
     }
 
-    /// Build the signed .pkpass for the Student ID ticket.
+    /// Build the signed .pkpass for any ticket the app holds: the standby
+    /// Student ID (generic pass, near-venue relevance for both theaters) or a
+    /// reserved show ticket (event ticket, relevant at ITS venue and showtime).
     @MainActor
-    static func studentIDPass(ticket: Ticket) async throws -> PKPass {
+    static func pass(for ticket: Ticket) async throws -> PKPass {
         guard let identity = signingIdentity() else { throw BuildError.noSigningIdentity }
-        guard ticket.kind == .studentID,
-              let image = await QRRender.cachedImage(svg: ticket.qrSVG),
+        guard let image = await QRRender.cachedImage(svg: ticket.qrSVG),
               let payload = decodeQRPayload(image) else { throw BuildError.qrUndecodable }
 
-        let passJSON = passJSON(identity: identity, ticket: ticket, payload: payload)
+        let passJSON = ticket.kind == .studentID
+            ? studentIDJSON(identity: identity, ticket: ticket, payload: payload)
+            : reservedJSON(identity: identity, ticket: ticket, payload: payload)
 
         var files: [String: Data] = ["pass.json": passJSON]
         for (name, side) in [("icon.png", 29.0), ("icon@2x.png", 58.0), ("icon@3x.png", 87.0)] {
@@ -100,8 +103,9 @@ enum WalletPass {
         for (name, side) in [("thumbnail.png", 90.0), ("thumbnail@2x.png", 180.0), ("thumbnail@3x.png", 270.0)] {
             files[name] = thumbnailPNG(side: side)
         }
+        let subtitle = ticket.kind == .studentID ? "STUDENT ID" : "STUDENT TICKET"
         for (name, scale) in [("logo.png", 1.0), ("logo@2x.png", 2.0), ("logo@3x.png", 3.0)] {
-            files[name] = logoPNG(scale: scale)
+            files[name] = logoPNG(scale: scale, subtitle: subtitle)
         }
 
         // manifest.json: SHA-1 of every file (the v1 pass format's digest).
@@ -131,24 +135,16 @@ enum WalletPass {
         return try PKPass(data: zipped)
     }
 
-    private static func passJSON(identity: SigningIdentity, ticket: Ticket, payload: String) -> Data {
-        let serial = SHA256.hash(data: Data(payload.utf8)).prefix(12)
-            .map { String(format: "%02x", $0) }.joined()
-        // Wallet surfaces the pass on the lock screen near these coordinates.
-        let locations: [[String: Any]] = Venue.all.map {
-            ["latitude": $0.latitude, "longitude": $0.longitude,
-             "relevantText": "You’re near \($0.name) — show your UCB Student ID at the door."]
-        }
-        // Minimal near-black card: the rendered logo (big UCB, small STUDENT ID
-        // beneath) top left, the skull tile top right, the QR below. No fields,
-        // no barcode caption — Wallet renders the QR at its own fixed size.
-        let pass: [String: Any] = [
+    /// Shared card chrome: near-black, white text, UCB-red labels.
+    private static func baseJSON(identity: SigningIdentity, serial: String,
+                                 description: String, payload: String) -> [String: Any] {
+        [
             "formatVersion": 1,
             "passTypeIdentifier": identity.passTypeIdentifier,
             "teamIdentifier": identity.teamIdentifier,
-            "serialNumber": "ucb-student-id-\(serial)",
+            "serialNumber": serial,
             "organizationName": "Improv",
-            "description": "UCB Student ID",
+            "description": description,
             "foregroundColor": "rgb(255,255,255)",
             "backgroundColor": "rgb(17,17,20)",
             "labelColor": "rgb(235,75,95)",
@@ -157,9 +153,59 @@ enum WalletPass {
                 "message": payload,
                 "messageEncoding": "iso-8859-1",
             ]],
-            "locations": locations,
-            "maxDistance": 300,
-            "generic": ["primaryFields": [[String: Any]]()],
+        ]
+    }
+
+    /// Minimal Student ID card: rendered logo top left, skull tile top right,
+    /// QR below. No fields, no barcode caption. Relevant near BOTH theaters.
+    private static func studentIDJSON(identity: SigningIdentity, ticket: Ticket, payload: String) -> Data {
+        let serial = SHA256.hash(data: Data(payload.utf8)).prefix(12)
+            .map { String(format: "%02x", $0) }.joined()
+        var pass = baseJSON(identity: identity, serial: "ucb-student-id-\(serial)",
+                            description: "UCB Student ID", payload: payload)
+        pass["locations"] = Venue.all.map {
+            ["latitude": $0.latitude, "longitude": $0.longitude,
+             "relevantText": "You’re near \($0.name) — show your UCB Student ID at the door."]
+        }
+        pass["maxDistance"] = 300
+        pass["generic"] = ["primaryFields": [[String: Any]]()]
+        return (try? JSONSerialization.data(withJSONObject: pass)) ?? Data()
+    }
+
+    /// A reserved show: event ticket with the show name and time, relevant at
+    /// ITS venue and around showtime, expiring half a day after the show.
+    private static func reservedJSON(identity: SigningIdentity, ticket: Ticket, payload: String) -> Data {
+        let qrHash = SHA256.hash(data: Data(payload.utf8)).prefix(6)
+            .map { String(format: "%02x", $0) }.joined()
+        var pass = baseJSON(identity: identity,
+                            serial: "ucb-ticket-\(ticket.orderID ?? qrHash)",
+                            description: "UCB ticket — \(ticket.title)", payload: payload)
+        if let venue = Venue.forSource(ticket.source) {
+            pass["locations"] = [
+                ["latitude": venue.latitude, "longitude": venue.longitude,
+                 "relevantText": "You’re near \(venue.name) — your ticket for \(ticket.title) is ready."],
+            ]
+            pass["maxDistance"] = 300
+        }
+        if let start = ticket.startDate {
+            let iso = DateFormatter()
+            iso.dateFormat = "yyyy-MM-dd'T'HH:mm:ssxxxxx"
+            iso.timeZone = ticket.cityTimeZone
+            pass["relevantDate"] = iso.string(from: start)
+            pass["expirationDate"] = iso.string(from: start.addingTimeInterval(12 * 3600))
+        }
+        var secondary: [[String: Any]] = []
+        if ticket.startDate != nil {
+            secondary.append(["key": "when", "label": "SHOWTIME", "value": ticket.whenLabel])
+        }
+        let venueName = Ticket.cleanVenue(ticket.venueLabel)
+        if !venueName.isEmpty {
+            secondary.append(["key": "venue", "label": "VENUE", "value": venueName.capitalized,
+                              "textAlignment": "PKTextAlignmentRight"])
+        }
+        pass["eventTicket"] = [
+            "primaryFields": [["key": "show", "label": "SHOW", "value": ticket.title.capitalized]],
+            "secondaryFields": secondary,
         ]
         return (try? JSONSerialization.data(withJSONObject: pass)) ?? Data()
     }
@@ -225,8 +271,8 @@ enum WalletPass {
     }
 
     /// Rendered wordmark for the pass header: prominent "UCB" with a small,
-    /// letter-spaced "STUDENT ID" beneath it.
-    private static func logoPNG(scale: CGFloat) -> Data {
+    /// letter-spaced subtitle beneath it.
+    private static func logoPNG(scale: CGFloat, subtitle: String) -> Data {
         let size = CGSize(width: 160 * scale, height: 50 * scale)
         let renderer = UIGraphicsImageRenderer(size: size)
         let image = renderer.image { _ in
@@ -234,7 +280,7 @@ enum WalletPass {
                 .font: UIFont.systemFont(ofSize: 30 * scale, weight: .heavy),
                 .foregroundColor: UIColor(red: 235 / 255, green: 75 / 255, blue: 95 / 255, alpha: 1),
             ]).draw(at: CGPoint(x: 0, y: 0))
-            NSAttributedString(string: "STUDENT ID", attributes: [
+            NSAttributedString(string: subtitle, attributes: [
                 .font: UIFont.systemFont(ofSize: 10 * scale, weight: .semibold),
                 .foregroundColor: UIColor.white.withAlphaComponent(0.9),
                 .kern: 2.4 * scale,

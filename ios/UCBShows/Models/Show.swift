@@ -242,7 +242,12 @@ extension Show {
         if let r = source.range(of: Self.castLabel,
                                 options: [.regularExpression, .caseInsensitive]) {
             let body = String(source[..<r.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let inline = String(source[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            // The cast is only the label's own paragraph — descriptions keep
+            // their paragraph breaks now, and copy after the lineup (ticket
+            // prices etc.) must not leak into the Cast section.
+            let inline = String(source[r.upperBound...])
+                .components(separatedBy: "\n").first?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return (body, field.isEmpty ? inline : field)
         }
         return (source, field)
