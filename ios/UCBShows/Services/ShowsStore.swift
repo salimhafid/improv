@@ -50,10 +50,10 @@ final class ShowsStore {
         didSet { Self.persistFilters(filters) }
     }
 
-    private let service: ShowsService
+    private let service: FeedService<ShowsPayload>
     private static let filtersKey = "filters"
 
-    init(service: ShowsService = ShowsService()) {
+    init(service: FeedService<ShowsPayload> = .shows) {
         self.service = service
         self.filters = Self.loadFilters() ?? Filters()
     }

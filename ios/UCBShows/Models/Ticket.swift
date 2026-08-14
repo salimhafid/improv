@@ -62,7 +62,9 @@ extension Ticket {
     var id: String {
         switch kind {
         case .studentID: return "studentID"
-        case .reserved:  return "reserved/\(orderID ?? eventID ?? title)"
+        // Prefer the order number; fall back through event id to title+start so
+        // two same-titled reserved shows can't collapse to one id.
+        case .reserved:  return "reserved/\(orderID ?? eventID ?? "\(title)#\(start ?? "")")"
         }
     }
 

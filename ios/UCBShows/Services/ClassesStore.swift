@@ -31,10 +31,10 @@ final class ClassesStore {
         didSet { Self.persistFilters(filters) }
     }
 
-    private let service: ClassesService
+    private let service: FeedService<ClassesPayload>
     private static let filtersKey = "classFilters"
 
-    init(service: ClassesService = ClassesService()) {
+    init(service: FeedService<ClassesPayload> = .classes) {
         self.service = service
         self.filters = Self.loadFilters() ?? ClassFilters()
     }

@@ -4,11 +4,13 @@ import SwiftUI
 /// so a scanner reads it in any light. Works offline — the QR is cached SVG.
 struct TicketDetailView: View {
     let ticket: Ticket
-    var onRelease: ((Ticket) async -> Void)?
+    var onRelease: ((Ticket) async -> Bool)?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var priorBrightness = UIScreen.main.brightness
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var priorBrightness: CGFloat?
     @State private var releasing = false
+    @State private var releaseError: String?
 
     var body: some View {
         ScrollView {
@@ -30,24 +32,58 @@ struct TicketDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                if ticket.kind == .reserved, ticket.isReleasable, onRelease != nil {
+                if ticket.kind == .reserved, ticket.isReleasable, let onRelease {
                     Button(role: .destructive) {
                         releasing = true
-                        Task { await onRelease?(ticket); releasing = false; dismiss() }
+                        releaseError = nil
+                        Task {
+                            let ok = await onRelease(ticket)
+                            releasing = false
+                            // Only leave on success — a failed release means the
+                            // ticket is still claimed, and silently popping would
+                            // read as "released".
+                            if ok { dismiss() }
+                            else { releaseError = "Couldn’t release the ticket. Check your connection and try again." }
+                        }
                     } label: {
                         if releasing { ProgressView() } else { Text("Release ticket") }
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
+                    .disabled(releasing)
                     .padding(.top, 4)
+
+                    if let releaseError {
+                        Text(releaseError)
+                            .font(.footnote).foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, Theme.Space.gutter)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Space.section)
         }
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { priorBrightness = UIScreen.main.brightness; UIScreen.main.brightness = 1.0 }
-        .onDisappear { UIScreen.main.brightness = priorBrightness }
+        .onAppear(perform: brighten)
+        .onDisappear(perform: restoreBrightness)
+        // Also restore when the app is backgrounded (onDisappear doesn't fire
+        // on scene changes), and re-brighten on return.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { brighten() } else { restoreBrightness() }
+        }
+    }
+
+    private func brighten() {
+        if priorBrightness == nil { priorBrightness = UIScreen.main.brightness }
+        UIScreen.main.brightness = 1.0
+    }
+
+    private func restoreBrightness() {
+        if let prior = priorBrightness {
+            UIScreen.main.brightness = prior
+            priorBrightness = nil
+        }
     }
 
     private var header: some View {

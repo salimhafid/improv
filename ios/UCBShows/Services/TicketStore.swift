@@ -20,17 +20,15 @@ final class TicketStore {
     var account: UCBAccountStore?
 
     private let proximity = TicketProximity()
-    private let fileURL: URL
+    private let fileURL = AppSupport.file("tickets.json")
 
     init() {
-        let fm = FileManager.default
-        let base = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                appropriateFor: nil, create: true))
-            ?? fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent("UCBShows", isDirectory: true)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        fileURL = dir.appendingPathComponent("tickets.json")
         load()
+        // Re-arm once location permission is actually granted (the first
+        // reserve requests it, but arm() runs before the grant lands).
+        proximity.onAuthorized = { [weak self] in
+            Task { await self?.rearmGeofences() }
+        }
     }
 
     var hasAnything: Bool { studentID != nil || !reserved.isEmpty }
@@ -42,27 +40,68 @@ final class TicketStore {
 
     // MARK: Sync from the account
 
-    /// Pull the latest tickets from UCB and re-arm everything. Called on launch,
-    /// after reserve/release, and on foreground.
+    /// Pull the latest tickets from UCB and re-arm everything.
     func sync() async {
         guard let account else { return }
-        guard let snap = await account.refresh() else {
-            reserved = []; studentID = nil; save()
-            proximity.disarm()
-            return
+        adopt(await account.refresh())
+    }
+
+    /// Apply a refresh outcome. `unknown` (transient / interstitial) is a no-op,
+    /// so a bad read never wipes the offline cache or drops geofences.
+    func adopt(_ outcome: UCBSession.RefreshOutcome) {
+        switch outcome {
+        case .signedIn(let snap): apply(snap)
+        case .signedOut: clearLocal()
+        case .unknown: break
         }
-        apply(snap)
     }
 
     private func apply(_ snap: UCBSession.AccountSnapshot) {
-        reserved = snap.tickets.filter { !$0.isPast() }
+        // UCB's account page doesn't expose showtimes, so `start` (which drives
+        // reminders, expiry, and the release gate) is learned from the shows
+        // feed at reserve time — carry it across syncs by order id.
+        let prior = Dictionary(reserved.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        reserved = snap.tickets.map { t in
+            guard t.start == nil, let old = prior[t.id], old.start != nil else { return t }
+            return Ticket(kind: .reserved, showID: old.showID, orderID: t.orderID,
+                          eventID: t.eventID ?? old.eventID, title: t.title,
+                          venueLabel: t.venueLabel, source: old.source,
+                          start: old.start, qrSVG: t.qrSVG, releaseNonce: t.releaseNonce)
+        }.filter { !$0.isPast() }
         studentID = snap.studentIDSVG.isEmpty
             ? nil
             : Ticket(kind: .studentID, title: "UCB Student ID", venueLabel: "",
                      source: "ucb_ny", qrSVG: snap.studentIDSVG, name: snap.name)
         save()
-        scheduleReminders()
+        reconcileReminders()
         Task { await rearmGeofences() }
+    }
+
+    /// Stamp the reserved ticket that matches this show with the show's start
+    /// and identity (the account page carries neither). Best-effort: a ticket
+    /// reserved on the UCB website instead of in-app simply keeps start == nil.
+    private func adoptShowContext(_ show: Show) {
+        guard let i = reserved.firstIndex(where: {
+            $0.start == nil && $0.title.localizedCaseInsensitiveCompare(show.title) == .orderedSame
+        }) else { return }
+        let t = reserved[i]
+        reserved[i] = Ticket(kind: .reserved, showID: show.id, orderID: t.orderID,
+                             eventID: t.eventID, title: t.title, venueLabel: t.venueLabel,
+                             source: show.source, start: show.start, qrSVG: t.qrSVG,
+                             releaseNonce: t.releaseNonce)
+        save()
+        reconcileReminders()
+        Task { await rearmGeofences() }
+    }
+
+    /// Drop all local ticket state + surfacing (sign-out / definitive signed-out).
+    func clearLocal() {
+        reserved = []
+        studentID = nil
+        save()
+        armGeneration += 1   // invalidate any in-flight arm() so it can't re-add
+        proximity.disarm()
+        cancelAllReminders()
     }
 
     // MARK: Reserve / release (run inside the session web view)
@@ -72,9 +111,11 @@ final class TicketStore {
             return .init(success: false, message: "Sign in to UCB to reserve.")
         }
         await proximity.requestAuthorization()
-        // One atomic session op: load the show, read the live claim control, claim.
         let result = await account.session.reserve(showURL: url)
-        if result.success { await sync() }
+        if result.success {
+            await sync()
+            adoptShowContext(show)
+        }
         return result
     }
 
@@ -88,15 +129,31 @@ final class TicketStore {
 
     // MARK: Geofence + reminders
 
+    /// Monotonic token ordering geofence arms against clearLocal(): arm()
+    /// suspends for seconds rendering QR attachments, and a sign-out landing in
+    /// that window must not let the resumed arm re-add the wiped account's QR.
+    private var armGeneration = 0
+
     func rearmGeofences() async {
+        armGeneration += 1
+        let gen = armGeneration
         await proximity.arm(reserved: reserved, studentID: studentID,
-                            venuesWithShows: venuesWithShowsToday)
+                            venuesWithShows: venuesWithShowsToday,
+                            isCurrent: { [weak self] in self?.armGeneration == gen })
     }
 
-    private func scheduleReminders() {
+    private nonisolated static let reminderPrefix = "ticket/"
+
+    /// Cancel reminders for tickets no longer held, (re)schedule the current set.
+    private func reconcileReminders() {
         let center = UNUserNotificationCenter.current()
-        let ids = reserved.map { "ticket/\($0.id)" }
-        center.removePendingNotificationRequests(withIdentifiers: ids)
+        let keep = Set(reserved.map { "\(Self.reminderPrefix)\($0.id)" })
+        Task {
+            let pending = await center.pendingNotificationRequests()
+            let stale = pending.map(\.identifier)
+                .filter { $0.hasPrefix(Self.reminderPrefix) && !keep.contains($0) }
+            if !stale.isEmpty { center.removePendingNotificationRequests(withIdentifiers: stale) }
+        }
         for ticket in reserved {
             guard let start = ticket.startDate else { continue }
             let fireAt = start.addingTimeInterval(-3600)
@@ -108,8 +165,17 @@ final class TicketStore {
             content.userInfo = ["ticketID": ticket.id]
             let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireAt)
             let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-            center.add(UNNotificationRequest(identifier: "ticket/\(ticket.id)",
+            center.add(UNNotificationRequest(identifier: "\(Self.reminderPrefix)\(ticket.id)",
                                              content: content, trigger: trigger))
+        }
+    }
+
+    private func cancelAllReminders() {
+        let center = UNUserNotificationCenter.current()
+        Task {
+            let pending = await center.pendingNotificationRequests()
+            let ids = pending.map(\.identifier).filter { $0.hasPrefix(Self.reminderPrefix) }
+            if !ids.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ids) }
         }
     }
 
@@ -120,9 +186,7 @@ final class TicketStore {
     private func load() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         guard let saved = try? JSONDecoder().decode(Saved.self, from: data) else {
-            let bak = fileURL.deletingPathExtension().appendingPathExtension("bak.json")
-            try? FileManager.default.removeItem(at: bak)
-            try? FileManager.default.moveItem(at: fileURL, to: bak)
+            AppSupport.moveAside(fileURL)
             return
         }
         reserved = saved.reserved.filter { !$0.isPast() }
@@ -130,8 +194,7 @@ final class TicketStore {
     }
 
     private func save() {
-        let payload = Saved(reserved: reserved, studentID: studentID)
-        if let data = try? JSONEncoder().encode(payload) {
+        if let data = try? JSONEncoder().encode(Saved(reserved: reserved, studentID: studentID)) {
             try? data.write(to: fileURL, options: .atomic)
         }
     }

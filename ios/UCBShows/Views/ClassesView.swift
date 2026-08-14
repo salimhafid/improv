@@ -56,6 +56,11 @@ struct ClassesView: View {
                 // Scope changed — drop a level not offered by the new theater.
                 store.reconcileLevel(city: city, theater: theater)
             }
+            .onChange(of: city) { _, _ in
+                // City change with All Theaters keeps theater == "all", so the
+                // onChange above never fires — reconcile here too.
+                store.reconcileLevel(city: city, theater: theater)
+            }
             .onChange(of: store.lastUpdated) { _, _ in
                 // Keyed on the timestamp, not the count, so a same-count refresh
                 // still reconciles.

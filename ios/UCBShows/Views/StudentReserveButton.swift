@@ -70,15 +70,16 @@ struct StudentReserveButton: View {
     private var taskKey: String { "\(show.id)|\(account.phase)" }
 
     private func evaluate() async {
-        guard isUCB, !excluded, show.url != nil else { phase = .hidden; return }
+        guard isUCB, !excluded, let url = show.url else { phase = .hidden; return }
         guard account.isSignedIn else { phase = .signInPrompt; return }
         if case .reserved = phase { return }
         phase = .checking
-        guard let url = show.url else { phase = .hidden; return }
         // The show page is the source of truth: a claim control appears only
         // when THIS account can claim THIS show — no need to pre-gate on the
-        // separately-parsed eligibility flag (which can false-negative).
+        // separately-parsed eligibility flag (which can false-negative). The
+        // session caches this per show, so re-opening doesn't re-navigate.
         let a = await account.session.claimAvailability(showURL: url)
+        if Task.isCancelled { return }
         phase = a.alreadyClaimed ? .reserved : (a.available ? .available : .hidden)
     }
 

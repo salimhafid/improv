@@ -23,13 +23,7 @@ final class GoingStore {
     private static let expiryGrace: TimeInterval = 6 * 3600
 
     init() {
-        let fm = FileManager.default
-        let base = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                appropriateFor: nil, create: true))
-            ?? fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent("UCBShows", isDirectory: true)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        fileURL = dir.appendingPathComponent("going.json")
+        fileURL = AppSupport.file("going.json")
         load()
     }
 
@@ -60,9 +54,7 @@ final class GoingStore {
             // next toggle()'s save() would then overwrite the user's whole list
             // with one show — park the unreadable file aside first so the data
             // survives for a future recovery/migration.
-            let backup = fileURL.deletingPathExtension().appendingPathExtension("bak.json")
-            try? FileManager.default.removeItem(at: backup)
-            try? FileManager.default.moveItem(at: fileURL, to: backup)
+            AppSupport.moveAside(fileURL)
             return
         }
         // Quietly drop shows that are long over.

@@ -49,6 +49,14 @@ def _parse_when_start(when: str, today: date | None = None):
             dt = dt.replace(year=dt.year + 1)
         except ValueError:  # Feb 29 in a non-leap year
             return None
+    elif (dt.date() - today).days > 200:
+        # Mirror case: a December class viewed in January parses ~11 months in
+        # the FUTURE (default year is the new year) — roll back to last year so
+        # an in-session class isn't published as next December's.
+        try:
+            dt = dt.replace(year=dt.year - 1)
+        except ValueError:
+            return None
     return dt.isoformat()
 
 

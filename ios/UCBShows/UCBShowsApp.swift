@@ -17,6 +17,10 @@ struct UCBShowsApp: App {
         // (AsyncImage uses URLSession.shared → URLCache.shared).
         URLCache.shared = URLCache(memoryCapacity: 32 * 1024 * 1024,
                                    diskCapacity: 256 * 1024 * 1024)
+        // Must be set BEFORE launch finishes or a notification tap that
+        // cold-starts the app is dropped (the router buffers the tap until
+        // onOpen is wired below).
+        UNUserNotificationCenter.current().delegate = notifications
     }
 
     var body: some Scene {
@@ -31,15 +35,15 @@ struct UCBShowsApp: App {
                 .environment(tickets)
                 .tint(Theme.accent)
                 .task {
-                    // Wire the ticket feature once, then restore any UCB session.
+                    // Wire the ticket feature once, then restore any UCB session
+                    // with a SINGLE account read shared into the ticket store.
                     tickets.account = account
                     notifications.onOpen = { id in
                         app.openTicketID = id
                         app.activeTab = 3
                     }
-                    UNUserNotificationCenter.current().delegate = notifications
-                    await account.restoreOnLaunch()
-                    if account.isSignedIn { await tickets.sync() }
+                    let outcome = await account.restoreOnLaunch()
+                    tickets.adopt(outcome)
                 }
         }
     }

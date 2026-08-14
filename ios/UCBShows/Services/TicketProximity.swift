@@ -13,6 +13,11 @@ final class TicketProximity: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private(set) var locationStatus: CLAuthorizationStatus
 
+    /// Invoked when location authorization first becomes usable, so the store
+    /// can arm geofences it couldn't at reserve time (auth is granted async,
+    /// after `arm()` has already run and no-op'd on the `ready` guard).
+    var onAuthorized: (() -> Void)?
+
     override init() {
         locationStatus = manager.authorizationStatus
         super.init()
@@ -36,7 +41,10 @@ final class TicketProximity: NSObject, CLLocationManagerDelegate {
     /// (Re)arm one region per venue. Content is chosen now (the trigger bakes
     /// it at schedule time): a reserved ticket at that venue wins; otherwise the
     /// standby student ID, but only where the venue actually has shows today.
-    func arm(reserved: [Ticket], studentID: Ticket?, venuesWithShows: Set<String>) async {
+    /// `isCurrent` is re-checked after every suspension so an arm superseded
+    /// mid-flight (sign-out, newer arm) never adds anything.
+    func arm(reserved: [Ticket], studentID: Ticket?, venuesWithShows: Set<String>,
+             isCurrent: () -> Bool = { true }) async {
         let center = UNUserNotificationCenter.current()
         let venueIDs = Venue.all.map { "geofence/\($0.id)" }
         center.removePendingNotificationRequests(withIdentifiers: venueIDs)
@@ -73,11 +81,16 @@ final class TicketProximity: NSObject, CLLocationManagerDelegate {
                    options: [UNNotificationAttachmentOptionsThumbnailHiddenKey: false]) {
                 content.attachments = [att]
             }
+            guard isCurrent() else { return }   // superseded while rendering
 
             let trigger = UNLocationNotificationTrigger(region: venue.region, repeats: false)
             let req = UNNotificationRequest(identifier: "geofence/\(venue.id)",
                                             content: content, trigger: trigger)
             try? await center.add(req)
+            guard isCurrent() else {            // superseded during add — undo
+                center.removePendingNotificationRequests(withIdentifiers: ["geofence/\(venue.id)"])
+                return
+            }
         }
     }
 
@@ -95,6 +108,11 @@ final class TicketProximity: NSObject, CLLocationManagerDelegate {
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
-        Task { @MainActor in self.locationStatus = status }
+        Task { @MainActor in
+            let becameUsable = !self.ready
+                && (status == .authorizedWhenInUse || status == .authorizedAlways)
+            self.locationStatus = status
+            if becameUsable { self.onAuthorized?() }
+        }
     }
 }

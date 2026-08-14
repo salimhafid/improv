@@ -18,9 +18,9 @@ final class TalentStore {
     /// Profile slug → person (exact matches for structured cast).
     private var bySlug: [String: TalentPerson] = [:]
 
-    private let service: TalentService
+    private let service: FeedService<TalentPayload>
 
-    init(service: TalentService = TalentService()) {
+    init(service: FeedService<TalentPayload> = .talent) {
         self.service = service
     }
 
