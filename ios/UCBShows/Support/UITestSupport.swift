@@ -6,7 +6,7 @@ import SwiftUI
 /// is completely unaffected.
 ///
 /// Supported variables:
-///   UITEST_TAB           — initial tab index (0 Shows, 1 I'm Going, 2 Classes)
+///   UITEST_TAB           — initial tab index (0 Shows, 1 Tickets, 2 Classes)
 ///   UITEST_PUSH_SOURCE   — push the first show from this source id that has a cast
 ///   UITEST_TALENT        — with UITEST_PUSH_SOURCE: "directory", "person", or a
 ///                          performer name to push on top of the show detail

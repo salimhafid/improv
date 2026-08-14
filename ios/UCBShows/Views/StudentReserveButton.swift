@@ -54,7 +54,7 @@ struct StudentReserveButton: View {
         case .reserved:
             Button {
                 app.openTicketID = nil
-                app.activeTab = 3
+                app.activeTab = 1
             } label: {
                 Label("Student ticket reserved — view", systemImage: "checkmark.circle.fill")
                     .font(.headline).frame(maxWidth: .infinity)

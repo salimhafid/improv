@@ -324,7 +324,8 @@ struct ShowDetailView: View {
         .background(.bar)
     }
 
-    /// The "I'm Going" heart — saves the show to the I'm Going tab and schedules
+    /// The "I'm Going" heart — saves the show to the Tickets tab's I'm-Going
+    /// section and schedules
     /// a pre-show reminder.
     private var goingButton: some View {
         let isGoing = going.isGoing(show)

@@ -89,8 +89,8 @@ struct TheaterListPanel: View {
         .padding(.bottom, 12)
     }
 
-    /// Count for a theater in whichever list the user is looking at (the I'm
-    /// Going tab keeps showing show counts — it's a shows list too).
+    /// Count for a theater in whichever list the user is looking at: class
+    /// counts on the Classes tab, show counts everywhere else.
     private func count(for id: String) -> Int? {
         if app.activeTab == 2 {
             return classesStore.sourcesInfo.first { $0.id == id }?.count
