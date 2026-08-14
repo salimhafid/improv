@@ -70,7 +70,8 @@ final class TicketStore {
             return Ticket(kind: .reserved, showID: old.showID, orderID: t.orderID,
                           eventID: t.eventID ?? old.eventID, title: t.title,
                           venueLabel: t.venueLabel, source: old.source,
-                          start: old.start, qrSVG: t.qrSVG, releaseNonce: t.releaseNonce)
+                          start: old.start, qrSVG: t.qrSVG, releaseNonce: t.releaseNonce,
+                          posterURL: old.posterURL)
         }.filter { !$0.isPast() }
         studentID = snap.studentIDSVG.isEmpty
             ? nil
@@ -91,7 +92,7 @@ final class TicketStore {
         reserved[i] = Ticket(kind: .reserved, showID: show.id, orderID: t.orderID,
                              eventID: t.eventID, title: t.title, venueLabel: t.venueLabel,
                              source: show.source, start: show.start, qrSVG: t.qrSVG,
-                             releaseNonce: t.releaseNonce)
+                             releaseNonce: t.releaseNonce, posterURL: show.imageString)
         save()
         reconcileReminders()
     }

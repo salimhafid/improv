@@ -29,17 +29,22 @@ struct Ticket: Codable, Identifiable, Hashable {
     let name: String?
     /// One-time nonce to release this reservation.
     let releaseNonce: String?
+    /// The show's poster URL (from the feed, stamped at reserve time) — drives
+    /// the Wallet pass's strip art. Website-reserved tickets may lack it.
+    let posterURL: String?
 
     enum CodingKeys: String, CodingKey {
-        case kind, showID, orderID, eventID, title, venueLabel, source, start, qrSVG, name, releaseNonce
+        case kind, showID, orderID, eventID, title, venueLabel, source, start, qrSVG, name, releaseNonce, posterURL
     }
 
     init(kind: Kind, showID: String? = nil, orderID: String? = nil, eventID: String? = nil,
          title: String, venueLabel: String = "", source: String, start: String? = nil,
-         qrSVG: String, name: String? = nil, releaseNonce: String? = nil) {
+         qrSVG: String, name: String? = nil, releaseNonce: String? = nil,
+         posterURL: String? = nil) {
         self.kind = kind; self.showID = showID; self.orderID = orderID; self.eventID = eventID
         self.title = title; self.venueLabel = venueLabel; self.source = source; self.start = start
         self.qrSVG = qrSVG; self.name = name; self.releaseNonce = releaseNonce
+        self.posterURL = posterURL
     }
 
     init(from decoder: Decoder) throws {
@@ -55,6 +60,7 @@ struct Ticket: Codable, Identifiable, Hashable {
         qrSVG = (try c.decodeIfPresent(String.self, forKey: .qrSVG)) ?? ""
         name = try c.decodeIfPresent(String.self, forKey: .name)
         releaseNonce = try c.decodeIfPresent(String.self, forKey: .releaseNonce)
+        posterURL = try c.decodeIfPresent(String.self, forKey: .posterURL)
     }
 }
 
