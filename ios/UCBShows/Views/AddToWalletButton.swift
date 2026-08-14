@@ -15,7 +15,7 @@ struct AddToWalletButton: View {
 
     var body: some View {
         if WalletPass.isAvailable {
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 PassKitAddButton {
                     guard !building else { return }
                     building = true
@@ -26,8 +26,16 @@ struct AddToWalletButton: View {
                         building = false
                     }
                 }
-                .frame(width: 220, height: 52)
+                // Apple's badge artwork is ~3.1:1 — an off-ratio frame stretches
+                // it. Keep the canonical proportions and let it breathe.
+                .frame(width: 180, height: 58)
+                .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
                 .opacity(building ? 0.5 : 1)
+                .animation(.easeInOut(duration: 0.15), value: building)
+
+                Text("Surfaces on your lock screen at the theater")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
 
                 if let error {
                     Text(error).font(.footnote).foregroundStyle(.red)
