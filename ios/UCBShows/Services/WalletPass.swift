@@ -158,19 +158,15 @@ enum WalletPass {
             "locations": locations,
             "maxDistance": 300,
         ]
+        // No header fields: the skull thumbnail owns the top right of the card.
         var primary: [[String: Any]] = []
         if let name = ticket.name, !name.isEmpty {
             primary.append(["key": "name", "label": "STUDENT ID", "value": name.capitalized])
         }
         pass["generic"] = [
-            "headerFields": [
-                ["key": "kind", "label": "STANDBY", "value": "2/WK"],
-            ],
             "primaryFields": primary,
             "secondaryFields": [
                 ["key": "entry", "label": "ENTRY", "value": "Free student ticket"],
-                ["key": "venues", "label": "THEATERS", "value": "NYC · LA",
-                 "textAlignment": "PKTextAlignmentRight"],
             ],
         ]
         return (try? JSONSerialization.data(withJSONObject: pass)) ?? Data()
@@ -213,29 +209,25 @@ enum WalletPass {
         return image.pngData() ?? Data()
     }
 
-    /// Square thumbnail shown on the card's right: a UCB-red gradient tile
-    /// with the comedy masks, so the black card gets one saturated accent.
+    /// Square thumbnail shown on the card's top right: UCB's skull face (from
+    /// the site logo, bundled as ucb_skull.png) on a white rounded tile.
     private static func thumbnailPNG(side: CGFloat) -> Data {
         let size = CGSize(width: side, height: side)
         let renderer = UIGraphicsImageRenderer(size: size)
-        let image = renderer.image { ctx in
+        let image = renderer.image { _ in
             let rect = CGRect(origin: .zero, size: size)
             UIBezierPath(roundedRect: rect, cornerRadius: side * 0.18).addClip()
-            let colors = [UIColor(red: 230 / 255, green: 57 / 255, blue: 80 / 255, alpha: 1).cgColor,
-                          UIColor(red: 150 / 255, green: 16 / 255, blue: 40 / 255, alpha: 1).cgColor]
-            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                         colors: colors as CFArray, locations: [0, 1]) {
-                ctx.cgContext.drawLinearGradient(
-                    gradient, start: .zero,
-                    end: CGPoint(x: size.width, y: size.height), options: [])
-            }
-            let config = UIImage.SymbolConfiguration(pointSize: side * 0.42, weight: .medium)
-            if let glyph = UIImage(systemName: "theatermasks.fill", withConfiguration: config)?
-                .withTintColor(.white, renderingMode: .alwaysOriginal) {
-                let g = CGRect(x: (side - glyph.size.width) / 2, y: (side - glyph.size.height) / 2,
-                               width: glyph.size.width, height: glyph.size.height)
-                glyph.draw(in: g)
-            }
+            UIColor.white.setFill()
+            UIBezierPath(rect: rect).fill()
+            guard let art = UIImage(named: "ucb_skull") else { return }
+            // Aspect-fit with a small margin, centered.
+            let inset = side * 0.10
+            let box = rect.insetBy(dx: inset, dy: inset)
+            let scale = min(box.width / art.size.width, box.height / art.size.height)
+            let drawSize = CGSize(width: art.size.width * scale, height: art.size.height * scale)
+            art.draw(in: CGRect(x: rect.midX - drawSize.width / 2,
+                                y: rect.midY - drawSize.height / 2,
+                                width: drawSize.width, height: drawSize.height))
         }
         return image.pngData() ?? Data()
     }
