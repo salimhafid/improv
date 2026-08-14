@@ -30,8 +30,9 @@ struct TicketWalletView: View {
                 .sheet(isPresented: $showSignIn) { UCBSignInView(account: account) }
                 // Re-runs when sign-in state flips, so a first-ever sign-in pulls
                 // the Student ID + tickets without needing a pull-to-refresh.
+                // Throttled: revisiting the tab within a few minutes is instant.
                 .task(id: account.isSignedIn) {
-                    if account.isSignedIn { await tickets.sync() }
+                    if account.isSignedIn { await tickets.syncIfStale() }
                     openDeepLink(app.openTicketID)
                 }
                 .onChange(of: app.openTicketID) { _, id in openDeepLink(id) }
