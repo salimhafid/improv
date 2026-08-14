@@ -17,13 +17,16 @@ struct TicketDetailView: View {
             VStack(spacing: 18) {
                 header
 
+                // Full-width QR — as big as the screen allows, so the door
+                // scanner reads it from a distance. Rendered from the locally
+                // stored SVG, so it works with no network at all.
                 QRCodeView(svg: ticket.qrSVG)
-                    .frame(maxWidth: 320)
+                    .frame(maxWidth: .infinity)
                     .aspectRatio(1, contentMode: .fit)
                     .background(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.black.opacity(0.08)))
-                    .padding(.horizontal, Theme.Space.gutter)
+                    .padding(.horizontal, 12)
                     .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
 
                 Text(ticket.kind == .studentID

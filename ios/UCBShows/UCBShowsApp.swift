@@ -10,6 +10,7 @@ struct UCBShowsApp: App {
     @State private var app = AppState()
     @State private var account = UCBAccountStore()
     @State private var tickets = TicketStore()
+    @Environment(\.scenePhase) private var scenePhase
     private let notifications = NotificationRouter()
 
     init() {
@@ -44,6 +45,13 @@ struct UCBShowsApp: App {
                     }
                     let outcome = await account.restoreOnLaunch()
                     tickets.adopt(outcome)
+                }
+                // Periodic ticket/QR refresh: every foreground (throttled to
+                // one sync per 5 minutes) keeps the locally stored QR current.
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active, account.isSignedIn {
+                        Task { await tickets.syncIfStale() }
+                    }
                 }
         }
     }

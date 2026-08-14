@@ -11,9 +11,10 @@ import WebKit
 /// is reclaimed while the app is suspended.
 enum QRRender {
 
-    /// One canonical render size for the cache: 960px covers the largest
-    /// on-screen use (320pt @3x) and notification attachments alike.
-    private static let renderSide: CGFloat = 960
+    /// One canonical render size for the cache: 1280px keeps the QR crisp at
+    /// full screen width on the largest phones (~430pt @3x) and covers
+    /// notification attachments alike.
+    private static let renderSide: CGFloat = 1280
 
     @MainActor private static var cache: [Int: UIImage] = [:]
 
