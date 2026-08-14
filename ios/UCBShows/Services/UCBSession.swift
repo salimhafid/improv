@@ -264,17 +264,29 @@ final class UCBSession {
       const m = bodyText.match(/(\\d+)\\s+of\\s+(\\d+)\\s+free/i);
       const freeRemaining = m ? parseInt(m[1], 10) : (eligible ? 2 : 0);
       const tickets = [];
-      document.querySelectorAll('[data-order][data-nonce]').forEach(rel => {
-        const scope = rel.closest('li, .ucb-ticket, article, .ticket, div') || document;
-        const svg = (scope.querySelector('.ucb-ticket__qr')?.outerHTML) || (scope.querySelector('svg')?.outerHTML) || '';
-        const title = (scope.querySelector('h1,h2,h3,h4,.ucb-ticket__title')?.innerText || '').trim();
+      const seen = new Set();
+      // Anchor on data-order alone (the release control), not data-order AND
+      // data-nonce on one element — the nonce may live on a sibling. Scope to
+      // the nearest card-like ancestor, not the first div.
+      document.querySelectorAll('[data-order]').forEach(rel => {
+        const order = rel.getAttribute('data-order');
+        if (!order || seen.has(order)) return;
+        seen.add(order);
+        const scope = rel.closest('.ucb-ticket, .ticket, li, article, tr, section')
+          || rel.parentElement?.parentElement || document;
         const meta = (scope.innerText || '');
+        if (/cancell?ed/i.test(meta)) return;   // released shows keep an order row under "Cancelled"
+        const nonce = rel.getAttribute('data-nonce')
+          || scope.querySelector('[data-nonce]')?.getAttribute('data-nonce') || null;
+        const svg = (scope.querySelector('.qr-svg, .ucb-ticket__qr')?.outerHTML)
+          || (scope.querySelector('svg')?.outerHTML) || '';
+        const title = (scope.querySelector('h1,h2,h3,h4,h5,.ucb-ticket__title,[class*="title"]')?.innerText || '').trim();
         const stMatch = meta.match(/ST-(\\d+)/);
         const source = /\\bLA\\b|Franklin|Los Angeles/i.test(meta) ? 'ucb_la' : 'ucb_ny';
         tickets.push({
-          order: rel.getAttribute('data-order'), nonce: rel.getAttribute('data-nonce'),
+          order, nonce,
           event: stMatch ? stMatch[1] : null, title: title || 'UCB show',
-          venue: (meta.match(/NY[^\\n]*Mainstage|LA[^\\n]*|[0-9]+th St[^\\n]*/i)||[''])[0].trim(), svg
+          venue: (meta.match(/NY[^\\n]*Mainstage|LA[^\\n]*|[0-9]+th St[^\\n]*/i)||[''])[0].trim(), svg, source
         });
       });
       return {state:'signedIn', name, eligible, freeRemaining, studentSVG:idSvg, tickets};

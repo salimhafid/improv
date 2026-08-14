@@ -42,7 +42,7 @@ enum QRRender {
         """
         <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <style>html,body{margin:0;height:100%;background:#fff}
-        .wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:6%}
+        .wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:3%}
         .wrap svg{width:100%;height:100%;display:block}</style></head>
         <body><div class="wrap">\(svg)</div></body></html>
         """
@@ -132,6 +132,11 @@ struct QRCodeView: View {
                     .resizable()
                     .interpolation(.none)
                     .scaledToFit()
+            } else if svg.isEmpty {
+                // QR not synced yet — show a placeholder, never a blank card.
+                Image(systemName: "qrcode")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.tertiary)
             }
         }
         .task(id: svg) { image = await QRRender.cachedImage(svg: svg) }
