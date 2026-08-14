@@ -92,8 +92,9 @@ UCBShows/
     AppState.swift           selected city/theater/tab; drives all scoping
   Support/DateUtils.swift    per-timezone parsing/formatting + day grouping
   DesignSystem/Theme.swift   accent, radii, per-type tints & symbols
-  Views/                     RootView, ShowsFeedView, GoingView, ClassesView,
-                             ShowDetailView, ClassDetailView, SetupView
+  Views/                     RootView, ShowsFeedView, ClassesView, TicketWalletView
+                             (tickets + hearted I'm-Going shows), ShowDetailView,
+                             ClassDetailView, SetupView
   Views/Components/          TheaterSidebar/TheaterListPanel, ShowRow, ClassRow,
                              PosterImage/GeneratedCover, FilterSheet, Chips, …
 ```

@@ -40,7 +40,7 @@ struct UCBShowsApp: App {
                     tickets.account = account
                     notifications.onOpen = { id in
                         app.openTicketID = id
-                        app.activeTab = 3
+                        app.activeTab = 1
                     }
                     let outcome = await account.restoreOnLaunch()
                     tickets.adopt(outcome)

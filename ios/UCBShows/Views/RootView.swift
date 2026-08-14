@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Three-tab shell: Shows, I'm Going, and Classes — scoped (except I'm Going) to
+/// Three-tab shell: Shows, Classes, and Tickets (which also holds the hearted
+/// "I'm Going" shows) — Shows and Classes are scoped to
 /// the theater chosen in the left sidebar. On iPhone the sidebar is a drawer
 /// overlaying the TabView (opened from each tab's hamburger button); on iPad
 /// (regular width) it's a persistent leading column. A city-selector Setup is
@@ -61,19 +62,14 @@ struct RootView: View {
                 .tabItem { Label("Shows", systemImage: "theatermasks") }
                 .tag(0)
 
-            GoingView()
-                .tabItem { Label("I’m Going", systemImage: "heart") }
-                .badge(going.count)
+            TicketWalletView()
+                .tabItem { Label("Tickets", systemImage: "ticket") }
+                .badge(tickets.reserved.count + going.count)
                 .tag(1)
 
             ClassesView()
                 .tabItem { Label("Classes", systemImage: "graduationcap") }
                 .tag(2)
-
-            TicketWalletView()
-                .tabItem { Label("Tickets", systemImage: "ticket") }
-                .badge(tickets.reserved.count)
-                .tag(3)
         }
     }
 

@@ -9,7 +9,7 @@ struct DaySection: Identifiable {
     let shows: [Show]
 
     /// Groups shows into date sections keyed on each show's venue-local day.
-    /// Shared by the feed and the I'm Going tab (which can mix cities).
+    /// Shared by the feed and the Tickets tab's I'm-Going section (mixed cities).
     static func group(_ shows: [Show]) -> [DaySection] {
         let byDay = Dictionary(grouping: shows, by: \.dayKey)
         return byDay.keys.sorted { a, b in
