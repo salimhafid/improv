@@ -18,13 +18,15 @@ enum DateUtils {
         }()
     }
 
-    /// Parses either `yyyy-MM-dd'T'HH:mm:ss` (timed) or `yyyy-MM-dd` (date-only),
-    /// interpreting the value in the venue's timezone.
+    /// Parses `yyyy-MM-dd'T'HH:mm:ss` (timed), `yyyy-MM-dd'T'HH:mm`
+    /// (minute-precision, e.g. from the UCB account-page scrape), or
+    /// `yyyy-MM-dd` (date-only), interpreting the value in the venue's timezone.
     static func parse(_ value: String, in tz: TimeZone) -> Date? {
         if value.count == 10 {
             return formatter(.dateOnly, in: tz).date(from: value)
         }
         return formatter(.dateTime, in: tz).date(from: value)
+            ?? formatter(.dateTime, in: tz).date(from: value + ":00")
             ?? formatter(.dateOnly, in: tz).date(from: String(value.prefix(10)))
     }
 

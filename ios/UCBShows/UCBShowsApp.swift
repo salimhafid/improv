@@ -43,6 +43,13 @@ struct UCBShowsApp: App {
                         app.openTicketID = id
                         app.activeTab = 1
                     }
+                    #if DEBUG
+                    print("UCBShowsApp task: fakeTickets=\(DebugFixtures.fakeTickets) args=\(ProcessInfo.processInfo.arguments.count)")
+                    if DebugFixtures.fakeTickets {
+                        DebugFixtures.seed(account: account, tickets: tickets)
+                        return
+                    }
+                    #endif
                     let outcome = await account.restoreOnLaunch()
                     tickets.adopt(outcome)
                 }

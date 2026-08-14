@@ -277,7 +277,7 @@ final class UCBSession {
         let h = parseInt(tm[1], 10) % 12;
         if (/pm/i.test(tm[3])) h += 12;
         const p2 = n => String(n).padStart(2, '0');
-        return `${dm[3]}-${p2(MONTHS[dm[1].slice(0,3).toUpperCase()])}-${p2(dm[2])}T${p2(h)}:${tm[2]}`;
+        return `${dm[3]}-${p2(MONTHS[dm[1].slice(0,3).toUpperCase()])}-${p2(dm[2])}T${p2(h)}:${tm[2]}:00`;
       };
       const tickets = [];
       const seen = new Set();
