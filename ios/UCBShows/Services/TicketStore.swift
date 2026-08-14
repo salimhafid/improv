@@ -44,6 +44,17 @@ final class TicketStore {
     func sync() async {
         guard let account else { return }
         adopt(await account.refresh())
+        lastSynced = Date()
+    }
+
+    private var lastSynced: Date?
+
+    /// Tab-visit sync: skip if we synced recently, so switching to the Tickets
+    /// tab is instant instead of kicking off a UCB page load every time.
+    /// Pull-to-refresh uses `sync()` directly and is always fresh.
+    func syncIfStale(maxAge: TimeInterval = 5 * 60) async {
+        if let lastSynced, Date().timeIntervalSince(lastSynced) < maxAge { return }
+        await sync()
     }
 
     /// Apply a refresh outcome. `unknown` (transient / interstitial) is a no-op,
