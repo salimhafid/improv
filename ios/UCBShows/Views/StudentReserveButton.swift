@@ -17,20 +17,33 @@ struct StudentReserveButton: View {
     @State private var phase: Phase = .hidden
 
     private var isUCB: Bool { show.source == "ucb_ny" || show.source == "ucb_la" }
+    /// Exclude only shows with no in-person seat: most UCB shows are hybrid
+    /// (Mainstage + a livestream option) and DO have student tickets — the feed
+    /// flags those `isLivestream` too, so keying off the flag alone hid the
+    /// reserve button on nearly every show. Pure livestreams have no physical
+    /// venue ("Livestream" is the venue).
     private var excluded: Bool {
-        show.isLivestream || show.title.localizedCaseInsensitiveContains("asssscat")
+        (show.isLivestream && show.venue.caseInsensitiveCompare("Livestream") == .orderedSame)
+            || show.title.localizedCaseInsensitiveContains("asssscat")
     }
 
     var body: some View {
-        content
-            .task(id: taskKey) { await evaluate() }
+        // Static gates decide membership in the layout; the async probe only
+        // runs for shows that could ever have a student CTA.
+        if isUCB, !excluded, show.url != nil {
+            content
+                .task(id: taskKey) { await evaluate() }
+        }
     }
 
     @ViewBuilder
     private var content: some View {
         switch phase {
         case .hidden, .checking:
-            EmptyView()
+            // NOT EmptyView: SwiftUI never fires .task/.onAppear on EmptyView,
+            // which left evaluate() unrun and the button permanently hidden.
+            // A zero-size color keeps the view (and its task) alive.
+            Color.clear.frame(width: 0, height: 0)
         case .signInPrompt:
             Button(action: onSignIn) {
                 Label("Students: sign in for a free ticket", systemImage: "graduationcap")

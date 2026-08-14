@@ -56,7 +56,11 @@ final class UCBAccountStore {
     /// Called by the sign-in web view once it lands on the logged-in dashboard.
     func completeSignIn() async {
         Keychain.set("1", for: Self.marker)
-        _ = await refresh()
+        let outcome = await refresh()
+        // The user just watched the dashboard load, so an ambiguous first read
+        // (challenge interstitial, slow network) must not leave the app looking
+        // signed out — trust the login; the next refresh confirms.
+        if case .unknown = outcome { phase = .signedIn }
     }
 
     func signOut() async {
