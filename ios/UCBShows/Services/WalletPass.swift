@@ -100,6 +100,9 @@ enum WalletPass {
         for (name, side) in [("thumbnail.png", 90.0), ("thumbnail@2x.png", 180.0), ("thumbnail@3x.png", 270.0)] {
             files[name] = thumbnailPNG(side: side)
         }
+        for (name, scale) in [("logo.png", 1.0), ("logo@2x.png", 2.0), ("logo@3x.png", 3.0)] {
+            files[name] = logoPNG(scale: scale)
+        }
 
         // manifest.json: SHA-1 of every file (the v1 pass format's digest).
         let manifest = files.mapValues { Insecure.SHA1.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
@@ -136,16 +139,16 @@ enum WalletPass {
             ["latitude": $0.latitude, "longitude": $0.longitude,
              "relevantText": "You’re near \($0.name) — show your UCB Student ID at the door."]
         }
-        // Near-black card with UCB-red labels: modern, high contrast, and the
-        // white QR panel pops against it at the door.
-        var pass: [String: Any] = [
+        // Minimal near-black card: the rendered logo (big UCB, small STUDENT ID
+        // beneath) top left, the skull tile top right, the QR below. No fields,
+        // no barcode caption — Wallet renders the QR at its own fixed size.
+        let pass: [String: Any] = [
             "formatVersion": 1,
             "passTypeIdentifier": identity.passTypeIdentifier,
             "teamIdentifier": identity.teamIdentifier,
             "serialNumber": "ucb-student-id-\(serial)",
             "organizationName": "Improv",
             "description": "UCB Student ID",
-            "logoText": "UCB",
             "foregroundColor": "rgb(255,255,255)",
             "backgroundColor": "rgb(17,17,20)",
             "labelColor": "rgb(235,75,95)",
@@ -153,21 +156,10 @@ enum WalletPass {
                 "format": "PKBarcodeFormatQR",
                 "message": payload,
                 "messageEncoding": "iso-8859-1",
-                "altText": "UCB Student ID",
             ]],
             "locations": locations,
             "maxDistance": 300,
-        ]
-        // No header fields: the skull thumbnail owns the top right of the card.
-        var primary: [[String: Any]] = []
-        if let name = ticket.name, !name.isEmpty {
-            primary.append(["key": "name", "label": "STUDENT ID", "value": name.capitalized])
-        }
-        pass["generic"] = [
-            "primaryFields": primary,
-            "secondaryFields": [
-                ["key": "entry", "label": "ENTRY", "value": "Free student ticket"],
-            ],
+            "generic": ["primaryFields": [[String: Any]]()],
         ]
         return (try? JSONSerialization.data(withJSONObject: pass)) ?? Data()
     }
@@ -209,8 +201,8 @@ enum WalletPass {
         return image.pngData() ?? Data()
     }
 
-    /// Square thumbnail shown on the card's top right: UCB's skull face (from
-    /// the site logo, bundled as ucb_skull.png) on a white rounded tile.
+    /// Square thumbnail shown on the card's top right: the UCB skull face
+    /// (Salim's art, white-trimmed) filling a white rounded tile.
     private static func thumbnailPNG(side: CGFloat) -> Data {
         let size = CGSize(width: side, height: side)
         let renderer = UIGraphicsImageRenderer(size: size)
@@ -220,14 +212,33 @@ enum WalletPass {
             UIColor.white.setFill()
             UIBezierPath(rect: rect).fill()
             guard let art = UIImage(named: "ucb_skull") else { return }
-            // Aspect-fit with a small margin, centered.
-            let inset = side * 0.10
+            // Aspect-fit tight to the tile so the face reads large.
+            let inset = side * 0.05
             let box = rect.insetBy(dx: inset, dy: inset)
             let scale = min(box.width / art.size.width, box.height / art.size.height)
             let drawSize = CGSize(width: art.size.width * scale, height: art.size.height * scale)
             art.draw(in: CGRect(x: rect.midX - drawSize.width / 2,
                                 y: rect.midY - drawSize.height / 2,
                                 width: drawSize.width, height: drawSize.height))
+        }
+        return image.pngData() ?? Data()
+    }
+
+    /// Rendered wordmark for the pass header: prominent "UCB" with a small,
+    /// letter-spaced "STUDENT ID" beneath it.
+    private static func logoPNG(scale: CGFloat) -> Data {
+        let size = CGSize(width: 160 * scale, height: 50 * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { _ in
+            NSAttributedString(string: "UCB", attributes: [
+                .font: UIFont.systemFont(ofSize: 30 * scale, weight: .heavy),
+                .foregroundColor: UIColor(red: 235 / 255, green: 75 / 255, blue: 95 / 255, alpha: 1),
+            ]).draw(at: CGPoint(x: 0, y: 0))
+            NSAttributedString(string: "STUDENT ID", attributes: [
+                .font: UIFont.systemFont(ofSize: 10 * scale, weight: .semibold),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.9),
+                .kern: 2.4 * scale,
+            ]).draw(at: CGPoint(x: 1.5 * scale, y: 37 * scale))
         }
         return image.pngData() ?? Data()
     }
