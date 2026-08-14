@@ -36,6 +36,13 @@ struct TicketDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
+                if ticket.kind == .studentID {
+                    // Wallet handles near-theater lock-screen surfacing itself
+                    // once the pass is added (pass.json carries the venues).
+                    AddToWalletButton(ticket: ticket)
+                        .padding(.top, 2)
+                }
+
                 if ticket.qrSVG.isEmpty {
                     Text("The QR hasn’t synced yet — pull to refresh in Tickets. Your UCB confirmation email also carries the ticket.")
                         .font(.footnote).foregroundStyle(.secondary)
