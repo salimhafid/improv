@@ -153,6 +153,9 @@ func testLossyPayloadDecoding() {
 func testDateUtils() {
     let chicago = TimeZone(identifier: "America/Chicago")!
     check(DateUtils.parse("2026-08-29T12:00:00", in: chicago) != nil, "timed parse")
+    checkEqual(DateUtils.parse("2026-08-14T19:00", in: chicago),
+               DateUtils.parse("2026-08-14T19:00:00", in: chicago),
+               "minute-precision parse keeps the time (UCB account scrape)")
     check(DateUtils.parse("2026-08-29", in: chicago) != nil, "date-only parse")
     check(DateUtils.parse("garbage", in: chicago) == nil, "garbage -> nil")
     check(DateUtils.parseTimestamp("2026-07-22T14:22:17.189113+00:00") != nil,

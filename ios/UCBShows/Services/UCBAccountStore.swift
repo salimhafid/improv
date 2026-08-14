@@ -69,4 +69,12 @@ final class UCBAccountStore {
         phase = .signedOut
         name = ""; eligible = false; freeRemaining = 0
     }
+
+    #if DEBUG
+    /// Screenshot-verification hook (see DebugFixtures) — no session behind it.
+    func debugForceSignedIn(name: String) {
+        phase = .signedIn
+        self.name = name; eligible = true; freeRemaining = 2
+    }
+    #endif
 }

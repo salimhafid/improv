@@ -42,6 +42,9 @@ final class TicketStore {
 
     /// Pull the latest tickets from UCB and re-arm everything.
     func sync() async {
+        #if DEBUG
+        if DebugFixtures.fakeTickets { return }   // keep seeded fixtures stable
+        #endif
         guard let account else { return }
         adopt(await account.refresh())
         lastSynced = Date()
@@ -189,6 +192,15 @@ final class TicketStore {
             if !ids.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ids) }
         }
     }
+
+    #if DEBUG
+    /// Screenshot-verification hook (see DebugFixtures): in-memory only, never
+    /// saved, no reminders/geofences armed.
+    func debugSeed(studentID: Ticket, reserved: [Ticket]) {
+        self.studentID = studentID
+        self.reserved = reserved
+    }
+    #endif
 
     // MARK: Persistence
 
