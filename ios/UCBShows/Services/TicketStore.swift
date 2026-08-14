@@ -12,23 +12,13 @@ final class TicketStore {
     private(set) var reserved: [Ticket] = []
     private(set) var studentID: Ticket?
 
-    /// Which UCB venues have shows today — set by the shows feed so the standby
-    /// geofence only arms when standby is actually possible.
-    var venuesWithShowsToday: Set<String> = []
-
     /// Set once at app composition (strong; no cycle back to us).
     var account: UCBAccountStore?
 
-    private let proximity = TicketProximity()
     private let fileURL = AppSupport.file("tickets.json")
 
     init() {
         load()
-        // Re-arm once location permission is actually granted (the first
-        // reserve requests it, but arm() runs before the grant lands).
-        proximity.onAuthorized = { [weak self] in
-            Task { await self?.rearmGeofences() }
-        }
     }
 
     var hasAnything: Bool { studentID != nil || !reserved.isEmpty }
@@ -61,7 +51,7 @@ final class TicketStore {
     }
 
     /// Apply a refresh outcome. `unknown` (transient / interstitial) is a no-op,
-    /// so a bad read never wipes the offline cache or drops geofences.
+    /// so a bad read never wipes the offline cache.
     func adopt(_ outcome: UCBSession.RefreshOutcome) {
         switch outcome {
         case .signedIn(let snap): apply(snap)
@@ -88,7 +78,6 @@ final class TicketStore {
                      source: "ucb_ny", qrSVG: snap.studentIDSVG, name: snap.name)
         save()
         reconcileReminders()
-        Task { await rearmGeofences() }
     }
 
     /// Stamp the reserved ticket that matches this show with the show's start
@@ -105,16 +94,13 @@ final class TicketStore {
                              releaseNonce: t.releaseNonce)
         save()
         reconcileReminders()
-        Task { await rearmGeofences() }
     }
 
-    /// Drop all local ticket state + surfacing (sign-out / definitive signed-out).
+    /// Drop all local ticket state + reminders (sign-out / definitive signed-out).
     func clearLocal() {
         reserved = []
         studentID = nil
         save()
-        armGeneration += 1   // invalidate any in-flight arm() so it can't re-add
-        proximity.disarm()
         cancelAllReminders()
     }
 
@@ -124,7 +110,6 @@ final class TicketStore {
         guard let account, let url = show.url else {
             return .init(success: false, message: "Sign in to UCB to reserve.")
         }
-        await proximity.requestAuthorization()
         let result = await account.session.reserve(showURL: url)
         if result.success {
             await sync()
@@ -141,20 +126,7 @@ final class TicketStore {
         return result.success
     }
 
-    // MARK: Geofence + reminders
-
-    /// Monotonic token ordering geofence arms against clearLocal(): arm()
-    /// suspends for seconds rendering QR attachments, and a sign-out landing in
-    /// that window must not let the resumed arm re-add the wiped account's QR.
-    private var armGeneration = 0
-
-    func rearmGeofences() async {
-        armGeneration += 1
-        let gen = armGeneration
-        await proximity.arm(reserved: reserved, studentID: studentID,
-                            venuesWithShows: venuesWithShowsToday,
-                            isCurrent: { [weak self] in self?.armGeneration == gen })
-    }
+    // MARK: Reminders (near-venue surfacing lives in the Wallet pass now)
 
     private nonisolated static let reminderPrefix = "ticket/"
 

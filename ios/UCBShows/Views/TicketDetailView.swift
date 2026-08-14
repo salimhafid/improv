@@ -36,12 +36,10 @@ struct TicketDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                if ticket.kind == .studentID {
-                    // Wallet handles near-theater lock-screen surfacing itself
-                    // once the pass is added (pass.json carries the venues).
-                    AddToWalletButton(ticket: ticket)
-                        .padding(.top, 2)
-                }
+                // Wallet handles near-theater lock-screen surfacing itself once
+                // the pass is added (pass.json carries venue + showtime).
+                AddToWalletButton(ticket: ticket)
+                    .padding(.top, 2)
 
                 if ticket.qrSVG.isEmpty {
                     Text("The QR hasn’t synced yet — pull to refresh in Tickets. Your UCB confirmation email also carries the ticket.")
@@ -50,36 +48,37 @@ struct TicketDetailView: View {
                         .padding(.horizontal, Theme.Space.gutter)
                 }
 
-                if ticket.kind == .reserved, ticket.isReleasable, onRelease != nil {
-                    Button(role: .destructive) {
-                        confirmingRelease = true
-                    } label: {
-                        if releasing { ProgressView() } else { Text("Release ticket") }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .disabled(releasing)
-                    .padding(.top, 4)
-                    .confirmationDialog("Release this ticket?", isPresented: $confirmingRelease,
-                                        titleVisibility: .visible) {
-                        Button("Release ticket", role: .destructive) { release() }
-                        Button("Keep ticket", role: .cancel) {}
-                    } message: {
-                        Text("Your seat goes back on sale and your weekly student allowance is restored. This can’t be undone.")
-                    }
-
-                    if let releaseError {
-                        Text(releaseError)
-                            .font(.footnote).foregroundStyle(.red)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, Theme.Space.gutter)
-                    }
+                if let releaseError {
+                    Text(releaseError)
+                        .font(.footnote).foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Theme.Space.gutter)
                 }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Space.section)
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if ticket.kind == .reserved, ticket.isReleasable, onRelease != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        confirmingRelease = true
+                    } label: {
+                        if releasing { ProgressView() } else { Text("Release") }
+                    }
+                    .tint(.red)
+                    .disabled(releasing)
+                }
+            }
+        }
+        .confirmationDialog("Release this ticket?", isPresented: $confirmingRelease,
+                            titleVisibility: .visible) {
+            Button("Release ticket", role: .destructive) { release() }
+            Button("Keep ticket", role: .cancel) {}
+        } message: {
+            Text("Your seat goes back on sale and your weekly student allowance is restored. This can’t be undone.")
+        }
         .onAppear(perform: brighten)
         .onDisappear(perform: restoreBrightness)
         // Also restore when the app is backgrounded (onDisappear doesn't fire

@@ -1,28 +1,15 @@
-import CoreLocation
 import Foundation
 
-/// A physical UCB venue the app can geofence. Coordinates are baked in (the
-/// feed carries only a venue *string*), so proximity works with zero backend.
+/// A physical UCB venue. Coordinates are baked in (the feed carries only a
+/// venue *string*) and feed the Wallet pass's `locations`, which is what
+/// surfaces the pass on the lock screen near the theater — the app itself
+/// uses no location services.
 struct Venue: Identifiable, Hashable {
     let id: String            // stable key, e.g. "ucb_ny"
     let name: String          // display, e.g. "UCB 14th Street"
     let address: String
     let latitude: Double
     let longitude: Double
-    /// Geofence radius in meters — tight enough to mean "you're here," loose
-    /// enough to fire before the door.
-    var radius: CLLocationDistance = 200
-
-    var coordinate: CLLocationCoordinate2D {
-        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-    }
-
-    var region: CLCircularRegion {
-        let r = CLCircularRegion(center: coordinate, radius: radius, identifier: "venue/\(id)")
-        r.notifyOnEntry = true
-        r.notifyOnExit = false
-        return r
-    }
 }
 
 extension Venue {

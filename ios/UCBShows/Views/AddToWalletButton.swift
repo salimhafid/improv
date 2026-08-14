@@ -1,7 +1,7 @@
 import PassKit
 import SwiftUI
 
-/// The system "Add to Apple Wallet" button for the Student ID. Renders only
+/// The system "Add to Apple Wallet" button for any held ticket. Renders only
 /// when a pass-signing identity is bundled (see WalletPass); tapping builds
 /// the signed .pkpass on-device and presents Wallet's add sheet. Once added,
 /// Wallet itself surfaces the pass on the lock screen near the theaters —
@@ -21,7 +21,7 @@ struct AddToWalletButton: View {
                     building = true
                     error = nil
                     Task {
-                        do { pass = try await WalletPass.studentIDPass(ticket: ticket) }
+                        do { pass = try await WalletPass.pass(for: ticket) }
                         catch { self.error = error.localizedDescription }
                         building = false
                     }
