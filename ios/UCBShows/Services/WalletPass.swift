@@ -97,6 +97,9 @@ enum WalletPass {
         for (name, side) in [("icon.png", 29.0), ("icon@2x.png", 58.0), ("icon@3x.png", 87.0)] {
             files[name] = iconPNG(side: side)
         }
+        for (name, side) in [("thumbnail.png", 90.0), ("thumbnail@2x.png", 180.0), ("thumbnail@3x.png", 270.0)] {
+            files[name] = thumbnailPNG(side: side)
+        }
 
         // manifest.json: SHA-1 of every file (the v1 pass format's digest).
         let manifest = files.mapValues { Insecure.SHA1.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
@@ -133,6 +136,8 @@ enum WalletPass {
             ["latitude": $0.latitude, "longitude": $0.longitude,
              "relevantText": "You’re near \($0.name) — show your UCB Student ID at the door."]
         }
+        // Near-black card with UCB-red labels: modern, high contrast, and the
+        // white QR panel pops against it at the door.
         var pass: [String: Any] = [
             "formatVersion": 1,
             "passTypeIdentifier": identity.passTypeIdentifier,
@@ -140,27 +145,32 @@ enum WalletPass {
             "serialNumber": "ucb-student-id-\(serial)",
             "organizationName": "Improv",
             "description": "UCB Student ID",
-            "logoText": "UCB Student ID",
+            "logoText": "UCB",
             "foregroundColor": "rgb(255,255,255)",
-            "backgroundColor": "rgb(196,30,58)",
-            "labelColor": "rgb(255,235,235)",
+            "backgroundColor": "rgb(17,17,20)",
+            "labelColor": "rgb(235,75,95)",
             "barcodes": [[
                 "format": "PKBarcodeFormatQR",
                 "message": payload,
                 "messageEncoding": "iso-8859-1",
+                "altText": "UCB Student ID",
             ]],
             "locations": locations,
             "maxDistance": 300,
         ]
         var primary: [[String: Any]] = []
         if let name = ticket.name, !name.isEmpty {
-            primary.append(["key": "name", "label": "STUDENT", "value": name])
+            primary.append(["key": "name", "label": "STUDENT ID", "value": name.capitalized])
         }
         pass["generic"] = [
+            "headerFields": [
+                ["key": "kind", "label": "STANDBY", "value": "2/WK"],
+            ],
             "primaryFields": primary,
             "secondaryFields": [
-                ["key": "standby", "label": "STANDBY ENTRY",
-                 "value": "Free student ticket at the door"],
+                ["key": "entry", "label": "ENTRY", "value": "Free student ticket"],
+                ["key": "venues", "label": "THEATERS", "value": "NYC · LA",
+                 "textAlignment": "PKTextAlignmentRight"],
             ],
         ]
         return (try? JSONSerialization.data(withJSONObject: pass)) ?? Data()
@@ -198,6 +208,33 @@ enum WalletPass {
                                width: glyph.size.width, height: glyph.size.height)
                 glyph.draw(in: g)
                 _ = ctx
+            }
+        }
+        return image.pngData() ?? Data()
+    }
+
+    /// Square thumbnail shown on the card's right: a UCB-red gradient tile
+    /// with the comedy masks, so the black card gets one saturated accent.
+    private static func thumbnailPNG(side: CGFloat) -> Data {
+        let size = CGSize(width: side, height: side)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { ctx in
+            let rect = CGRect(origin: .zero, size: size)
+            UIBezierPath(roundedRect: rect, cornerRadius: side * 0.18).addClip()
+            let colors = [UIColor(red: 230 / 255, green: 57 / 255, blue: 80 / 255, alpha: 1).cgColor,
+                          UIColor(red: 150 / 255, green: 16 / 255, blue: 40 / 255, alpha: 1).cgColor]
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                         colors: colors as CFArray, locations: [0, 1]) {
+                ctx.cgContext.drawLinearGradient(
+                    gradient, start: .zero,
+                    end: CGPoint(x: size.width, y: size.height), options: [])
+            }
+            let config = UIImage.SymbolConfiguration(pointSize: side * 0.42, weight: .medium)
+            if let glyph = UIImage(systemName: "theatermasks.fill", withConfiguration: config)?
+                .withTintColor(.white, renderingMode: .alwaysOriginal) {
+                let g = CGRect(x: (side - glyph.size.width) / 2, y: (side - glyph.size.height) / 2,
+                               width: glyph.size.width, height: glyph.size.height)
+                glyph.draw(in: g)
             }
         }
         return image.pngData() ?? Data()
