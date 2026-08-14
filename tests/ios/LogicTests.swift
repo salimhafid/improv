@@ -141,6 +141,19 @@ func testLossyPayloadDecoding() {
     let payload = try? JSONDecoder().decode(ShowsPayload.self, from: data)
     checkEqual(payload?.shows.map(\.title), ["Good A", "Good B"],
                "one malformed show drops, the rest decode")
+
+    // Multi-paragraph description: the Cast section takes only the
+    // "Featuring:" paragraph; later copy (ticket prices) stays out, and the
+    // body ends cleanly before the lineup.
+    let descRaw: [String: Any] = ["title": "T", "source": "ucb_ny", "city": "New York",
+        "description": "Body para one.\n\nBody para two.\n\nFeaturing: Ana One, Ben Two\n\nIn-person tickets are $15."]
+    let descData = try! JSONSerialization.data(withJSONObject: descRaw)
+    if let show = try? JSONDecoder().decode(Show.self, from: descData) {
+        checkEqual(show.detailText, "Body para one.\n\nBody para two.", "body keeps its paragraphs, ends before the lineup")
+        checkEqual(show.castLine, "Ana One, Ben Two", "cast bounded at its own paragraph")
+    } else {
+        check(false, "description fixture decodes")
+    }
     // The type-mismatched row drops (Lossy), the good row survives; the
     // payload as a whole must never abort.
     checkEqual(payload?.sources?.map(\.id), ["ucb_ny"],

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
@@ -124,6 +125,12 @@ def aggregate(now: datetime | None = None) -> dict:
                                   s.get("cast_members") or [])
                    for s in previous.get("shows", [])
                    if s.get("url") and (s.get("detail_done") or s.get("description") or s.get("cast"))}
+    # One-run cache buster: re-scrape every source and re-fetch every detail
+    # page (e.g. after a change to how descriptions are extracted).
+    # Usage: REFRESH_DETAILS=1 python publish_static.py
+    if os.environ.get("REFRESH_DETAILS"):
+        prev_detail = {}
+        prev_scraped = {}
 
     # Detail enrichment rides the shared loop as a post-scrape hook; the budget
     # is shared across sources within one run.
