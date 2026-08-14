@@ -35,6 +35,13 @@ struct TicketDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
+                if ticket.qrSVG.isEmpty {
+                    Text("The QR hasn’t synced yet — pull to refresh in Tickets. Your UCB confirmation email also carries the ticket.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Theme.Space.gutter)
+                }
+
                 if ticket.kind == .reserved, ticket.isReleasable, let onRelease {
                     Button(role: .destructive) {
                         releasing = true

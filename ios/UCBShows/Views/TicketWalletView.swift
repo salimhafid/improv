@@ -157,29 +157,34 @@ struct TicketWalletView: View {
 
 // MARK: - Cards
 
+/// Wallet-pass style: the QR takes the full card width so it can be scanned
+/// straight from the Tickets tab; tapping still opens the max-brightness view.
 private struct StudentIDCard: View {
     let ticket: Ticket
     let freeRemaining: Int
 
     var body: some View {
-        HStack(spacing: 16) {
+        VStack(spacing: 12) {
             QRCodeView(svg: ticket.qrSVG)
-                .frame(width: 84, height: 84)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
                 .background(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            VStack(alignment: .leading, spacing: 4) {
-                Text("UCB Student ID").font(.headline)
-                if let name = ticket.name, !name.isEmpty {
-                    Text(name).font(.subheadline).foregroundStyle(.secondary)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("UCB Student ID").font(.headline)
+                    if let name = ticket.name, !name.isEmpty {
+                        Text(name).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Text("\(freeRemaining) free show\(freeRemaining == 1 ? "" : "s") left this week")
+                        .font(.caption).foregroundStyle(.tertiary)
                 }
-                Text("\(freeRemaining) free show\(freeRemaining == 1 ? "" : "s") left this week")
-                    .font(.caption).foregroundStyle(.tertiary)
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
             }
-            Spacer()
-            Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
         }
-        .padding(16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
