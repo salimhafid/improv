@@ -92,20 +92,38 @@ enum WalletPass {
         guard let image = await QRRender.cachedImage(svg: ticket.qrSVG),
               let payload = decodeQRPayload(image) else { throw BuildError.qrUndecodable }
 
+        let poster = ticket.kind == .reserved ? await fetchPoster(ticket.posterURL) : nil
         let passJSON = ticket.kind == .studentID
             ? studentIDJSON(identity: identity, ticket: ticket, payload: payload)
-            : reservedJSON(identity: identity, ticket: ticket, payload: payload)
+            : reservedJSON(identity: identity, ticket: ticket, payload: payload,
+                           hasPoster: poster != nil)
 
         var files: [String: Data] = ["pass.json": passJSON]
         for (name, side) in [("icon.png", 29.0), ("icon@2x.png", 58.0), ("icon@3x.png", 87.0)] {
             files[name] = iconPNG(side: side)
         }
-        for (name, side) in [("thumbnail.png", 90.0), ("thumbnail@2x.png", 180.0), ("thumbnail@3x.png", 270.0)] {
-            files[name] = thumbnailPNG(side: side)
-        }
         let subtitle = ticket.kind == .studentID ? "STUDENT ID" : "STUDENT TICKET"
         for (name, scale) in [("logo.png", 1.0), ("logo@2x.png", 2.0), ("logo@3x.png", 3.0)] {
             files[name] = logoPNG(scale: scale, subtitle: subtitle)
+        }
+        switch ticket.kind {
+        case .studentID:
+            // Brick wall + spotlight + framed skull as the strip banner.
+            for (suffix, scale) in [("", 1.0), ("@2x", 2.0), ("@3x", 3.0)] {
+                files["strip\(suffix).png"] = brickStripPNG(scale: scale)
+            }
+        case .reserved:
+            // The show's own poster as the strip; skull tile when a
+            // website-reserved ticket carries no poster.
+            if let poster {
+                for (suffix, scale) in [("", 1.0), ("@2x", 2.0), ("@3x", 3.0)] {
+                    files["strip\(suffix).png"] = posterStripPNG(poster: poster, scale: scale)
+                }
+            } else {
+                for (name, side) in [("thumbnail.png", 90.0), ("thumbnail@2x.png", 180.0), ("thumbnail@3x.png", 270.0)] {
+                    files[name] = thumbnailPNG(side: side)
+                }
+            }
         }
 
         // manifest.json: SHA-1 of every file (the v1 pass format's digest).
@@ -156,8 +174,10 @@ enum WalletPass {
         ]
     }
 
-    /// Minimal Student ID card: rendered logo top left, skull tile top right,
-    /// QR below. No fields, no barcode caption. Relevant near BOTH theaters.
+    /// Minimal Student ID card: rendered logo top left, the brick-and-spotlight
+    /// strip below it, QR at the bottom. storeCard style because generic passes
+    /// can't take a strip. No fields, no barcode caption. Relevant near BOTH
+    /// theaters.
     private static func studentIDJSON(identity: SigningIdentity, ticket: Ticket, payload: String) -> Data {
         let serial = SHA256.hash(data: Data(payload.utf8)).prefix(12)
             .map { String(format: "%02x", $0) }.joined()
@@ -168,13 +188,14 @@ enum WalletPass {
              "relevantText": "You’re near \($0.name) — show your UCB Student ID at the door."]
         }
         pass["maxDistance"] = 300
-        pass["generic"] = ["primaryFields": [[String: Any]]()]
+        pass["storeCard"] = ["primaryFields": [[String: Any]]()]
         return (try? JSONSerialization.data(withJSONObject: pass)) ?? Data()
     }
 
     /// A reserved show: event ticket with the show name and time, relevant at
     /// ITS venue and around showtime, expiring half a day after the show.
-    private static func reservedJSON(identity: SigningIdentity, ticket: Ticket, payload: String) -> Data {
+    private static func reservedJSON(identity: SigningIdentity, ticket: Ticket, payload: String,
+                                     hasPoster: Bool) -> Data {
         let qrHash = SHA256.hash(data: Data(payload.utf8)).prefix(6)
             .map { String(format: "%02x", $0) }.joined()
         var pass = baseJSON(identity: identity,
@@ -198,13 +219,18 @@ enum WalletPass {
         if ticket.startDate != nil {
             secondary.append(["key": "when", "label": "SHOWTIME", "value": ticket.whenLabel])
         }
-        let venueName = Ticket.cleanVenue(ticket.venueLabel)
+        let venueName = smartTitleCase(Ticket.cleanVenue(ticket.venueLabel))
         if !venueName.isEmpty {
-            secondary.append(["key": "venue", "label": "VENUE", "value": venueName.capitalized,
+            secondary.append(["key": "venue", "label": "VENUE", "value": venueName,
                               "textAlignment": "PKTextAlignmentRight"])
         }
+        // With a poster strip the art carries the show's identity — a giant
+        // overlaid title would double it. Text title only when there's no art.
+        let primary: [[String: Any]] = hasPoster
+            ? []
+            : [["key": "show", "label": "SHOW", "value": smartTitleCase(ticket.title)]]
         pass["eventTicket"] = [
-            "primaryFields": [["key": "show", "label": "SHOW", "value": ticket.title.capitalized]],
+            "primaryFields": primary,
             "secondaryFields": secondary,
         ]
         return (try? JSONSerialization.data(withJSONObject: pass)) ?? Data()
@@ -266,6 +292,104 @@ enum WalletPass {
             art.draw(in: CGRect(x: rect.midX - drawSize.width / 2,
                                 y: rect.midY - drawSize.height / 2,
                                 width: drawSize.width, height: drawSize.height))
+        }
+        return image.pngData() ?? Data()
+    }
+
+    /// Title-case that leaves digit-led words alone ("14TH ST." -> "14th St.",
+    /// where `capitalized` would produce "14Th").
+    private static func smartTitleCase(_ text: String) -> String {
+        text.split(separator: " ").map { word -> String in
+            let lower = word.lowercased()
+            guard let first = lower.first, first.isLetter else { return lower }
+            return first.uppercased() + lower.dropFirst()
+        }.joined(separator: " ")
+    }
+
+    private static func fetchPoster(_ urlString: String?) async -> UIImage? {
+        guard let urlString, let url = URL(string: urlString),
+              let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        return UIImage(data: data)
+    }
+
+    /// Reserved-ticket strip: the show poster aspect-filled into the banner,
+    /// with a dark scrim along the bottom so the overlaid SHOW field stays
+    /// readable. eventTicket strips are 375x98 pt.
+    private static func posterStripPNG(poster: UIImage, scale: CGFloat) -> Data {
+        let size = CGSize(width: 375 * scale, height: 98 * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { ctx in
+            let rect = CGRect(origin: .zero, size: size)
+            // Aspect-fill, centered.
+            let s = max(rect.width / poster.size.width, rect.height / poster.size.height)
+            let draw = CGSize(width: poster.size.width * s, height: poster.size.height * s)
+            poster.draw(in: CGRect(x: rect.midX - draw.width / 2, y: rect.midY - draw.height / 2,
+                                   width: draw.width, height: draw.height))
+            // Bottom scrim for field legibility.
+            let colors = [UIColor.black.withAlphaComponent(0).cgColor,
+                          UIColor.black.withAlphaComponent(0.62).cgColor]
+            if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                  colors: colors as CFArray, locations: [0, 1]) {
+                ctx.cgContext.drawLinearGradient(
+                    g, start: CGPoint(x: 0, y: rect.height * 0.45),
+                    end: CGPoint(x: 0, y: rect.height), options: [])
+            }
+        }
+        return image.pngData() ?? Data()
+    }
+
+    /// Student ID strip: dark brick wall, one warm spotlight from above, and
+    /// the skull art on a white card holding the stage. storeCard strips are
+    /// 375x144 pt.
+    private static func brickStripPNG(scale: CGFloat) -> Data {
+        let size = CGSize(width: 375 * scale, height: 144 * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { ctx in
+            let g = ctx.cgContext
+            let rect = CGRect(origin: .zero, size: size)
+
+            // Brick wall: mortar ground, then offset rows of bricks.
+            UIColor(red: 0.098, green: 0.066, blue: 0.063, alpha: 1).setFill()  // mortar #19110F
+            g.fill(rect)
+            UIColor(red: 0.141, green: 0.102, blue: 0.094, alpha: 1).setFill()  // brick #241A18
+            let bh: CGFloat = 21 * scale, bw: CGFloat = 50 * scale, gap: CGFloat = 3 * scale
+            var y: CGFloat = 0
+            var row = 0
+            while y < rect.height {
+                var x: CGFloat = (row % 2 == 0) ? 0 : -bw / 2
+                while x < rect.width {
+                    g.fill(CGRect(x: x, y: y, width: bw - gap, height: bh - gap))
+                    x += bw
+                }
+                y += bh
+                row += 1
+            }
+
+            // Spotlight pool from above.
+            let warm = UIColor(red: 1.0, green: 0.87, blue: 0.67, alpha: 0.38).cgColor
+            let clear = UIColor(red: 1.0, green: 0.87, blue: 0.67, alpha: 0).cgColor
+            if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                     colors: [warm, clear] as CFArray, locations: [0, 1]) {
+                g.drawRadialGradient(grad,
+                                     startCenter: CGPoint(x: rect.midX, y: -rect.height * 0.3), startRadius: 0,
+                                     endCenter: CGPoint(x: rect.midX, y: rect.midY), endRadius: rect.width * 0.52,
+                                     options: [.drawsAfterEndLocation])
+            }
+
+            // The skull on a white card, catching the light.
+            guard let art = UIImage(named: "ucb_skull") else { return }
+            let cardH = rect.height * 0.72
+            let inset = cardH * 0.10
+            let artScale = (cardH - inset * 2) / art.size.height
+            let cardW = art.size.width * artScale + inset * 2
+            let card = CGRect(x: rect.midX - cardW / 2, y: rect.midY - cardH / 2,
+                              width: cardW, height: cardH)
+            g.setShadow(offset: .zero, blur: 26 * scale,
+                        color: UIColor(red: 1.0, green: 0.87, blue: 0.67, alpha: 0.55).cgColor)
+            UIColor.white.setFill()
+            UIBezierPath(roundedRect: card, cornerRadius: 8 * scale).fill()
+            g.setShadow(offset: .zero, blur: 0, color: nil)
+            art.draw(in: card.insetBy(dx: inset, dy: inset))
         }
         return image.pngData() ?? Data()
     }

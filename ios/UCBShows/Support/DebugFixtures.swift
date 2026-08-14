@@ -21,7 +21,8 @@ enum DebugFixtures {
                               title: "THE PROPHECY",
                               venueLabel: "NY - 14TH ST. MAINSTAGE", source: "ucb_ny",
                               start: "2026-08-14T19:00", qrSVG: sampleQR,
-                              releaseNonce: "debug")])
+                              releaseNonce: "debug",
+                              posterURL: "https://ucbcomedy.com/wp-content/uploads/2026/07/Edits-various-show-posters-2026-07-09T150454.087.jpg")])
     }
 
     /// A real, scannable sample QR (payload "UCB-STUDENT-SAMPLE-000738265"),
