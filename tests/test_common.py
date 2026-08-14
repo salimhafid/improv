@@ -4,7 +4,22 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timezone
 
-from common import clean, local_today, parse_datetime, safe_url, strip_html
+from common import block_text, clean, local_today, parse_datetime, safe_url, strip_html
+
+
+class BlockTextTests(unittest.TestCase):
+    def test_preserves_paragraphs_breaks_and_bullets(self):
+        from bs4 import BeautifulSoup
+        html = ("<div><p>First para.</p><p>Second <br>line.</p>"
+                "<ul><li>One</li><li>Two</li></ul></div>")
+        el = BeautifulSoup(html, "lxml").div
+        self.assertEqual(block_text(el),
+                         "First para.\n\nSecond\nline.\n\n\u2022 One\n\u2022 Two")
+
+    def test_collapses_runs_of_blank_lines(self):
+        from bs4 import BeautifulSoup
+        el = BeautifulSoup("<div><p>A</p><p></p><p></p><p>B</p></div>", "lxml").div
+        self.assertEqual(block_text(el), "A\n\nB")
 
 
 class CleanTests(unittest.TestCase):

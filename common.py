@@ -78,6 +78,40 @@ def fetch_json(url: str, retries: int = 3):
     raise RuntimeError(f"failed to fetch json {url} after {retries} attempts: {last_err}")
 
 
+_BLOCK_TAGS = {"p", "div", "section", "article", "blockquote",
+               "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "tr"}
+
+
+def block_text(el) -> str:
+    """Paragraph-preserving text extraction for description HTML: block
+    elements become blank-line breaks, <br> a line break, <li> a bullet —
+    so the app can render copy with the site's structure instead of one
+    mashed-together line."""
+    from bs4 import NavigableString, Tag
+
+    def walk(node) -> str:
+        if isinstance(node, NavigableString):
+            return str(node)
+        if not isinstance(node, Tag):
+            return ""
+        if node.name == "br":
+            return "\n"
+        if node.name in ("script", "style"):
+            return ""
+        inner = "".join(walk(c) for c in node.children)
+        if node.name == "li":
+            return "\u2022 " + inner.strip() + "\n"
+        if node.name in _BLOCK_TAGS:
+            return inner.strip() + "\n\n"
+        return inner
+
+    text = walk(el)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" ?\n ?", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def clean(text) -> str:
     """Collapse whitespace. Tolerates non-string CMS values (ints, lists, dicts)
     so a single odd field skips rather than crashing a whole source."""

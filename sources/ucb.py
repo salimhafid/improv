@@ -6,7 +6,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from common import clean, fetch_html, make_show, parse_datetime, safe_url
+from common import block_text, clean, fetch_html, make_show, parse_datetime, safe_url
 
 REGIONS = {
     "ny": ("ucb_ny", "UCB", "New York", "https://ucbcomedy.com/shows/new-york/"),
@@ -176,7 +176,7 @@ def detail(url: str) -> tuple[str, str, str | None, list[dict]] | None:
     except RuntimeError:
         return None
     el = soup.select_one(".ucb-event-description")
-    description = clean(el.get_text(" ")) if el else ""
+    description = block_text(el) if el else ""
     members = _linked_cast(soup)
     if members:
         cast = ", ".join(m["name"] for m in members)[:400]
