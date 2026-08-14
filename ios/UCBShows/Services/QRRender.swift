@@ -22,22 +22,26 @@ enum QRRender {
     }
 
     /// Rasterize QR SVG markup to a square PNG (for notification attachments).
+    /// Bounded by a timeout and resumed on every terminal navigation outcome, so
+    /// a stuck render can never hang the caller (geofence arming).
     @MainActor
     static func rasterize(svg: String, side: CGFloat = 480) async -> Data? {
         guard !svg.isEmpty else { return nil }
-        let config = WKWebViewConfiguration()
-        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: side, height: side), configuration: config)
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: side, height: side))
         web.isOpaque = true
         web.backgroundColor = .white
 
-        return await withCheckedContinuation { (cont: CheckedContinuation<Data?, Never>) in
-            let delegate = LoadThenSnapshot(side: side) { image in
-                cont.resume(returning: image?.pngData())
-            }
+        let image: UIImage? = await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
+            let delegate = LoadThenSnapshot(side: side) { cont.resume(returning: $0) }
             web.navigationDelegate = delegate
             objc_setAssociatedObject(web, &Self.delegateKey, delegate, .OBJC_ASSOCIATION_RETAIN)
             web.loadHTMLString(html(for: svg), baseURL: nil)
+            Task {                       // hard timeout backstop
+                try? await Task.sleep(for: .seconds(4))
+                delegate.timeout(web)
+            }
         }
+        return image?.pngData()
     }
 
     /// Fallback QR from a raw payload string (unused while UCB gives us SVG).
@@ -56,32 +60,43 @@ enum QRRender {
     private nonisolated(unsafe) static var delegateKey: UInt8 = 0
 
     /// Loads the SVG, gives it a beat to lay out, then snapshots to a UIImage.
+    /// Every terminal path (finish, any failure, content-process crash, timeout)
+    /// resolves the caller exactly once.
     private final class LoadThenSnapshot: NSObject, WKNavigationDelegate {
         let side: CGFloat
-        let done: (UIImage?) -> Void
+        private let done: (UIImage?) -> Void
         private var finished = false
         init(side: CGFloat, done: @escaping (UIImage?) -> Void) { self.side = side; self.done = done }
 
-        func webView(_ web: WKWebView, didFinish navigation: WKNavigation!) {
+        private func resolve(_ image: UIImage?) {
             guard !finished else { return }
             finished = true
+            done(image)
+        }
+
+        func webView(_ web: WKWebView, didFinish navigation: WKNavigation!) {
+            guard !finished else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                 let cfg = WKSnapshotConfiguration()
                 cfg.rect = CGRect(x: 0, y: 0, width: self.side, height: self.side)
-                web.takeSnapshot(with: cfg) { image, _ in self.done(image) }
+                web.takeSnapshot(with: cfg) { image, _ in self.resolve(image) }
             }
         }
 
-        func webView(_ web: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            if !finished { finished = true; done(nil) }
-        }
+        func webView(_ web: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { resolve(nil) }
+        func webView(_ web: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { resolve(nil) }
+        func webViewWebContentProcessDidTerminate(_ web: WKWebView) { resolve(nil) }
+        func timeout(_ web: WKWebView) { web.stopLoading(); resolve(nil) }
     }
 }
 
 /// SwiftUI on-screen QR: the SVG rendered in a WebView on a white card. Used on
-/// the ticket detail screen (which also cranks brightness).
+/// the ticket detail screen (which also cranks brightness). Reloads only when
+/// the SVG actually changes, so unrelated SwiftUI updates don't flash the code.
 struct QRCodeView: UIViewRepresentable {
     let svg: String
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> WKWebView {
         let web = WKWebView()
@@ -89,11 +104,26 @@ struct QRCodeView: UIViewRepresentable {
         web.backgroundColor = .white
         web.scrollView.isScrollEnabled = false
         web.isUserInteractionEnabled = false
+        web.navigationDelegate = context.coordinator
         return web
     }
 
     func updateUIView(_ web: WKWebView, context: Context) {
+        guard context.coordinator.loadedSVG != svg else { return }
+        context.coordinator.loadedSVG = svg
         web.loadHTMLString(QRRender.svgHTML(svg), baseURL: nil)
+    }
+
+    /// Tracks the loaded SVG so unrelated SwiftUI updates don't reload — and
+    /// re-runs the load if WebKit's content process is reclaimed while the app
+    /// is suspended (loadHTMLString pages don't auto-restore, so without this
+    /// the user would arrive at the door to a blank white card).
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var loadedSVG: String?
+        func webViewWebContentProcessDidTerminate(_ web: WKWebView) {
+            guard let svg = loadedSVG else { return }
+            web.loadHTMLString(QRRender.svgHTML(svg), baseURL: nil)
+        }
     }
 }
 

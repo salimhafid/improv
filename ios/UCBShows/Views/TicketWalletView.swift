@@ -23,12 +23,19 @@ struct TicketWalletView: View {
             }
             .navigationTitle("Tickets")
             .navigationDestination(for: Ticket.self) { ticket in
-                TicketDetailView(ticket: ticket) { t in _ = await tickets.release(t) }
+                TicketDetailView(ticket: ticket) { t in await tickets.release(t) }
             }
             .sheet(isPresented: $showSignIn) { UCBSignInView(account: account) }
-            .task { if account.isSignedIn { await tickets.sync() } }
+            // Re-runs when sign-in state flips, so a first-ever sign-in pulls
+            // the Student ID + tickets without needing a pull-to-refresh.
+            .task(id: account.isSignedIn) {
+                if account.isSignedIn { await tickets.sync() }
+                openDeepLink(app.openTicketID)
+            }
             .onChange(of: app.openTicketID) { _, id in openDeepLink(id) }
-            .onAppear { openDeepLink(app.openTicketID) }
+            // Retry the deep link once the target ticket lands in the store.
+            .onChange(of: tickets.reserved) { _, _ in openDeepLink(app.openTicketID) }
+            .onChange(of: tickets.studentID) { _, _ in openDeepLink(app.openTicketID) }
         }
     }
 
@@ -59,7 +66,10 @@ struct TicketWalletView: View {
                 }
 
                 Button("Sign out of UCB", role: .destructive) {
-                    Task { await tickets.sync(); await account.signOut() }
+                    Task {
+                        await account.signOut()
+                        tickets.clearLocal()   // disarm geofences + cancel reminders
+                    }
                 }
                 .font(.subheadline)
                 .frame(maxWidth: .infinity)

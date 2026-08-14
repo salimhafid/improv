@@ -2,9 +2,9 @@
 // building). Compiled straight against the app sources — no Xcode test target:
 //
 //   xcrun swiftc -parse-as-library -o /tmp/improv_logic_tests \
-//     ios/UCBShows/Support/DateUtils.swift ios/UCBShows/Models/*.swift \
-//     ios/UCBShows/Services/ShowsStore.swift ios/UCBShows/Services/ShowsService.swift \
-//     ios/UCBShows/Services/ClassesStore.swift ios/UCBShows/Services/ClassesService.swift \
+//     ios/UCBShows/Support/DateUtils.swift ios/UCBShows/Support/AppSupport.swift \
+//     ios/UCBShows/Models/*.swift ios/UCBShows/Services/FeedService.swift \
+//     ios/UCBShows/Services/ShowsStore.swift ios/UCBShows/Services/ClassesStore.swift \
 //     tests/ios/LogicTests.swift && /tmp/improv_logic_tests
 //
 // (run_tests.sh at the repo root does exactly this.)

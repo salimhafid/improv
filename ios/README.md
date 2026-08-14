@@ -84,8 +84,7 @@ UCBShows/
     Source.swift             City (timezone) + theater catalog + feed source info
     Filters.swift            value-type filter state (shows + classes)
   Services/
-    ShowsService.swift       fetch + on-disk last-good cache (shows.json)
-    ClassesService.swift     same for classes.json
+    FeedService.swift        generic fetch + on-disk last-good cache (all feeds)
     ShowsStore.swift         @MainActor @Observable source of truth for shows
     ClassesStore.swift       same for classes
     GoingStore.swift         saved "I'm Going" shows + pre-show reminders
@@ -108,8 +107,7 @@ under `UCBShows/` are picked up automatically — no `.pbxproj` edits needed.
 
 ## Data source
 
-`ShowsService.feedURL` / `ClassesService.feedURL` / `TalentService.feedURL`
-point at the static feeds in this repo's `docs/` folder, served via
-raw.githubusercontent.com (committed by the scheduled scrape workflow). To
-point at a different backend (e.g. a local `python app.py`), change those
-constants.
+The `FeedService` factories (`.shows` / `.classes` / `.talent`) point at the
+static feeds in this repo's `docs/` folder, served via raw.githubusercontent.com
+(committed by the scheduled scrape workflow). To point at a different backend,
+change the `liveFeed` base URL in `Services/FeedService.swift`.

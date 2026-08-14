@@ -338,6 +338,12 @@ class WgisYearBoundaryTests(unittest.TestCase):
         start = wgis._parse_when_start("Thu Jul 9 7pm (2 hrs)", today=date(2026, 7, 22))
         self.assertEqual(start, "2026-07-09T19:00:00")
 
+    def test_december_class_seen_in_january_lands_last_year(self):
+        # Mirror case: a December-started in-session class viewed in January
+        # must roll BACK a year, not sit 11 months in the future.
+        start = wgis._parse_when_start("Thu Dec 18 7pm (2 hrs)", today=date(2027, 1, 10))
+        self.assertEqual(start, "2026-12-18T19:00:00")
+
 
 # ---- Playground (ICS parsing) ----------------------------------------------
 

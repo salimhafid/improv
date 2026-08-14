@@ -56,6 +56,12 @@ struct ShowsFeedView: View {
                 // Scope changed — drop venue/types not in the new theater.
                 store.reconcileFilters(city: city, theater: theater)
             }
+            .onChange(of: city) { _, _ in
+                // City changed with All Theaters selected: theater stays "all",
+                // so the onChange above never fires — reconcile here or a stale
+                // venue/type filter from the old city empties the feed.
+                store.reconcileFilters(city: city, theater: theater)
+            }
             .onChange(of: store.lastUpdated) { _, _ in
                 // Re-reconcile on every successful load (keyed on the timestamp,
                 // not the count, so a same-count refresh still reconciles).
