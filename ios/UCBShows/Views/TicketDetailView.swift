@@ -11,6 +11,7 @@ struct TicketDetailView: View {
     @State private var priorBrightness: CGFloat?
     @State private var releasing = false
     @State private var releaseError: String?
+    @State private var confirmingRelease = false
 
     var body: some View {
         ScrollView {
@@ -42,19 +43,9 @@ struct TicketDetailView: View {
                         .padding(.horizontal, Theme.Space.gutter)
                 }
 
-                if ticket.kind == .reserved, ticket.isReleasable, let onRelease {
+                if ticket.kind == .reserved, ticket.isReleasable, onRelease != nil {
                     Button(role: .destructive) {
-                        releasing = true
-                        releaseError = nil
-                        Task {
-                            let ok = await onRelease(ticket)
-                            releasing = false
-                            // Only leave on success — a failed release means the
-                            // ticket is still claimed, and silently popping would
-                            // read as "released".
-                            if ok { dismiss() }
-                            else { releaseError = "Couldn’t release the ticket. Check your connection and try again." }
-                        }
+                        confirmingRelease = true
                     } label: {
                         if releasing { ProgressView() } else { Text("Release ticket") }
                     }
@@ -62,6 +53,13 @@ struct TicketDetailView: View {
                     .controlSize(.large)
                     .disabled(releasing)
                     .padding(.top, 4)
+                    .confirmationDialog("Release this ticket?", isPresented: $confirmingRelease,
+                                        titleVisibility: .visible) {
+                        Button("Release ticket", role: .destructive) { release() }
+                        Button("Keep ticket", role: .cancel) {}
+                    } message: {
+                        Text("Your seat goes back on sale and your weekly student allowance is restored. This can’t be undone.")
+                    }
 
                     if let releaseError {
                         Text(releaseError)
@@ -81,6 +79,20 @@ struct TicketDetailView: View {
         // on scene changes), and re-brighten on return.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { brighten() } else { restoreBrightness() }
+        }
+    }
+
+    private func release() {
+        guard let onRelease else { return }
+        releasing = true
+        releaseError = nil
+        Task {
+            let ok = await onRelease(ticket)
+            releasing = false
+            // Only leave on success — a failed release means the ticket is
+            // still claimed, and silently popping would read as "released".
+            if ok { dismiss() }
+            else { releaseError = "Couldn’t release the ticket. Check your connection and try again." }
         }
     }
 
