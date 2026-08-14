@@ -14,3 +14,7 @@ ios/UCBShows.xcodeproj/xcuserdata/
 ios/UCBShows.xcodeproj/project.xcworkspace/xcuserdata/
 DerivedData/
 build/
+
+# Wallet pass signing credentials (device-local, never committed)
+ios/UCBShows/PassSigning/pass_cert.pem
+ios/UCBShows/PassSigning/pass_key.pem
