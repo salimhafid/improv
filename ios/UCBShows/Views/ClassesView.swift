@@ -1,23 +1,23 @@
 import SwiftUI
 
-/// Classes & workshops organized by school folder. Each selected theater is a
-/// card with collapsible subject sub-sections inside. Unselected theaters from
-/// the same cities collapse into a "More schools" row.
+/// Classes & workshops organized by school folder. Classes are browsed
+/// city-wide: every school in the selected theaters' cities gets a card with
+/// collapsible subject sub-sections inside, the picked theaters first. The city
+/// is inferred from the sidebar selection — it's never asked for.
 struct ClassesView: View {
     @Environment(ClassesStore.self) private var store
     @Environment(ClassAlertsStore.self) private var alertsStore
     @Environment(AppState.self) private var app
     @Environment(\.horizontalSizeClass) private var hSize
-    @State private var showFilters = false
     @State private var showAlerts = false
     @State private var query = ""
     @State private var expandedSchool: String?
     @State private var expandedSubjects: Set<String> = []
 
     private var theaters: Set<String> { app.selectedTheaters }
-    private var title: String { app.scopeTheaterName ?? "Classes" }
+    private var title: String { app.scopeCityName ?? "Classes" }
     private var searchPrompt: String {
-        app.scopeTheaterName.map { "Search \($0) classes" } ?? "Search classes"
+        app.scopeCityName.map { "Search \($0) classes" } ?? "Search classes"
     }
 
     var body: some View {
@@ -30,7 +30,7 @@ struct ClassesView: View {
                     case .failed(let message): errorState(message)
                     default: emptyDataState
                     }
-                } else if layout.selected.isEmpty && layout.more.isEmpty {
+                } else if layout.selected.isEmpty {
                     emptyState
                 } else {
                     list(layout)
@@ -40,15 +40,11 @@ struct ClassesView: View {
             .toolbar {
                 hamburgerToolbarItem
                 alertsToolbarItem
-                filterToolbarItem
             }
             .navigationDestination(for: ClassItem.self) { item in
                 ClassDetailView(item: item)
             }
             .searchable(text: $query, prompt: searchPrompt)
-            .sheet(isPresented: $showFilters) {
-                ClassFilterSheet(store: store, theaters: theaters)
-            }
             .sheet(isPresented: $showAlerts) {
                 ClassAlertsView()
             }
@@ -56,25 +52,12 @@ struct ClassesView: View {
             .onSwipeRight {
                 if hSize == .compact { app.sidebarOpen = true }
             }
-            .task { store.reconcileLevel(theaters: theaters) }
-            .onChange(of: theaters) { _, newTheaters in
-                store.reconcileLevel(theaters: newTheaters)
-                // Auto-expand the first selected school
-                if let first = store.schoolFolders(theaters: newTheaters).selected.first {
-                    expandedSchool = first.id
-                }
-            }
-            .onChange(of: store.lastUpdated) { _, _ in
-                store.reconcileLevel(theaters: theaters)
-                if ProcessInfo.processInfo.uiTestClassFilter, !store.allClasses.isEmpty {
-                    showFilters = true
-                }
-            }
-            .onAppear {
-                if expandedSchool == nil,
-                   let first = store.schoolFolders(theaters: theaters).selected.first {
-                    expandedSchool = first.id
-                }
+            .onChange(of: theaters) { _, _ in
+                // A new sidebar pick is a new city's worth of schools, so start
+                // it fully collapsed rather than leaving a card from the old
+                // scope open.
+                expandedSchool = nil
+                expandedSubjects = []
             }
         }
     }
@@ -91,10 +74,6 @@ struct ClassesView: View {
 
                 ForEach(layout.selected) { folder in
                     schoolCard(folder)
-                }
-
-                if !layout.more.isEmpty {
-                    moreSchoolsCard(layout.more, totalCount: layout.moreCount)
                 }
 
                 if let updated = store.updatedLabel, store.phase != .offline {
@@ -204,102 +183,25 @@ struct ClassesView: View {
         }
     }
 
-    // MARK: More Schools
-
-    private func moreSchoolsCard(_ rows: [MoreSchoolRow], totalCount: Int) -> some View {
-        let isOpen = expandedSchool == "__more__"
-        return VStack(spacing: 0) {
-            Button {
-                withAnimation(.snappy(duration: 0.25)) {
-                    expandedSchool = isOpen ? nil : "__more__"
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    Text("+\(rows.count)")
-                        .font(.caption.weight(.heavy))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(.primary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    Text("More schools")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Spacer(minLength: 4)
-                    Text("\(totalCount)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 14)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .sensoryFeedback(.selection, trigger: isOpen)
-
-            if isOpen {
-                ForEach(rows) { row in
-                    VStack(spacing: 0) {
-                        Divider().padding(.leading, 56)
-                        HStack(spacing: 12) {
-                            TheaterIcon(id: row.id, size: 30)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(row.name)
-                                    .font(.body.weight(.medium))
-                                    .foregroundStyle(.primary)
-                                Text("\(row.count) classes")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 4)
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                    }
-                }
-            }
-        }
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, Theme.Space.gutter)
-        .padding(.top, 10)
-    }
-
     // MARK: States
 
     @ViewBuilder
     private var emptyState: some View {
         if !query.isEmpty {
             ContentUnavailableView.search(text: query)
-        } else if store.filters.isActive {
-            noMatchesState
         } else {
-            noClassesForTheater
+            noClassesForCity
         }
     }
 
-    private var noMatchesState: some View {
-        ContentUnavailableView {
-            Label("No Classes Match", systemImage: "line.3.horizontal.decrease.circle")
-        } description: {
-            Text("Try removing a filter to see more classes.")
-        } actions: {
-            Button("Clear Filters") { store.filters.clear() }
-                .buttonStyle(.borderedProminent)
-        }
-    }
-
-    private var noClassesForTheater: some View {
+    private var noClassesForCity: some View {
         ContentUnavailableView {
             Label("No Classes", systemImage: "graduationcap")
         } description: {
-            Text(app.scopeTheaterName.map { "\($0) has no classes listed. Try another theater." }
-                ?? "The selected theaters have no classes listed.")
+            // The list is city-wide, so an empty one is the city's fault, not
+            // the picked theater's.
+            Text(app.scopeCityName.map { "No classes listed in \($0) right now." }
+                ?? "No classes listed in the selected cities right now.")
         } actions: {
             if hSize == .compact {
                 Button("Choose Theater") { app.sidebarOpen = true }
@@ -347,16 +249,6 @@ struct ClassesView: View {
                 Image(systemName: alertsStore.activeCount > 0 ? "bell.badge.fill" : "bell")
                     .foregroundStyle(Theme.accent)
                     .accessibilityLabel("Class alerts")
-            }
-        }
-    }
-
-    private var filterToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                showFilters = true
-            } label: {
-                FilterToolbarIcon(activeCount: store.filters.activeCount)
             }
         }
     }

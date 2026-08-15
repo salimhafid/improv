@@ -1,7 +1,8 @@
 import Foundation
 
-/// The cities the app spans — a grouping label for theaters (sidebar sections,
-/// Setup), not a scope of its own. Case order is the display order.
+/// The cities the app spans — a grouping label for theaters (sidebar sections)
+/// and the unit the Classes tab browses in. Never picked directly: it's always
+/// inferred from the selected theaters. Case order is the display order.
 enum City: String, CaseIterable, Identifiable, Codable {
     case newYork = "New York"
     case chicago = "Chicago"
@@ -40,15 +41,15 @@ enum City: String, CaseIterable, Identifiable, Codable {
     var calendar: Calendar { DateUtils.calendar(in: timeZone) }
 }
 
-/// A source the app knows how to show, listed in Setup even before the feed loads
-/// or when the source is currently unavailable.
+/// A source the app knows how to show, listed in the sidebar even before the feed
+/// loads or when the source is currently unavailable.
 struct SourceCatalogEntry: Identifiable, Hashable {
     let id: String        // matches the feed's source id
     let name: String      // display name, e.g. "Brooklyn Comedy Collective"
     let blurb: String     // neighborhood / subtitle
     let city: City
     /// False for class-only schools (no shows feed) — they're hidden from the
-    /// shows sidebar/Setup, and their classes ride along with their city.
+    /// theater sidebar, but their classes still show up under their city.
     var hasShows = true
 }
 
@@ -117,12 +118,12 @@ enum SourceCatalog {
 
     static let allIDs = Set(all.map(\.id))
 
-    /// Theaters selectable in the sidebar/Setup (shows feed exists).
+    /// Theaters selectable in the sidebar (shows feed exists).
     static let showIDs = Set(all.filter(\.hasShows).map(\.id))
 
     /// Catalog grouped by city, in city order, skipping empty cities. Only
-    /// theaters with shows — this feeds the sidebar and Setup, which scope
-    /// the shows feed.
+    /// theaters with shows — this feeds the sidebar, which scopes the shows
+    /// feed.
     static var byCity: [(city: City, entries: [SourceCatalogEntry])] {
         City.allCases.compactMap { city in
             let entries = all.filter { $0.city == city && $0.hasShows }
@@ -132,13 +133,17 @@ enum SourceCatalog {
 
     static func entry(_ id: String) -> SourceCatalogEntry? { all.first { $0.id == id } }
 
-    /// Class sources visible for a theater selection: the selected theaters
-    /// plus class-only schools (unlistable in the sidebar) from the same
-    /// cities — so e.g. WGIS NY's classes appear for anyone scoped to a New
-    /// York theater.
+    /// Class sources visible for a theater selection: **every** school in the
+    /// selection's cities, not just the picked theaters. Classes are browsed
+    /// city-wide — picking UCB New York surfaces Magnet, BCC and WGIS NY too —
+    /// while the shows feed stays scoped to the picked theaters.
+    ///
+    /// The empty set keeps its "no scoping" meaning, and unknown ids stay in
+    /// the scope alone: without the union an unrecognized id would yield ∅,
+    /// which downstream reads as *every* class in every city.
     static func classScope(for theaters: Set<String>) -> Set<String> {
+        guard !theaters.isEmpty else { return [] }
         let cities = Set(theaters.compactMap { entry($0)?.city })
-        let classOnly = all.filter { !$0.hasShows && cities.contains($0.city) }.map(\.id)
-        return theaters.union(classOnly)
+        return Set(all.filter { cities.contains($0.city) }.map(\.id)).union(theaters)
     }
 }

@@ -39,18 +39,10 @@ struct SchoolFolder: Identifiable {
     let subjects: [SubjectGroup]
 }
 
-/// A row in the "More schools" folder.
-struct MoreSchoolRow: Identifiable {
-    let id: String
-    let name: String
-    let count: Int
-}
-
-/// The full school-folder layout for the Classes tab.
+/// The full school-folder layout for the Classes tab: every school in the
+/// selection's cities, picked theaters first.
 struct SchoolFolderLayout {
     let selected: [SchoolFolder]
-    let more: [MoreSchoolRow]
-    var moreCount: Int { more.reduce(0) { $0 + $1.count } }
 }
 
 /// Single source of truth for the Classes tab: loads the `/classes.json` feed,
@@ -71,10 +63,6 @@ final class ClassesStore {
     private(set) var lastUpdated: Date?
     private(set) var sourcesInfo: [SourceInfo] = []
 
-    var filters: ClassFilters {
-        didSet { Self.persistFilters(filters) }
-    }
-
     /// How the list is grouped (persisted).
     var grouping: ClassGrouping {
         didSet { UserDefaults.standard.set(grouping.rawValue, forKey: Self.groupingKey) }
@@ -82,33 +70,11 @@ final class ClassesStore {
     private static let groupingKey = "classGrouping"
 
     private let service: FeedService<ClassesPayload>
-    private static let filtersKey = "classFilters"
 
     init(service: FeedService<ClassesPayload> = .classes) {
         self.service = service
-        self.filters = Self.loadFilters() ?? ClassFilters()
         self.grouping = UserDefaults.standard.string(forKey: Self.groupingKey)
             .flatMap(ClassGrouping.init(rawValue:)) ?? .subject
-    }
-
-    private static func loadFilters() -> ClassFilters? {
-        guard let data = UserDefaults.standard.data(forKey: filtersKey) else { return nil }
-        return try? JSONDecoder().decode(ClassFilters.self, from: data)
-    }
-
-    private static func persistFilters(_ filters: ClassFilters) {
-        if let data = try? JSONEncoder().encode(filters) {
-            UserDefaults.standard.set(data, forKey: filtersKey)
-        }
-    }
-
-    /// Drop a level filter not present in the current theater scope so a
-    /// stale selection can't silently empty the list. Driven by the view.
-    func reconcileLevel(theaters: Set<String>) {
-        guard !allClasses.isEmpty else { return }
-        if let l = filters.level, !availableLevels(theaters: theaters).contains(l) {
-            filters.level = nil
-        }
     }
 
     // MARK: Loading
@@ -144,27 +110,10 @@ final class ClassesStore {
         lastUpdated.map { DateUtils.relativeUpdated($0) }
     }
 
-    // MARK: Filter option sources (scoped to the current theaters)
-
-    /// Classes in a given theater scope (no other filters). The scope widens
-    /// to class-only schools in the selection's cities (see `classScope`).
-    /// The empty set means every theater.
-    func scoped(theaters: Set<String>) -> [ClassItem] {
-        let scope = SourceCatalog.classScope(for: theaters)
-        return allClasses.filter { scope.isEmpty || scope.contains($0.source) }
-    }
-
-    /// Distinct levels/tracks present in the scope, sorted.
-    func availableLevels(theaters: Set<String>) -> [String] {
-        Set(scoped(theaters: theaters).map(\.level)).filter { !$0.isEmpty }.sorted()
-    }
-
-    func levelFilterIsUseful(theaters: Set<String>) -> Bool {
-        !availableLevels(theaters: theaters).isEmpty
-    }
-
     // MARK: Filtering
 
+    /// Classes matching the search text within the selection's cities (see
+    /// `classScope` — the Classes tab browses city-wide, not theater-by-theater).
     func filtered(theaters: Set<String>, searchText: String = "") -> [ClassItem] {
         let query = searchText.folding(options: .diacriticInsensitive, locale: .current)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -175,8 +124,6 @@ final class ClassesStore {
 
     private func matches(_ item: ClassItem, query: String, theaters: Set<String>) -> Bool {
         if !theaters.isEmpty, !theaters.contains(item.source) { return false }
-        if let level = filters.level, item.level != level { return false }
-        if filters.openOnly, item.isFull { return false }
         if !query.isEmpty, !item.searchHay.contains(query) { return false }
         return true
     }
@@ -339,32 +286,31 @@ final class ClassesStore {
 
     // MARK: School Folders
 
+    /// Every school in the selection's cities gets a top-level folder. Within
+    /// each city the picked theaters lead, so the sidebar choice still sits on
+    /// top. Folders open on tap only — the list lands fully collapsed so all of
+    /// the city's schools are visible at once.
     func schoolFolders(theaters: Set<String>, searchText: String = "") -> SchoolFolderLayout {
         let items = filtered(theaters: theaters, searchText: searchText)
         let scope = SourceCatalog.classScope(for: theaters)
-
         let bySource = Dictionary(grouping: items, by: \.source)
-        var selected: [SchoolFolder] = []
-        var moreRows: [MoreSchoolRow] = []
 
-        let selectedOrder = SourceCatalog.all.filter { theaters.contains($0.id) }
-        let moreOrder = SourceCatalog.all.filter { scope.contains($0.id) && !theaters.contains($0.id) }
-
-        for entry in selectedOrder {
-            let classes = bySource[entry.id] ?? []
-            guard !classes.isEmpty else { continue }
-            selected.append(SchoolFolder(
-                id: entry.id, name: entry.name, count: classes.count,
-                subjects: Self.subjectGroups(from: classes, source: entry.id)))
+        let inScope = SourceCatalog.all.filter { scope.isEmpty || scope.contains($0.id) }
+        // Two filters rather than a sort: Swift's sort isn't documented stable,
+        // and catalog order within a city has to survive.
+        let order = City.allCases.flatMap { city -> [SourceCatalogEntry] in
+            let entries = inScope.filter { $0.city == city }
+            return entries.filter { theaters.contains($0.id) }
+                 + entries.filter { !theaters.contains($0.id) }
         }
 
-        for entry in moreOrder {
+        let folders: [SchoolFolder] = order.compactMap { entry in
             let classes = bySource[entry.id] ?? []
-            guard !classes.isEmpty else { continue }
-            moreRows.append(MoreSchoolRow(id: entry.id, name: entry.name, count: classes.count))
+            guard !classes.isEmpty else { return nil }
+            return SchoolFolder(id: entry.id, name: entry.name, count: classes.count,
+                                subjects: Self.subjectGroups(from: classes, source: entry.id))
         }
-
-        return SchoolFolderLayout(selected: selected, more: moreRows)
+        return SchoolFolderLayout(selected: folders)
     }
 
     private static func subjectGroups(from classes: [ClassItem], source: String) -> [SubjectGroup] {

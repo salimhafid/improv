@@ -137,7 +137,6 @@ part is pure paste.
 **Screenshots via simctl** (no XCUITest needed):
 ```bash
 xcrun simctl boot <device>
-xcrun simctl spawn <device> defaults write <bundle> hasCompletedSetup -bool YES  # skip onboarding
 xcrun simctl status_bar <device> override --time "9:41" --batteryState charged --batteryLevel 100
 SIMCTL_CHILD_UITEST_TAB=2 xcrun simctl launch <device> <bundle>   # env → screen
 xcrun simctl io <device> screenshot out.png

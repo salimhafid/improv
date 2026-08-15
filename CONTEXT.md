@@ -118,13 +118,13 @@ most daily.
   (hosted OG interstitials were considered and deliberately skipped).
 - **Reminders**: 1 hour before showtime; pending notifications rescheduled
   on every launch (migrates lead-time changes).
-- **Onboarding**: two steps (city → theater incl. All Theaters), both saved;
-  sidebar changes overwrite the default afterward.
+- **Onboarding**: none. A fresh install opens on UCB New York; theaters are
+  picked in the sidebar and the city is always inferred from that selection.
 - **DEBUG UITEST launch-env hooks** (Support/UITestSupport.swift + detail
   view): `UITEST_TAB` (0 Shows / 1 I'm Going / 2 Classes),
   `UITEST_PUSH_SOURCE=<source id>`, `UITEST_TALENT=directory|person|<name>`,
   `UITEST_SCROLL_CAST=1`, `UITEST_CALENDAR_DIALOG=1`, `UITEST_SHARE=1`,
-  `UITEST_SIDEBAR=1`, `UITEST_CLASS_FILTER=1`, `UITEST_ONBOARDING=2`.
+  `UITEST_SIDEBAR=1`.
 
 ## Build & release runbook
 
@@ -158,9 +158,8 @@ xcodebuild -exportArchive -archivePath <path>/Improv.xcarchive \
 
 ```bash
 xcrun simctl boot <udid>            # list: xcrun simctl list devices available
-xcrun simctl spawn <udid> defaults write com.salimhafid.UCBShows hasCompletedSetup -bool YES
-xcrun simctl spawn <udid> defaults write com.salimhafid.UCBShows selectedCity "New York"
-xcrun simctl spawn <udid> defaults write com.salimhafid.UCBShows selectedTheater "ucb_ny"
+# no onboarding to skip; seed the selection directly if you need a non-default one
+xcrun simctl spawn <udid> defaults write com.salimhafid.UCBShows selectedTheaters -array "ucb_ny"
 xcrun simctl status_bar <udid> override --time "9:41" --batteryState charged --batteryLevel 100
 SIMCTL_CHILD_UITEST_PUSH_SOURCE=ucb_ny xcrun simctl launch <udid> com.salimhafid.UCBShows
 xcrun simctl io <udid> screenshot out.png

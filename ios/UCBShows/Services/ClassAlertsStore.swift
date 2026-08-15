@@ -62,6 +62,11 @@ final class ClassAlertsStore {
         ("other", "Everything Else"),
     ]
 
+    /// Categories switched on when a UCB school is first enabled — deliberately
+    /// just the core improv track. Everything else is opt-in (use "Select all"
+    /// in the detail view to take the lot).
+    static let defaultUCBCategories: Set<String> = ["improv"]
+
     // MARK: Preferences (persisted)
 
     struct Prefs: Codable, Equatable {
@@ -71,7 +76,14 @@ final class ClassAlertsStore {
         /// UCB school id → enabled category keys. A key present with an empty
         /// set means "on, but no categories" (sends nothing).
         var ucb: [String: Set<String>] = [:]
+        /// Schema version, so a one-time migration can run without re-running
+        /// on every launch. Absent (0) = written before key-presence semantics.
+        var version = 0
     }
+
+    /// Current `Prefs` schema version. v1 introduced key-presence semantics for
+    /// `ucb` (see `isUCBEnabled`).
+    private static let prefsVersion = 1
 
     private(set) var prefs = Prefs()
     /// Human-readable status of the last subscription sync ("" = fine).
@@ -85,10 +97,25 @@ final class ClassAlertsStore {
         if let data = UserDefaults.standard.data(forKey: Self.prefsKey),
            let saved = try? JSONDecoder().decode(Prefs.self, from: data) {
             prefs = saved
+            migrateIfNeeded()
         }
     }
 
-    /// Count of schools currently alerting — drives the bell badge.
+    /// Pre-v1, a school was "on" only while its category set was non-empty, so
+    /// unchecking the last category was how you silenced it — leaving an empty
+    /// set behind. Key-presence semantics would read those as on again, so drop
+    /// them once. After v1 an empty set is a deliberate (silent) state and is
+    /// left alone.
+    private func migrateIfNeeded() {
+        guard prefs.version < 1 else { return }
+        prefs.ucb = prefs.ucb.filter { !$0.value.isEmpty }
+        prefs.version = Self.prefsVersion
+        persist()
+    }
+
+    /// Count of schools currently alerting — drives the bell badge. Deliberately
+    /// stricter than `isUCBEnabled`: this means "actually pushing", so a school
+    /// that's on with no categories picked (which sends nothing) doesn't count.
     var activeCount: Int {
         guard prefs.master else { return 0 }
         return prefs.schools.count + prefs.ucb.filter { !$0.value.isEmpty }.count
@@ -109,9 +136,9 @@ final class ClassAlertsStore {
 
     func setUCB(_ id: String, enabled: Bool) {
         if enabled {
-            if prefs.ucb[id, default: []].isEmpty {
-                prefs.ucb[id] = Set(Self.ucbCategories.map(\.key))   // default: everything
-            }
+            // Only seed a school that has no entry at all — an existing pick
+            // (including the deliberate on-with-nothing state) is never rewritten.
+            if prefs.ucb[id] == nil { prefs.ucb[id] = Self.defaultUCBCategories }
         } else {
             prefs.ucb[id] = nil
         }
@@ -119,18 +146,35 @@ final class ClassAlertsStore {
     }
 
     func setUCBCategory(_ id: String, category: String, enabled: Bool) {
-        var set = prefs.ucb[id] ?? []
+        // Never materialize a key for an off school — under key-presence
+        // semantics that would silently switch it on.
+        guard var set = prefs.ucb[id] else { return }
         if enabled { set.insert(category) } else { set.remove(category) }
         prefs.ucb[id] = set
         persistAndSync()
     }
 
-    func isUCBEnabled(_ id: String) -> Bool { !(prefs.ucb[id] ?? []).isEmpty }
+    /// Switch every category on, or clear them all while leaving the school on.
+    func setAllUCBCategories(_ id: String, enabled: Bool) {
+        guard prefs.ucb[id] != nil else { return }
+        prefs.ucb[id] = enabled ? Set(Self.ucbCategories.map(\.key)) : []
+        persistAndSync()
+    }
 
-    private func persistAndSync() {
+    /// A key present means the school is on; the set says which categories.
+    /// On-with-no-categories is a legal (silent) state — see `Prefs.ucb` — so
+    /// unchecking the last category can't yank the school toggle out from under
+    /// the user and disable the very rows they need to recover.
+    func isUCBEnabled(_ id: String) -> Bool { prefs.ucb[id] != nil }
+
+    private func persist() {
         if let data = try? JSONEncoder().encode(prefs) {
             UserDefaults.standard.set(data, forKey: Self.prefsKey)
         }
+    }
+
+    private func persistAndSync() {
+        persist()
         Task { await syncSubscriptions() }
     }
 

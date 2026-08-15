@@ -33,22 +33,23 @@ XcodeGen.
 
 ## What it does
 
-- **City + theater scoping** — pick your home city on first launch (change it
-  anytime); a left sidebar (hamburger, or swipe right) lists that city's
-  theaters plus an **All Theaters** whole-city feed. Unavailable sources are
-  greyed out; live counts per theater match the visible tab.
+- **Theater scoping** — no onboarding: the app opens on UCB New York, and a left
+  sidebar (hamburger, or swipe right) lists every theater grouped by city. Pick
+  any mix; the city follows from the selection. Unavailable sources are greyed
+  out; live counts per theater match the visible tab.
 - **Shows tab** — a date-sectioned chronological feed for the selected scope
   (Today / Tomorrow / weekday headers, pinned), with an inline search bar.
 - **I'm Going tab** — tap the heart on a show's page to save it. Saved shows
   persist across launches (even after they leave the feed), group by date,
   badge the tab with a count, and schedule a local reminder ~3 hours before
   showtime (if you allow notifications).
-- **Classes tab** — classes & workshops for the same scope, grouped by
-  level/track, with level and open-seats filters. Each class has a native
-  detail page (description, instructor, schedule, price) with **Register**
-  opening the registration page in an in-app Safari sheet.
-- **Filters** — venue, comedy type (multi-select), livestream, free, and a date
-  window (This weekend = Fri–Sun). Filters persist across launches, the toolbar
+- **Classes tab** — browsed city-wide rather than theater-by-theater: every
+  school in the selected theaters' cities gets a collapsible card (the picked
+  theaters first), grouped by subject inside. Each class has a native detail
+  page (description, instructor, schedule, price) with **Register** opening the
+  registration page in an in-app Safari sheet.
+- **Filters** (Shows tab) — venue, comedy type (multi-select), livestream, free,
+  and a date window (This weekend = Fri–Sun). Filters persist across launches, the toolbar
   icon shows an active-count badge, and selections are auto-cleared if their
   venue/type stops being available in the current scope.
 - **Show detail** — stretchy poster header, metadata chips, blurb, cast section,
@@ -82,19 +83,19 @@ UCBShows/
     Show.swift               Codable model (defensive) + derived display values
     Class.swift              class/workshop model, same conventions
     Source.swift             City (timezone) + theater catalog + feed source info
-    Filters.swift            value-type filter state (shows + classes)
+    Filters.swift            value-type filter state (shows)
   Services/
     FeedService.swift        generic fetch + on-disk last-good cache (all feeds)
     ShowsStore.swift         @MainActor @Observable source of truth for shows
     ClassesStore.swift       same for classes
     GoingStore.swift         saved "I'm Going" shows + pre-show reminders
     CalendarService.swift    write-only EventKit "Add to Calendar"
-    AppState.swift           selected city/theater/tab; drives all scoping
+    AppState.swift           selected theaters/tab (+ inferred city); all scoping
   Support/DateUtils.swift    per-timezone parsing/formatting + day grouping
   DesignSystem/Theme.swift   accent, radii, per-type tints & symbols
   Views/                     RootView, ShowsFeedView, ClassesView, TicketWalletView
                              (tickets + hearted I'm-Going shows), ShowDetailView,
-                             ClassDetailView, SetupView
+                             ClassDetailView
   Views/Components/          TheaterSidebar/TheaterListPanel, ShowRow, ClassRow,
                              PosterImage/GeneratedCover, FilterSheet, Chips, …
 ```
