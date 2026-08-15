@@ -25,6 +25,7 @@ CLASS_SOURCES = [
     {"id": "magnet", "org": "Magnet Theater", "city": "New York", "fetch": magnet.fetch_classes},
     {"id": "wgis_ny", "org": "WGIS", "city": "New York", "fetch": wgis.fetch_classes_ny},
     {"id": "ucb_la", "org": "UCB", "city": "Los Angeles", "fetch": ucb_classes.fetch_la},
+    {"id": "ucb_online", "org": "UCB", "city": "Online", "fetch": ucb_classes.fetch_online},
     {"id": "wgis_la", "org": "WGIS", "city": "Los Angeles", "fetch": wgis.fetch_classes_la},
     {"id": "annoyance", "org": "The Annoyance", "city": "Chicago", "fetch": annoyance.fetch_classes},
     {"id": "io_chicago", "org": "iO Theater", "city": "Chicago", "fetch": io_chicago.fetch_classes},

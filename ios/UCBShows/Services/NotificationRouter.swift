@@ -1,10 +1,9 @@
 import Foundation
 import UserNotifications
 
-/// Handles taps on ticket notifications. A plain tap on iOS always foregrounds
-/// the app (the QR itself is shown in the notification's expanded card via the
-/// attachment); when the app does open, we route to the ticket so the
-/// max-brightness scan surface is one step away.
+/// Handles taps on ticket + class-alert notifications. Ticket taps route to
+/// the wallet (the max-brightness QR one step away); class-alert taps (CloudKit
+/// pushes carrying a "ck" payload) route to the Classes tab.
 final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     /// Set by the app; invoked on the main actor with the tapped ticket id.
     /// A tap that arrives before this is wired (cold launch from the lock
@@ -17,6 +16,14 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     }
     @MainActor private var pending: String?
 
+    /// Invoked when a class-alert push is tapped (buffered like onOpen).
+    @MainActor var onClassAlert: (@MainActor () -> Void)? {
+        didSet {
+            if pendingClassAlert, let onClassAlert { pendingClassAlert = false; onClassAlert() }
+        }
+    }
+    @MainActor private var pendingClassAlert = false
+
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
@@ -25,10 +32,15 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
-        let id = response.notification.request.content.userInfo["ticketID"] as? String
-        guard let id else { return }
-        await MainActor.run {
-            if let onOpen { onOpen(id) } else { pending = id }
+        let userInfo = response.notification.request.content.userInfo
+        if let id = userInfo["ticketID"] as? String {
+            await MainActor.run {
+                if let onOpen { onOpen(id) } else { pending = id }
+            }
+        } else if userInfo["ck"] != nil {
+            await MainActor.run {
+                if let onClassAlert { onClassAlert() } else { pendingClassAlert = true }
+            }
         }
     }
 }
