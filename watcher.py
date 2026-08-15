@@ -263,8 +263,8 @@ def test_cloudkit() -> int:
     """Send a single test record to verify CloudKit auth, then delete it."""
     import urllib.error
     import urllib.request
-    from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization
 
     if not KEY_ID or not PRIVATE_KEY_PEM:
         log.error("CLOUDKIT_KEY_ID and CLOUDKIT_PRIVATE_KEY must be set")
@@ -272,34 +272,15 @@ def test_cloudkit() -> int:
 
     log.info("Key ID: %s...%s (%d chars)", KEY_ID[:8], KEY_ID[-4:], len(KEY_ID))
     pem = PRIVATE_KEY_PEM.strip()
-    log.info("PEM has %d lines, %d total chars", pem.count("\n") + 1, len(pem))
     try:
         key = serialization.load_pem_private_key(pem.encode(), password=None)
-        if isinstance(key, ec.EllipticCurvePrivateKey):
-            log.info("Key type: EC %s (%d-bit)", key.curve.name, key.key_size)
-            pub_spki = key.public_key().public_bytes(
-                serialization.Encoding.DER,
-                serialization.PublicFormat.SubjectPublicKeyInfo)
-            pub_raw = key.public_key().public_bytes(
-                serialization.Encoding.X962,
-                serialization.PublicFormat.UncompressedPoint)
-            pub_pem = key.public_key().public_bytes(
-                serialization.Encoding.PEM,
-                serialization.PublicFormat.SubjectPublicKeyInfo)
-            log.info("Fingerprint SPKI-DER: %s", hashlib.sha256(pub_spki).hexdigest())
-            log.info("Fingerprint X962-raw: %s", hashlib.sha256(pub_raw).hexdigest())
-            log.info("Fingerprint PEM:      %s", hashlib.sha256(pub_pem).hexdigest())
-            log.info("Key ID matches SPKI-DER: %s", KEY_ID == hashlib.sha256(pub_spki).hexdigest())
-            log.info("Key ID matches X962-raw: %s", KEY_ID == hashlib.sha256(pub_raw).hexdigest())
-        else:
+        if not isinstance(key, ec.EllipticCurvePrivateKey):
             log.error("Key is not EC: %s", type(key).__name__)
             return 1
+        log.info("Key loaded: EC %s", key.curve.name)
     except Exception as e:
         log.error("Failed to load PEM: %r", e)
         return 1
-
-    log.info("Container: %s", CONTAINER)
-    log.info("Environments: %s", ENVIRONMENTS)
 
     ok = True
     for env in ENVIRONMENTS:
@@ -321,8 +302,6 @@ def test_cloudkit() -> int:
             },
         }]}).encode()
         headers = _sign(subpath, payload)
-        log.info("%s: signing message date=%s subpath=%s",
-                 env, headers["X-Apple-CloudKit-Request-ISO8601Date"], subpath)
         req = urllib.request.Request(
             "https://api.apple-cloudkit.com" + subpath, data=payload,
             headers=headers, method="POST")
