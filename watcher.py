@@ -278,6 +278,10 @@ def test_cloudkit() -> int:
             log.error("Key is not EC: %s", type(key).__name__)
             return 1
         log.info("Key loaded: EC %s", key.curve.name)
+        derived_pub = key.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo).decode().strip()
+        log.info("Derived public key:\n%s", derived_pub)
     except Exception as e:
         log.error("Failed to load PEM: %r", e)
         return 1
