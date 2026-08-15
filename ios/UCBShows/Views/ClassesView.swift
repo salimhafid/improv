@@ -80,10 +80,24 @@ struct ClassesView: View {
 
     // MARK: List
 
+    /// Subject | Level | Date — how the list below is organized.
+    private var groupingPicker: some View {
+        @Bindable var store = store
+        return Picker("Group classes by", selection: $store.grouping) {
+            ForEach(ClassGrouping.allCases) { mode in
+                Text(mode.label).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, Theme.Space.gutter)
+        .padding(.bottom, 2)
+    }
+
     private func list(_ sections: [ClassSection]) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.Space.section,
                        pinnedViews: [.sectionHeaders]) {
+                groupingPicker
                 if store.phase == .offline {
                     OfflineBanner(updatedLabel: store.updatedLabel)
                 }

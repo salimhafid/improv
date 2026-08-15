@@ -67,7 +67,7 @@ func testBuildSections() {
         ucbClass("Improv 101", level: "Improv 101: Improv Basics", start: "2026-08-01T19:00:00"),
         ucbClass("No Level Class"),
     ]
-    let sections = ClassesStore.buildSections(from: items)
+    let sections = ClassesStore.buildSections(from: items, grouping: .level)
     checkEqual(sections.map(\.id), [ClassesStore.coreSectionID, "Character", "__nolevel__"],
                "core first, levels A-Z, Other last")
     let core = sections[0]
@@ -79,8 +79,31 @@ func testBuildSections() {
 
     let nonUCB = [classItem(["title": "Improv 101", "source": "magnet", "level": "Improv",
                              "city": "New York"])]
-    checkEqual(ClassesStore.buildSections(from: nonUCB).map(\.id), ["Improv"],
+    checkEqual(ClassesStore.buildSections(from: nonUCB, grouping: .level).map(\.id), ["Improv"],
                "no core section without UCB core classes")
+
+    // Subject grouping: consistent buckets across schools, Core still pinned.
+    let mixed = [
+        ucbClass("Improv 101", level: "Improv 101: Improv Basics", start: "2026-09-01T19:00:00"),
+        classItem(["title": "AP1", "source": "annoyance", "level": "AP1", "city": "Chicago"]),
+        classItem(["title": "Musical Improv 101", "source": "magnet", "level": "Musical Improv", "city": "New York"]),
+        classItem(["title": "Sketch Writing Intensive", "source": "brooklyn_cc", "level": "Sketch", "city": "New York"]),
+        classItem(["title": "Clown One", "source": "brooklyn_cc", "level": "Clown", "city": "New York"]),
+    ]
+    let subj = ClassesStore.buildSections(from: mixed, grouping: .subject)
+    checkEqual(subj.map(\.title),
+               ["Core Curriculum", "Improv", "Musical Improv", "Sketch & Writing", "Clowning"],
+               "subject buckets in fixed order, core pinned, AP defaults to Improv")
+
+    // Date grouping: chronological months, no pinned core, TBA last.
+    let dated = [
+        ucbClass("Improv 101", level: "Improv 101", start: "2026-09-10T19:00:00"),
+        classItem(["title": "August Jam", "source": "magnet", "city": "New York", "start": "2026-08-20T19:00:00"]),
+        classItem(["title": "Someday Workshop", "source": "magnet", "city": "New York"]),
+    ]
+    let byDate = ClassesStore.buildSections(from: dated, grouping: .date)
+    checkEqual(byDate.map(\.title), ["August 2026", "September 2026", "Dates TBA"],
+               "date grouping: months ascending, TBA last")
 }
 
 func testClassItemDecoding() {
