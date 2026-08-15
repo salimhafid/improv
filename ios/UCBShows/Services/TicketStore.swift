@@ -19,6 +19,13 @@ final class TicketStore {
 
     init() {
         load()
+        // Another device changed the tickets via iCloud — reload them live.
+        NotificationCenter.default.addObserver(
+            forName: CloudSync.fileDidChange, object: nil, queue: .main
+        ) { [weak self] note in
+            guard note.object as? String == "tickets.json" else { return }
+            MainActor.assumeIsolated { self?.load() }
+        }
     }
 
     var hasAnything: Bool { studentID != nil || !reserved.isEmpty }
@@ -192,6 +199,7 @@ final class TicketStore {
     private func save() {
         if let data = try? JSONEncoder().encode(Saved(reserved: reserved, studentID: studentID)) {
             try? data.write(to: fileURL, options: .atomic)
+            CloudSync.pushFile("tickets.json", data)
         }
     }
 }

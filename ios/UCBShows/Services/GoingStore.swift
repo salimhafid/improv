@@ -25,6 +25,13 @@ final class GoingStore {
     init() {
         fileURL = AppSupport.file("going.json")
         load()
+        // Another device changed the list via iCloud — reload it live.
+        NotificationCenter.default.addObserver(
+            forName: CloudSync.fileDidChange, object: nil, queue: .main
+        ) { [weak self] note in
+            guard note.object as? String == "going.json" else { return }
+            MainActor.assumeIsolated { self?.load() }
+        }
     }
 
     var count: Int { shows.count }
@@ -74,6 +81,7 @@ final class GoingStore {
     private func save() {
         if let data = try? JSONEncoder().encode(shows) {
             try? data.write(to: fileURL, options: .atomic)
+            CloudSync.pushFile("going.json", data)
         }
     }
 

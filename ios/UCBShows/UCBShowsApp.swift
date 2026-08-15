@@ -3,18 +3,21 @@ import UserNotifications
 
 @main
 struct UCBShowsApp: App {
-    @State private var store = ShowsStore()
-    @State private var classesStore = ClassesStore()
-    @State private var going = GoingStore()
-    @State private var talent = TalentStore()
-    @State private var app = AppState()
-    @State private var account = UCBAccountStore()
-    @State private var tickets = TicketStore()
-    @State private var classAlerts = ClassAlertsStore()
+    @State private var store: ShowsStore
+    @State private var classesStore: ClassesStore
+    @State private var going: GoingStore
+    @State private var talent: TalentStore
+    @State private var app: AppState
+    @State private var account: UCBAccountStore
+    @State private var tickets: TicketStore
+    @State private var classAlerts: ClassAlertsStore
     @Environment(\.scenePhase) private var scenePhase
     private let notifications = NotificationRouter()
 
     init() {
+        // iCloud mirror first — a fresh install adopts the cloud copy of
+        // settings/tickets, so every store below must read AFTER this.
+        CloudSync.bootstrap()
         // Generous persistent cache so poster images load instantly on relaunch
         // (AsyncImage uses URLSession.shared → URLCache.shared).
         URLCache.shared = URLCache(memoryCapacity: 32 * 1024 * 1024,
@@ -23,6 +26,14 @@ struct UCBShowsApp: App {
         // cold-starts the app is dropped (the router buffers the tap until
         // onOpen is wired below).
         UNUserNotificationCenter.current().delegate = notifications
+        _store = State(initialValue: ShowsStore())
+        _classesStore = State(initialValue: ClassesStore())
+        _going = State(initialValue: GoingStore())
+        _talent = State(initialValue: TalentStore())
+        _app = State(initialValue: AppState())
+        _account = State(initialValue: UCBAccountStore())
+        _tickets = State(initialValue: TicketStore())
+        _classAlerts = State(initialValue: ClassAlertsStore())
     }
 
     var body: some Scene {

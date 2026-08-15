@@ -134,7 +134,10 @@ struct TicketWalletView: View {
                 .font(.subheadline).foregroundStyle(.secondary)
                 .padding(.horizontal, Theme.Space.gutter)
         } else {
-            ShowSectionsList(sections: DaySection.group(going.shows), namespace: zoom)
+            // Tag by the list's own contents — hearted shows can span cities
+            // regardless of the current sidebar selection.
+            ShowSectionsList(sections: DaySection.group(going.shows), namespace: zoom,
+                             showsCityTags: Set(going.shows.map(\.city)).count > 1)
         }
     }
 

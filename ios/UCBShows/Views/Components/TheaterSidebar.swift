@@ -30,9 +30,9 @@ struct TheaterSidebar: View {
     }
 }
 
-/// The sidebar's content: header, All Theaters, then every theater in one list
-/// under city sections, with live counts (shows or classes, matching the
-/// visible tab). Reused by the iPhone drawer and the persistent iPad column.
+/// The sidebar's content: header, then every theater in one list under city
+/// sections, with live counts (shows or classes, matching the visible tab).
+/// Reused by the iPhone drawer and the persistent iPad column.
 struct TheaterListPanel: View {
     @Environment(AppState.self) private var app
     @Environment(ShowsStore.self) private var store
@@ -44,7 +44,6 @@ struct TheaterListPanel: View {
             Divider()
             ScrollView {
                 VStack(spacing: 0) {
-                    allTheatersRow
                     ForEach(SourceCatalog.byCity, id: \.city) { group in
                         cityHeader(group.city)
                         ForEach(group.entries) { entry in
@@ -90,24 +89,6 @@ struct TheaterListPanel: View {
         return store.info(for: id)?.count
     }
 
-    private var allTheatersRow: some View {
-        let total = SourceCatalog.all.compactMap { count(for: $0.id) }.reduce(0, +)
-        return row(
-            title: "All Theaters",
-            subtitle: "Everything, every city",
-            count: total > 0 ? total : nil,
-            selected: app.isAllTheaters,
-            available: true,
-            icon: { AnyView(
-                Image(systemName: "square.grid.2x2.fill")
-                    .foregroundStyle(app.isAllTheaters ? Theme.accent : .secondary)
-                    .frame(width: 28)
-            ) }
-        ) {
-            app.selectAll()
-        }
-    }
-
     private func theaterRow(_ entry: SourceCatalogEntry) -> some View {
         // Availability follows the active tab like count(for:) does — a failed
         // shows scraper must not dim a theater whose classes feed is healthy
@@ -119,24 +100,23 @@ struct TheaterListPanel: View {
             available = store.isAvailable(entry.id)
         }
         return row(
+            id: entry.id,
             title: entry.name,
             subtitle: available ? entry.blurb : "Temporarily unavailable",
             count: count(for: entry.id),
             selected: app.selectedTheaters.contains(entry.id),
-            available: available,
-            icon: { AnyView(TheaterIcon(id: entry.id)) }
+            available: available
         ) {
             app.toggle(entry.id)
         }
     }
 
-    private func row(title: String, subtitle: String, count: Int?,
+    private func row(id: String, title: String, subtitle: String, count: Int?,
                      selected: Bool, available: Bool,
-                     icon: () -> AnyView,
                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                icon()
+                TheaterIcon(id: id)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.body.weight(selected ? .semibold : .regular))
