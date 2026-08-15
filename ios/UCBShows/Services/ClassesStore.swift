@@ -73,11 +73,11 @@ final class ClassesStore {
         }
     }
 
-    /// Drop a level filter not present in the current city+theater scope so a
+    /// Drop a level filter not present in the current theater scope so a
     /// stale selection can't silently empty the list. Driven by the view.
-    func reconcileLevel(city: String, theaters: Set<String>) {
+    func reconcileLevel(theaters: Set<String>) {
         guard !allClasses.isEmpty else { return }
-        if let l = filters.level, !availableLevels(city: city, theaters: theaters).contains(l) {
+        if let l = filters.level, !availableLevels(theaters: theaters).contains(l) {
             filters.level = nil
         }
     }
@@ -115,37 +115,33 @@ final class ClassesStore {
         lastUpdated.map { DateUtils.relativeUpdated($0) }
     }
 
-    // MARK: Filter option sources (scoped to the current city + theater)
+    // MARK: Filter option sources (scoped to the current theaters)
 
-    /// Classes in a given city + theater scope (no other filters). The
-    /// all-theaters sentinel widens the scope to the whole city.
-    func scoped(city: String, theaters: Set<String>) -> [ClassItem] {
-        allClasses.filter {
-            $0.city == city
-                && (theaters.isEmpty || theaters.contains($0.source))
-        }
+    /// Classes in a given theater scope (no other filters). The empty set
+    /// means every theater.
+    func scoped(theaters: Set<String>) -> [ClassItem] {
+        allClasses.filter { theaters.isEmpty || theaters.contains($0.source) }
     }
 
     /// Distinct levels/tracks present in the scope, sorted.
-    func availableLevels(city: String, theaters: Set<String>) -> [String] {
-        Set(scoped(city: city, theaters: theaters).map(\.level)).filter { !$0.isEmpty }.sorted()
+    func availableLevels(theaters: Set<String>) -> [String] {
+        Set(scoped(theaters: theaters).map(\.level)).filter { !$0.isEmpty }.sorted()
     }
 
-    func levelFilterIsUseful(city: String, theaters: Set<String>) -> Bool {
-        !availableLevels(city: city, theaters: theaters).isEmpty
+    func levelFilterIsUseful(theaters: Set<String>) -> Bool {
+        !availableLevels(theaters: theaters).isEmpty
     }
 
     // MARK: Filtering
 
-    func filtered(city: String, theaters: Set<String>, searchText: String = "") -> [ClassItem] {
+    func filtered(theaters: Set<String>, searchText: String = "") -> [ClassItem] {
         let query = searchText.folding(options: .diacriticInsensitive, locale: .current)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        return allClasses.filter { matches($0, query: query, city: city, theaters: theaters) }
+        return allClasses.filter { matches($0, query: query, theaters: theaters) }
     }
 
-    private func matches(_ item: ClassItem, query: String, city: String, theaters: Set<String>) -> Bool {
-        if item.city != city { return false }
+    private func matches(_ item: ClassItem, query: String, theaters: Set<String>) -> Bool {
         if !theaters.isEmpty, !theaters.contains(item.source) { return false }
         if let level = filters.level, item.level != level { return false }
         if filters.openOnly, item.isFull { return false }
@@ -170,10 +166,10 @@ final class ClassesStore {
         return nil
     }
 
-    // MARK: Sections (grouped by level within the city+theater scope)
+    // MARK: Sections (grouped within the theater scope)
 
-    func sections(city: String, theaters: Set<String>, searchText: String = "") -> [ClassSection] {
-        Self.buildSections(from: filtered(city: city, theaters: theaters, searchText: searchText),
+    func sections(theaters: Set<String>, searchText: String = "") -> [ClassSection] {
+        Self.buildSections(from: filtered(theaters: theaters, searchText: searchText),
                            grouping: grouping)
     }
 

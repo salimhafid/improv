@@ -69,17 +69,17 @@ final class ShowsStore {
         }
     }
 
-    /// Drop filter selections not available in the current city+theater scope
+    /// Drop filter selections not available in the current theater scope
     /// (venues are theater-specific; comedy types vary by theater) so a stale
     /// selection can't silently empty the feed. Driven by the view when the scope
     /// changes and after each successful load.
-    func reconcileFilters(city: String, theaters: Set<String>) {
+    func reconcileFilters(theaters: Set<String>) {
         guard !allShows.isEmpty else { return }
-        if let v = filters.venue, !availableVenues(city: city, theaters: theaters).contains(v) {
+        if let v = filters.venue, !availableVenues(theaters: theaters).contains(v) {
             filters.venue = nil
         }
         if !filters.comedyTypes.isEmpty {
-            let kept = filters.comedyTypes.intersection(Set(availableTypes(city: city, theaters: theaters)))
+            let kept = filters.comedyTypes.intersection(Set(availableTypes(theaters: theaters)))
             if kept != filters.comedyTypes { filters.comedyTypes = kept }
         }
     }
@@ -129,38 +129,33 @@ final class ShowsStore {
     /// (feed not loaded yet) is treated as available.
     func isAvailable(_ id: String) -> Bool { info(for: id)?.ok ?? true }
 
-    // MARK: Filter option sources (scoped to the current city + theater)
+    // MARK: Filter option sources (scoped to the current theaters)
 
-    /// Shows in a given city + theater scope (no other filters) — the basis for
-    /// filter option lists and the per-theater feed. The all-theaters sentinel
-    /// widens the scope to the whole city.
-    func scoped(city: String, theaters: Set<String>) -> [Show] {
-        allShows.filter {
-            $0.city == city
-                && (theaters.isEmpty || theaters.contains($0.source))
-        }
+    /// Shows in a given theater scope (no other filters) — the basis for
+    /// filter option lists and the feed. The empty set means every theater.
+    func scoped(theaters: Set<String>) -> [Show] {
+        allShows.filter { theaters.isEmpty || theaters.contains($0.source) }
     }
 
-    func availableVenues(city: String, theaters: Set<String>) -> [String] {
-        Set(scoped(city: city, theaters: theaters).map(\.venue)).filter { !$0.isEmpty }.sorted()
+    func availableVenues(theaters: Set<String>) -> [String] {
+        Set(scoped(theaters: theaters).map(\.venue)).filter { !$0.isEmpty }.sorted()
     }
 
-    func availableTypes(city: String, theaters: Set<String>) -> [String] {
-        Set(scoped(city: city, theaters: theaters).flatMap(\.comedyTypes)).sorted()
+    func availableTypes(theaters: Set<String>) -> [String] {
+        Set(scoped(theaters: theaters).flatMap(\.comedyTypes)).sorted()
     }
 
     // MARK: Filtering
 
-    /// Shows in the city+theater scope, refined by the active filters + search.
-    func filtered(city: String, theaters: Set<String>, searchText: String = "") -> [Show] {
+    /// Shows in the theater scope, refined by the active filters + search.
+    func filtered(theaters: Set<String>, searchText: String = "") -> [Show] {
         let query = searchText.folding(options: .diacriticInsensitive, locale: .current)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        return allShows.filter { matches($0, query: query, city: city, theaters: theaters) }
+        return allShows.filter { matches($0, query: query, theaters: theaters) }
     }
 
-    private func matches(_ show: Show, query: String, city: String, theaters: Set<String>) -> Bool {
-        if show.city != city { return false }
+    private func matches(_ show: Show, query: String, theaters: Set<String>) -> Bool {
         if !theaters.isEmpty, !theaters.contains(show.source) { return false }
         if let venue = filters.venue, show.venue != venue { return false }
         if !filters.comedyTypes.isEmpty,
@@ -212,8 +207,8 @@ final class ShowsStore {
 
     // MARK: Sections
 
-    /// Date-grouped sections of the current city+theater shows (filtered).
-    func sections(city: String, theaters: Set<String>, searchText: String = "") -> [DaySection] {
-        DaySection.group(filtered(city: city, theaters: theaters, searchText: searchText))
+    /// Date-grouped sections of the current theater scope's shows (filtered).
+    func sections(theaters: Set<String>, searchText: String = "") -> [DaySection] {
+        DaySection.group(filtered(theaters: theaters, searchText: searchText))
     }
 }

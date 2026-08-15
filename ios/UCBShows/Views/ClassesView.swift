@@ -15,14 +15,17 @@ struct ClassesView: View {
     /// launches. Search always renders it expanded so matches can't hide.
     @AppStorage("ucbCoreExpanded") private var coreExpanded = true
 
-    private var city: String { app.selectedCity.rawValue }
     private var theaters: Set<String> { app.selectedTheaters }
-    private var theaterName: String { app.scopeTitle }
+    /// Single theater's name, or just "Classes" for All Theaters / a mix.
+    private var title: String { app.scopeTheaterName ?? "Classes" }
+    private var searchPrompt: String {
+        app.scopeTheaterName.map { "Search \($0) classes" } ?? "Search classes"
+    }
 
     var body: some View {
         // One filter+group pass per body evaluation, shared by the emptiness
         // check and the list.
-        let sections = store.sections(city: city, theaters: theaters, searchText: query)
+        let sections = store.sections(theaters: theaters, searchText: query)
         NavigationStack {
             Group {
                 if store.allClasses.isEmpty {
@@ -37,7 +40,7 @@ struct ClassesView: View {
                     list(sections)
                 }
             }
-            .navigationTitle(theaterName)
+            .navigationTitle(title)
             .toolbar {
                 hamburgerToolbarItem
                 alertsToolbarItem
@@ -46,9 +49,9 @@ struct ClassesView: View {
             .navigationDestination(for: ClassItem.self) { item in
                 ClassDetailView(item: item)
             }
-            .searchable(text: $query, prompt: "Search \(theaterName) classes")
+            .searchable(text: $query, prompt: searchPrompt)
             .sheet(isPresented: $showFilters) {
-                ClassFilterSheet(store: store, city: city, theaters: theaters)
+                ClassFilterSheet(store: store, theaters: theaters)
             }
             .sheet(isPresented: $showAlerts) {
                 ClassAlertsView()
@@ -57,20 +60,15 @@ struct ClassesView: View {
             .onSwipeRight {                             // swipe L→R opens the theater drawer
                 if hSize == .compact { app.sidebarOpen = true }
             }
-            .task { store.reconcileLevel(city: city, theaters: theaters) }
+            .task { store.reconcileLevel(theaters: theaters) }
             .onChange(of: theaters) { _, _ in
-                // Scope changed — drop a level not offered by the new theater.
-                store.reconcileLevel(city: city, theaters: theaters)
-            }
-            .onChange(of: city) { _, _ in
-                // City change with All Theaters keeps theater == "all", so the
-                // onChange above never fires — reconcile here too.
-                store.reconcileLevel(city: city, theaters: theaters)
+                // Scope changed — drop a level not offered by the new selection.
+                store.reconcileLevel(theaters: theaters)
             }
             .onChange(of: store.lastUpdated) { _, _ in
                 // Keyed on the timestamp, not the count, so a same-count refresh
                 // still reconciles.
-                store.reconcileLevel(city: city, theaters: theaters)
+                store.reconcileLevel(theaters: theaters)
                 if ProcessInfo.processInfo.uiTestClassFilter, !store.allClasses.isEmpty {
                     showFilters = true
                 }
@@ -184,7 +182,8 @@ struct ClassesView: View {
         ContentUnavailableView {
             Label("No Classes", systemImage: "graduationcap")
         } description: {
-            Text("\(theaterName) has no classes listed. Try another theater.")
+            Text(app.scopeTheaterName.map { "\($0) has no classes listed. Try another theater." }
+                ?? "The selected theaters have no classes listed.")
         } actions: {
             // Drawer exists only on compact width — iPad shows the persistent
             // theater column, so the button would do nothing there.

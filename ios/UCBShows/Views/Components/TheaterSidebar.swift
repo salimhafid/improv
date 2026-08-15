@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Left hamburger drawer listing the selected city's theaters (plus an
-/// "All Theaters" whole-city scope). Selecting one scopes the Shows and Classes
-/// tabs via `AppState`. Overlays the whole TabView from `RootView` on iPhone;
-/// on iPad the inner `TheaterListPanel` is shown as a persistent column instead.
+/// Left hamburger drawer listing every theater the app knows, grouped by city
+/// (New York, Chicago, Los Angeles), plus an "All Theaters" scope up top.
+/// Toggling rows scopes the Shows and Classes tabs via `AppState`. Overlays the
+/// whole TabView from `RootView` on iPhone; on iPad the inner `TheaterListPanel`
+/// is shown as a persistent column instead.
 struct TheaterSidebar: View {
     @Environment(AppState.self) private var app
 
@@ -29,9 +30,9 @@ struct TheaterSidebar: View {
     }
 }
 
-/// The sidebar's content: header, All Theaters + per-theater rows with live
-/// counts (shows or classes, matching the visible tab), and the city switcher.
-/// Reused by the iPhone drawer and the persistent iPad column.
+/// The sidebar's content: header, All Theaters, then every theater in one list
+/// under city sections, with live counts (shows or classes, matching the
+/// visible tab). Reused by the iPhone drawer and the persistent iPad column.
 struct TheaterListPanel: View {
     @Environment(AppState.self) private var app
     @Environment(ShowsStore.self) private var store
@@ -44,49 +45,40 @@ struct TheaterListPanel: View {
             ScrollView {
                 VStack(spacing: 0) {
                     allTheatersRow
-                    ForEach(app.cityTheaters) { entry in
-                        theaterRow(entry)
+                    ForEach(SourceCatalog.byCity, id: \.city) { group in
+                        cityHeader(group.city)
+                        ForEach(group.entries) { entry in
+                            theaterRow(entry)
+                        }
                     }
                 }
+                .padding(.bottom, 12)
             }
-            Divider()
-            Button { openCityPicker() } label: {
-                Label("Change City", systemImage: "globe.americas.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
-            }
-            .foregroundStyle(.primary)
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    /// Close the drawer, then present the city picker, so the sheet doesn't stack
-    /// over the still-open drawer.
-    private func openCityPicker() {
-        app.sidebarOpen = false
-        app.showCityPicker = true
+    private var header: some View {
+        Text("Theaters")
+            .font(.title2.bold())
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Theaters")
-                .font(.title2.bold())
-            Button { openCityPicker() } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: app.selectedCity.symbol)
-                    Text(app.selectedCity.rawValue)
-                    Image(systemName: "chevron.down").font(.caption2.weight(.bold))
-                }
+    private func cityHeader(_ city: City) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: city.symbol)
+                .font(.caption.weight(.semibold))
+            Text(city.rawValue)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.accent)
-            }
         }
+        .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 12)
+        .padding(.top, 18)
+        .padding(.bottom, 6)
     }
 
     /// Count for a theater in whichever list the user is looking at: class
@@ -99,14 +91,18 @@ struct TheaterListPanel: View {
     }
 
     private var allTheatersRow: some View {
-        let total = app.cityTheaters.compactMap { count(for: $0.id) }.reduce(0, +)
+        let total = SourceCatalog.all.compactMap { count(for: $0.id) }.reduce(0, +)
         return row(
             title: "All Theaters",
-            subtitle: "Everything in \(app.selectedCity.short)",
-            symbol: "square.grid.2x2.fill",
+            subtitle: "Everything, every city",
             count: total > 0 ? total : nil,
             selected: app.isAllTheaters,
-            available: true
+            available: true,
+            icon: { AnyView(
+                Image(systemName: "square.grid.2x2.fill")
+                    .foregroundStyle(app.isAllTheaters ? Theme.accent : .secondary)
+                    .frame(width: 28)
+            ) }
         ) {
             app.selectAll()
         }
@@ -125,23 +121,22 @@ struct TheaterListPanel: View {
         return row(
             title: entry.name,
             subtitle: available ? entry.blurb : "Temporarily unavailable",
-            symbol: "theatermasks.fill",
             count: count(for: entry.id),
             selected: app.selectedTheaters.contains(entry.id),
-            available: available
+            available: available,
+            icon: { AnyView(TheaterIcon(id: entry.id)) }
         ) {
             app.toggle(entry.id)
         }
     }
 
-    private func row(title: String, subtitle: String, symbol: String, count: Int?,
+    private func row(title: String, subtitle: String, count: Int?,
                      selected: Bool, available: Bool,
+                     icon: () -> AnyView,
                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: symbol)
-                    .foregroundStyle(selected ? Theme.accent : .secondary)
-                    .frame(width: 26)
+                icon()
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.body.weight(selected ? .semibold : .regular))

@@ -1,10 +1,11 @@
 import Foundation
 
-/// The cities the app spans. Drives Setup grouping and the city filter.
+/// The cities the app spans — a grouping label for theaters (sidebar sections,
+/// Setup), not a scope of its own. Case order is the display order.
 enum City: String, CaseIterable, Identifiable, Codable {
     case newYork = "New York"
-    case losAngeles = "Los Angeles"
     case chicago = "Chicago"
+    case losAngeles = "Los Angeles"
 
     var id: String { rawValue }
 
