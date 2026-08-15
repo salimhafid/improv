@@ -1,0 +1,74 @@
+name: Class alert watcher
+
+# UCB every 10 minutes; everything else once a day (13:03 UTC ≈ 9am ET).
+# New classes become CloudKit ClassAlert records, which fan out as pushes to
+# every device whose in-app alert toggles subscribe to them.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+    - cron: "3 13 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "ucb | all | both"
+        default: "both"
+
+concurrency:
+  group: class-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Known-class state lives on its own branch so 10-minute commits never
+      # touch main's history.
+      - uses: actions/checkout@v4
+        with:
+          ref: class-watch-state
+          path: state-branch
+        continue-on-error: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt cryptography
+
+      - name: Run watcher
+        env:
+          WATCH_STATE: state-branch/class-watch.json
+          CLOUDKIT_CONTAINER: iCloud.com.salimhafid.UCBShows
+          CLOUDKIT_KEY_ID: ${{ secrets.CLOUDKIT_KEY_ID }}
+          CLOUDKIT_PRIVATE_KEY: ${{ secrets.CLOUDKIT_PRIVATE_KEY }}
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -z "$MODE" ]; then
+            if [ "${{ github.event.schedule }}" = "3 13 * * *" ]; then MODE=both; else MODE=ucb; fi
+          fi
+          FLAGS=""
+          [ "$MODE" = "ucb" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --ucb"
+          [ "$MODE" = "all" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --all"
+          mkdir -p state-branch
+          python watcher.py $FLAGS
+
+      - name: Commit state
+        run: |
+          cd state-branch
+          if [ ! -d .git ]; then
+            git init -b class-watch-state
+            git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          fi
+          git config user.name "class-watch-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Update class-watch state"
+          git push origin HEAD:class-watch-state

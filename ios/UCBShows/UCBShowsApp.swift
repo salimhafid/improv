@@ -10,6 +10,7 @@ struct UCBShowsApp: App {
     @State private var app = AppState()
     @State private var account = UCBAccountStore()
     @State private var tickets = TicketStore()
+    @State private var classAlerts = ClassAlertsStore()
     @Environment(\.scenePhase) private var scenePhase
     private let notifications = NotificationRouter()
 
@@ -34,6 +35,7 @@ struct UCBShowsApp: App {
                 .environment(app)
                 .environment(account)
                 .environment(tickets)
+                .environment(classAlerts)
                 .tint(Theme.accent)
                 .task {
                     // Wire the ticket feature once, then restore any UCB session
@@ -42,6 +44,9 @@ struct UCBShowsApp: App {
                     notifications.onOpen = { id in
                         app.openTicketID = id
                         app.activeTab = 1
+                    }
+                    notifications.onClassAlert = {
+                        app.activeTab = 2
                     }
                     #if DEBUG
                     print("UCBShowsApp task: fakeTickets=\(DebugFixtures.fakeTickets) args=\(ProcessInfo.processInfo.arguments.count)")

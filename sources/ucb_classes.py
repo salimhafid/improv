@@ -98,3 +98,13 @@ def fetch_ny() -> list[dict]:
 
 def fetch_la() -> list[dict]:
     return _build("LOC_LA", "ucb_la", "UCB", "Los Angeles")
+
+
+def fetch_online() -> list[dict]:
+    return _build("LOC_Online", "ucb_online", "UCB", "Online")
+
+
+def raw_events() -> list[dict]:
+    """The full tagged Arlo event list (paged, memoized) — used by the
+    class-alert watcher, which needs LOC_* and CTG_* tags directly."""
+    return _events()

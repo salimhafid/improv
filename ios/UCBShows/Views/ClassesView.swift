@@ -5,9 +5,11 @@ import SwiftUI
 /// list. Tapping a class pushes a native detail page (with Register from there).
 struct ClassesView: View {
     @Environment(ClassesStore.self) private var store
+    @Environment(ClassAlertsStore.self) private var alertsStore
     @Environment(AppState.self) private var app
     @Environment(\.horizontalSizeClass) private var hSize
     @State private var showFilters = false
+    @State private var showAlerts = false
     @State private var query = ""
     /// Collapsed state of the UCB Core Curriculum section, remembered across
     /// launches. Search always renders it expanded so matches can't hide.
@@ -38,6 +40,7 @@ struct ClassesView: View {
             .navigationTitle(theaterName)
             .toolbar {
                 hamburgerToolbarItem
+                alertsToolbarItem
                 filterToolbarItem
             }
             .navigationDestination(for: ClassItem.self) { item in
@@ -46,6 +49,9 @@ struct ClassesView: View {
             .searchable(text: $query, prompt: "Search \(theaterName) classes")
             .sheet(isPresented: $showFilters) {
                 ClassFilterSheet(store: store, city: city, theater: theater)
+            }
+            .sheet(isPresented: $showAlerts) {
+                ClassAlertsView()
             }
             .refreshable { await store.refresh() }
             .onSwipeRight {                             // swipe L→R opens the theater drawer
@@ -203,6 +209,18 @@ struct ClassesView: View {
                     Image(systemName: "line.3.horizontal")
                 }
                 .accessibilityLabel("Theaters")
+            }
+        }
+    }
+
+    private var alertsToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                showAlerts = true
+            } label: {
+                Image(systemName: alertsStore.activeCount > 0 ? "bell.badge.fill" : "bell")
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityLabel("Class alerts")
             }
         }
     }
