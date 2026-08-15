@@ -48,6 +48,9 @@ struct ClassItem: Decodable, Identifiable, Hashable {
     let startDate: Date?
     /// Pre-folded lowercase haystack for search matching.
     let searchHay: String
+    /// Cross-school subject bucket ("Improv", "Sketch & Writing", …) — computed
+    /// once at decode; drives the Classes tab's Subject grouping.
+    let subject: String
 
     enum CodingKeys: String, CodingKey {
         case rawID = "id"
@@ -88,6 +91,34 @@ struct ClassItem: Decodable, Identifiable, Hashable {
         searchHay = ([title, instructor, level, org, classDescription]
             .joined(separator: " "))
             .folding(options: .diacriticInsensitive, locale: .current).lowercased()
+        subject = Self.classifySubject(level: level, title: title)
+    }
+
+    /// Keyword classifier over each school's own level/track naming, so one
+    /// consistent set of buckets spans every theater. First match wins; the
+    /// fallback is Improv — at these schools an unlabeled program (Annoyance
+    /// AP1–5, "Harold", iO levels) is an improv program.
+    static let subjectOrder: [String] = [
+        "Improv", "Musical Improv", "Sketch & Writing", "Acting & Character",
+        "Stand-Up", "Clowning", "Storytelling", "Teens & Youth", "Workshops & Drop-Ins",
+    ]
+
+    static func classifySubject(level: String, title: String) -> String {
+        let hay = (level + " " + title).lowercased()
+        let rules: [(String, [String])] = [
+            ("Teens & Youth", ["teen", "youth", "kids", "young"]),
+            ("Musical Improv", ["musical"]),
+            ("Sketch & Writing", ["sketch", "writing", "writer"]),
+            ("Acting & Character", ["character", "acting", "on-camera", "on camera"]),
+            ("Stand-Up", ["stand-up", "standup", "stand up"]),
+            ("Clowning", ["clown"]),
+            ("Storytelling", ["storytell"]),
+            ("Workshops & Drop-Ins", ["workshop", "drop-in", "drop in", "jam", "elective", "intensive"]),
+        ]
+        for (bucket, keywords) in rules where keywords.contains(where: hay.contains) {
+            return bucket
+        }
+        return "Improv"
     }
 
     private static func nonEmpty(_ s: String?) -> String? {
