@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "ucb | all | both"
+        description: "ucb | all | both | test"
         default: "both"
 
 concurrency:
@@ -53,11 +53,15 @@ jobs:
           if [ -z "$MODE" ]; then
             if [ "${{ github.event.schedule }}" = "3 13 * * *" ]; then MODE=both; else MODE=ucb; fi
           fi
-          FLAGS=""
-          [ "$MODE" = "ucb" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --ucb"
-          [ "$MODE" = "all" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --all"
-          mkdir -p state-branch
-          python watcher.py $FLAGS
+          if [ "$MODE" = "test" ]; then
+            python watcher.py --test
+          else
+            FLAGS=""
+            [ "$MODE" = "ucb" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --ucb"
+            [ "$MODE" = "all" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --all"
+            mkdir -p state-branch
+            python watcher.py $FLAGS
+          fi
 
       - name: Commit state
         run: |
