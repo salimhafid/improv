@@ -277,11 +277,20 @@ def test_cloudkit() -> int:
         key = serialization.load_pem_private_key(pem.encode(), password=None)
         if isinstance(key, ec.EllipticCurvePrivateKey):
             log.info("Key type: EC %s (%d-bit)", key.curve.name, key.key_size)
-            pub_der = key.public_key().public_bytes(
+            pub_spki = key.public_key().public_bytes(
                 serialization.Encoding.DER,
                 serialization.PublicFormat.SubjectPublicKeyInfo)
-            fingerprint = hashlib.sha256(pub_der).hexdigest()
-            log.info("Public key SHA-256 fingerprint: %s", fingerprint)
+            pub_raw = key.public_key().public_bytes(
+                serialization.Encoding.X962,
+                serialization.PublicFormat.UncompressedPoint)
+            pub_pem = key.public_key().public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo)
+            log.info("Fingerprint SPKI-DER: %s", hashlib.sha256(pub_spki).hexdigest())
+            log.info("Fingerprint X962-raw: %s", hashlib.sha256(pub_raw).hexdigest())
+            log.info("Fingerprint PEM:      %s", hashlib.sha256(pub_pem).hexdigest())
+            log.info("Key ID matches SPKI-DER: %s", KEY_ID == hashlib.sha256(pub_spki).hexdigest())
+            log.info("Key ID matches X962-raw: %s", KEY_ID == hashlib.sha256(pub_raw).hexdigest())
         else:
             log.error("Key is not EC: %s", type(key).__name__)
             return 1
