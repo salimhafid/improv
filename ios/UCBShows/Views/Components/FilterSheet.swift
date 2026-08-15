@@ -7,11 +7,11 @@ import SwiftUI
 struct FilterSheet: View {
     @Bindable var store: ShowsStore
     let city: String
-    let theater: String
+    let theaters: Set<String>
     @Environment(\.dismiss) private var dismiss
 
-    private var venues: [String] { store.availableVenues(city: city, theater: theater) }
-    private var types: [String] { store.availableTypes(city: city, theater: theater) }
+    private var venues: [String] { store.availableVenues(city: city, theaters: theaters) }
+    private var types: [String] { store.availableTypes(city: city, theaters: theaters) }
 
     var body: some View {
         NavigationStack {

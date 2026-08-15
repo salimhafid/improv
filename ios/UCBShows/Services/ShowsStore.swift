@@ -73,13 +73,13 @@ final class ShowsStore {
     /// (venues are theater-specific; comedy types vary by theater) so a stale
     /// selection can't silently empty the feed. Driven by the view when the scope
     /// changes and after each successful load.
-    func reconcileFilters(city: String, theater: String) {
+    func reconcileFilters(city: String, theaters: Set<String>) {
         guard !allShows.isEmpty else { return }
-        if let v = filters.venue, !availableVenues(city: city, theater: theater).contains(v) {
+        if let v = filters.venue, !availableVenues(city: city, theaters: theaters).contains(v) {
             filters.venue = nil
         }
         if !filters.comedyTypes.isEmpty {
-            let kept = filters.comedyTypes.intersection(Set(availableTypes(city: city, theater: theater)))
+            let kept = filters.comedyTypes.intersection(Set(availableTypes(city: city, theaters: theaters)))
             if kept != filters.comedyTypes { filters.comedyTypes = kept }
         }
     }
@@ -134,34 +134,34 @@ final class ShowsStore {
     /// Shows in a given city + theater scope (no other filters) — the basis for
     /// filter option lists and the per-theater feed. The all-theaters sentinel
     /// widens the scope to the whole city.
-    func scoped(city: String, theater: String) -> [Show] {
+    func scoped(city: String, theaters: Set<String>) -> [Show] {
         allShows.filter {
             $0.city == city
-                && (theater == SourceCatalog.allTheatersID || $0.source == theater)
+                && (theaters.isEmpty || theaters.contains($0.source))
         }
     }
 
-    func availableVenues(city: String, theater: String) -> [String] {
-        Set(scoped(city: city, theater: theater).map(\.venue)).filter { !$0.isEmpty }.sorted()
+    func availableVenues(city: String, theaters: Set<String>) -> [String] {
+        Set(scoped(city: city, theaters: theaters).map(\.venue)).filter { !$0.isEmpty }.sorted()
     }
 
-    func availableTypes(city: String, theater: String) -> [String] {
-        Set(scoped(city: city, theater: theater).flatMap(\.comedyTypes)).sorted()
+    func availableTypes(city: String, theaters: Set<String>) -> [String] {
+        Set(scoped(city: city, theaters: theaters).flatMap(\.comedyTypes)).sorted()
     }
 
     // MARK: Filtering
 
     /// Shows in the city+theater scope, refined by the active filters + search.
-    func filtered(city: String, theater: String, searchText: String = "") -> [Show] {
+    func filtered(city: String, theaters: Set<String>, searchText: String = "") -> [Show] {
         let query = searchText.folding(options: .diacriticInsensitive, locale: .current)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        return allShows.filter { matches($0, query: query, city: city, theater: theater) }
+        return allShows.filter { matches($0, query: query, city: city, theaters: theaters) }
     }
 
-    private func matches(_ show: Show, query: String, city: String, theater: String) -> Bool {
+    private func matches(_ show: Show, query: String, city: String, theaters: Set<String>) -> Bool {
         if show.city != city { return false }
-        if theater != SourceCatalog.allTheatersID, show.source != theater { return false }
+        if !theaters.isEmpty, !theaters.contains(show.source) { return false }
         if let venue = filters.venue, show.venue != venue { return false }
         if !filters.comedyTypes.isEmpty,
            filters.comedyTypes.isDisjoint(with: Set(show.comedyTypes)) { return false }
@@ -213,7 +213,7 @@ final class ShowsStore {
     // MARK: Sections
 
     /// Date-grouped sections of the current city+theater shows (filtered).
-    func sections(city: String, theater: String, searchText: String = "") -> [DaySection] {
-        DaySection.group(filtered(city: city, theater: theater, searchText: searchText))
+    func sections(city: String, theaters: Set<String>, searchText: String = "") -> [DaySection] {
+        DaySection.group(filtered(city: city, theaters: theaters, searchText: searchText))
     }
 }

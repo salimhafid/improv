@@ -14,13 +14,13 @@ struct ShowsFeedView: View {
     @Namespace private var zoom
 
     private var city: String { app.selectedCity.rawValue }
-    private var theater: String { app.selectedTheater }
+    private var theaters: Set<String> { app.selectedTheaters }
     private var theaterName: String { app.scopeTitle }
 
     var body: some View {
         // One filter+group pass per body evaluation — the emptiness check and
         // the feed both read it (filtering twice was measurable at feed scale).
-        let sections = store.sections(city: city, theater: theater, searchText: query)
+        let sections = store.sections(city: city, theaters: theaters, searchText: query)
         NavigationStack(path: $path) {
             Group {
                 if store.allShows.isEmpty {
@@ -45,28 +45,28 @@ struct ShowsFeedView: View {
             }
             .searchable(text: $query, prompt: "Search \(theaterName)")
             .sheet(isPresented: $showFilters) {
-                FilterSheet(store: store, city: city, theater: theater)
+                FilterSheet(store: store, city: city, theaters: theaters)
             }
             .refreshable { await store.refresh() }
             .onSwipeRight {                             // swipe L→R opens the theater drawer
                 if hSize == .compact { app.sidebarOpen = true }
             }
-            .task { store.reconcileFilters(city: city, theater: theater) }
-            .onChange(of: theater) { _, _ in
+            .task { store.reconcileFilters(city: city, theaters: theaters) }
+            .onChange(of: theaters) { _, _ in
                 // Scope changed — drop venue/types not in the new theater.
-                store.reconcileFilters(city: city, theater: theater)
+                store.reconcileFilters(city: city, theaters: theaters)
             }
             .onChange(of: city) { _, _ in
                 // City changed with All Theaters selected: theater stays "all",
                 // so the onChange above never fires — reconcile here or a stale
                 // venue/type filter from the old city empties the feed.
-                store.reconcileFilters(city: city, theater: theater)
+                store.reconcileFilters(city: city, theaters: theaters)
             }
             .onChange(of: store.lastUpdated) { _, _ in
                 // Re-reconcile on every successful load (keyed on the timestamp,
                 // not the count, so a same-count refresh still reconciles).
                 maybeAutoPush()
-                store.reconcileFilters(city: city, theater: theater)
+                store.reconcileFilters(city: city, theaters: theaters)
             }
             .onChange(of: talent.loaded) { _, _ in
                 maybeAutoPushTalent()
