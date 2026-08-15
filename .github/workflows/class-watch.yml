@@ -47,6 +47,7 @@ jobs:
           WATCH_STATE: state-branch/class-watch.json
           CLOUDKIT_CONTAINER: iCloud.com.salimhafid.UCBShows
           CLOUDKIT_KEY_ID: ${{ secrets.CLOUDKIT_KEY_ID }}
+          CLOUDKIT_KEY_ID_PROD: ${{ secrets.CLOUDKIT_KEY_ID_PROD }}
           CLOUDKIT_PRIVATE_KEY: ${{ secrets.CLOUDKIT_PRIVATE_KEY }}
         run: |
           MODE="${{ github.event.inputs.mode }}"

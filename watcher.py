@@ -37,8 +37,15 @@ log = logging.getLogger("ucb.watcher")
 STATE_PATH = os.environ.get("WATCH_STATE", "state/class-watch.json")
 CONTAINER = os.environ.get("CLOUDKIT_CONTAINER", "iCloud.com.salimhafid.UCBShows")
 KEY_ID = os.environ.get("CLOUDKIT_KEY_ID", "")
+KEY_ID_PROD = os.environ.get("CLOUDKIT_KEY_ID_PROD", "")
 PRIVATE_KEY_PEM = os.environ.get("CLOUDKIT_PRIVATE_KEY", "")
 ENVIRONMENTS = [e for e in os.environ.get("CLOUDKIT_ENVS", "development,production").split(",") if e]
+
+
+def _key_id(env: str) -> str:
+    if env == "production" and KEY_ID_PROD:
+        return KEY_ID_PROD
+    return KEY_ID
 
 DISPLAY = {
     "ucb_ny": "UCB New York", "ucb_la": "UCB Los Angeles", "ucb_online": "UCB Online",
@@ -193,7 +200,7 @@ def _list_body(titles: list[str]) -> str:
 
 # ---------- CloudKit server-to-server ----------
 
-def _sign(subpath: str, body: bytes) -> dict[str, str]:
+def _sign(subpath: str, body: bytes, env: str) -> dict[str, str]:
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec, utils
 
@@ -204,7 +211,7 @@ def _sign(subpath: str, body: bytes) -> dict[str, str]:
     der_sig = key.sign(message, ec.ECDSA(hashes.SHA256()))
     signature = base64.b64encode(der_sig).decode()
     return {
-        "X-Apple-CloudKit-Request-KeyID": KEY_ID,
+        "X-Apple-CloudKit-Request-KeyID": _key_id(env),
         "X-Apple-CloudKit-Request-ISO8601Date": date,
         "X-Apple-CloudKit-Request-SignatureV1": signature,
         "Content-Type": "application/json",
@@ -244,7 +251,7 @@ def send_alerts(alerts: list[dict]) -> None:
         body = json.dumps({"operations": operations}).encode()
         req = urllib.request.Request(
             "https://api.apple-cloudkit.com" + subpath, data=body,
-            headers=_sign(subpath, body), method="POST")
+            headers=_sign(subpath, body, env), method="POST")
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result = json.load(resp)
@@ -303,7 +310,7 @@ def test_cloudkit() -> int:
         }]}).encode()
         w_req = urllib.request.Request(
             "https://api.apple-cloudkit.com" + w_subpath, data=w_payload,
-            headers=_sign(w_subpath, w_payload), method="POST")
+            headers=_sign(w_subpath, w_payload, env), method="POST")
         try:
             with urllib.request.urlopen(w_req, timeout=30) as resp:
                 result = json.load(resp)
@@ -335,7 +342,7 @@ def _delete_record(env: str, record_name: str) -> None:
     }]}).encode()
     req = urllib.request.Request(
         "https://api.apple-cloudkit.com" + subpath, data=body,
-        headers=_sign(subpath, body), method="POST")
+        headers=_sign(subpath, body, env), method="POST")
     try:
         with urllib.request.urlopen(req, timeout=15):
             log.info("%s: cleaned up test record", env)
