@@ -24,6 +24,35 @@ enum ClassGrouping: String, CaseIterable, Identifiable {
     }
 }
 
+/// A subject sub-group inside a school folder.
+struct SubjectGroup: Identifiable {
+    let id: String
+    let title: String
+    let classes: [ClassItem]
+}
+
+/// One school's folder in the Classes tab.
+struct SchoolFolder: Identifiable {
+    let id: String
+    let name: String
+    let count: Int
+    let subjects: [SubjectGroup]
+}
+
+/// A row in the "More schools" folder.
+struct MoreSchoolRow: Identifiable {
+    let id: String
+    let name: String
+    let count: Int
+}
+
+/// The full school-folder layout for the Classes tab.
+struct SchoolFolderLayout {
+    let selected: [SchoolFolder]
+    let more: [MoreSchoolRow]
+    var moreCount: Int { more.reduce(0) { $0 + $1.count } }
+}
+
 /// Single source of truth for the Classes tab: loads the `/classes.json` feed,
 /// caches it for offline, and exposes filtered + city-grouped output. Mirrors
 /// `ShowsStore` for the class data type.
@@ -306,5 +335,57 @@ final class ClassesStore {
                                 classes: sorted)
         }
         return sections
+    }
+
+    // MARK: School Folders
+
+    func schoolFolders(theaters: Set<String>, searchText: String = "") -> SchoolFolderLayout {
+        let items = filtered(theaters: theaters, searchText: searchText)
+        let scope = SourceCatalog.classScope(for: theaters)
+
+        let bySource = Dictionary(grouping: items, by: \.source)
+        var selected: [SchoolFolder] = []
+        var moreRows: [MoreSchoolRow] = []
+
+        let selectedOrder = SourceCatalog.all.filter { theaters.contains($0.id) }
+        let moreOrder = SourceCatalog.all.filter { scope.contains($0.id) && !theaters.contains($0.id) }
+
+        for entry in selectedOrder {
+            let classes = bySource[entry.id] ?? []
+            guard !classes.isEmpty else { continue }
+            selected.append(SchoolFolder(
+                id: entry.id, name: entry.name, count: classes.count,
+                subjects: Self.subjectGroups(from: classes, source: entry.id)))
+        }
+
+        for entry in moreOrder {
+            let classes = bySource[entry.id] ?? []
+            guard !classes.isEmpty else { continue }
+            moreRows.append(MoreSchoolRow(id: entry.id, name: entry.name, count: classes.count))
+        }
+
+        return SchoolFolderLayout(selected: selected, more: moreRows)
+    }
+
+    private static func subjectGroups(from classes: [ClassItem], source: String) -> [SubjectGroup] {
+        let ranked = classes.map { (rank: coreRank($0), item: $0) }
+        let core = ranked.filter { $0.rank != nil }
+        let rest = ranked.filter { $0.rank == nil }.map(\.item)
+
+        var groups: [SubjectGroup] = []
+        if !core.isEmpty {
+            groups.append(SubjectGroup(
+                id: "\(source)/core", title: "Core Curriculum",
+                classes: coreSorted(core)))
+        }
+
+        let bySubject = Dictionary(grouping: rest, by: \.subject)
+        for subject in ClassItem.subjectOrder {
+            guard let group = bySubject[subject], !group.isEmpty else { continue }
+            groups.append(SubjectGroup(
+                id: "\(source)/\(subject)", title: subject,
+                classes: dateSorted(group)))
+        }
+        return groups
     }
 }
