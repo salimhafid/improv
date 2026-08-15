@@ -265,7 +265,7 @@ def test_cloudkit() -> int:
     import urllib.error
     import urllib.request
     from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives import hashes, serialization
 
     if not KEY_ID or not PRIVATE_KEY_PEM:
         log.error("CLOUDKIT_KEY_ID and CLOUDKIT_PRIVATE_KEY must be set")
