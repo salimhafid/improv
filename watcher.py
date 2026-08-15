@@ -263,10 +263,34 @@ def test_cloudkit() -> int:
     """Send a single test record to verify CloudKit auth, then delete it."""
     import urllib.error
     import urllib.request
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
 
     if not KEY_ID or not PRIVATE_KEY_PEM:
         log.error("CLOUDKIT_KEY_ID and CLOUDKIT_PRIVATE_KEY must be set")
         return 1
+
+    log.info("Key ID: %s...%s (%d chars)", KEY_ID[:8], KEY_ID[-4:], len(KEY_ID))
+    pem = PRIVATE_KEY_PEM.strip()
+    log.info("PEM starts with: %s", pem[:30])
+    log.info("PEM has %d lines, %d total chars", pem.count("\n") + 1, len(pem))
+    try:
+        key = serialization.load_pem_private_key(pem.encode(), password=None)
+        if isinstance(key, ec.EllipticCurvePrivateKey):
+            log.info("Key type: EC %s (%d-bit)", key.curve.name, key.key_size)
+            pub_bytes = key.public_key().public_bytes(
+                serialization.Encoding.X962,
+                serialization.PublicFormat.UncompressedPoint)
+            log.info("Public key (uncompressed): %d bytes", len(pub_bytes))
+        else:
+            log.error("Key is not EC: %s", type(key).__name__)
+            return 1
+    except Exception as e:
+        log.error("Failed to load PEM: %r", e)
+        return 1
+
+    log.info("Container: %s", CONTAINER)
+    log.info("Environments: %s", ENVIRONMENTS)
 
     record_name = f"test-{uuid.uuid4().hex[:12]}"
     for env in ENVIRONMENTS:
