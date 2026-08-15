@@ -16,13 +16,13 @@ struct ClassesView: View {
     @AppStorage("ucbCoreExpanded") private var coreExpanded = true
 
     private var city: String { app.selectedCity.rawValue }
-    private var theater: String { app.selectedTheater }
+    private var theaters: Set<String> { app.selectedTheaters }
     private var theaterName: String { app.scopeTitle }
 
     var body: some View {
         // One filter+group pass per body evaluation, shared by the emptiness
         // check and the list.
-        let sections = store.sections(city: city, theater: theater, searchText: query)
+        let sections = store.sections(city: city, theaters: theaters, searchText: query)
         NavigationStack {
             Group {
                 if store.allClasses.isEmpty {
@@ -48,7 +48,7 @@ struct ClassesView: View {
             }
             .searchable(text: $query, prompt: "Search \(theaterName) classes")
             .sheet(isPresented: $showFilters) {
-                ClassFilterSheet(store: store, city: city, theater: theater)
+                ClassFilterSheet(store: store, city: city, theaters: theaters)
             }
             .sheet(isPresented: $showAlerts) {
                 ClassAlertsView()
@@ -57,20 +57,20 @@ struct ClassesView: View {
             .onSwipeRight {                             // swipe L→R opens the theater drawer
                 if hSize == .compact { app.sidebarOpen = true }
             }
-            .task { store.reconcileLevel(city: city, theater: theater) }
-            .onChange(of: theater) { _, _ in
+            .task { store.reconcileLevel(city: city, theaters: theaters) }
+            .onChange(of: theaters) { _, _ in
                 // Scope changed — drop a level not offered by the new theater.
-                store.reconcileLevel(city: city, theater: theater)
+                store.reconcileLevel(city: city, theaters: theaters)
             }
             .onChange(of: city) { _, _ in
                 // City change with All Theaters keeps theater == "all", so the
                 // onChange above never fires — reconcile here too.
-                store.reconcileLevel(city: city, theater: theater)
+                store.reconcileLevel(city: city, theaters: theaters)
             }
             .onChange(of: store.lastUpdated) { _, _ in
                 // Keyed on the timestamp, not the count, so a same-count refresh
                 // still reconciles.
-                store.reconcileLevel(city: city, theater: theater)
+                store.reconcileLevel(city: city, theaters: theaters)
                 if ProcessInfo.processInfo.uiTestClassFilter, !store.allClasses.isEmpty {
                     showFilters = true
                 }

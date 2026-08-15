@@ -108,7 +108,7 @@ struct TheaterListPanel: View {
             selected: app.isAllTheaters,
             available: true
         ) {
-            app.select(SourceCatalog.allTheatersID)
+            app.selectAll()
         }
     }
 
@@ -127,10 +127,10 @@ struct TheaterListPanel: View {
             subtitle: available ? entry.blurb : "Temporarily unavailable",
             symbol: "theatermasks.fill",
             count: count(for: entry.id),
-            selected: entry.id == app.selectedTheater,
+            selected: app.selectedTheaters.contains(entry.id),
             available: available
         ) {
-            app.select(entry.id)
+            app.toggle(entry.id)
         }
     }
 

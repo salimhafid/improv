@@ -123,9 +123,9 @@ private struct SetupTheaterRow: View {
     let symbol: String
 
     var body: some View {
-        let selected = app.selectedTheater == id
+        let selected = id == SourceCatalog.allTheatersID ? app.isAllTheaters : app.selectedTheaters == [id]
         Button {
-            app.selectedTheater = id
+            app.select(id)
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: symbol)
@@ -150,7 +150,7 @@ private struct SetupTheaterRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .sensoryFeedback(.selection, trigger: app.selectedTheater)
+        .sensoryFeedback(.selection, trigger: app.selectedTheaters)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

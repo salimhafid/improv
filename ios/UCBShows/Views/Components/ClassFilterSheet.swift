@@ -6,10 +6,10 @@ import SwiftUI
 struct ClassFilterSheet: View {
     @Bindable var store: ClassesStore
     let city: String
-    let theater: String
+    let theaters: Set<String>
     @Environment(\.dismiss) private var dismiss
 
-    private var levels: [String] { store.availableLevels(city: city, theater: theater) }
+    private var levels: [String] { store.availableLevels(city: city, theaters: theaters) }
 
     var body: some View {
         NavigationStack {
