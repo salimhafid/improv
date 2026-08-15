@@ -1,9 +1,11 @@
 import SwiftUI
 
 /// The single reusable list unit: poster thumbnail + title + time·venue, with
-/// trailing state symbols for livestream / free.
+/// trailing state symbols for livestream / free. When the current theater
+/// selection spans cities, a trailing city tag disambiguates each row.
 struct ShowRow: View {
     let show: Show
+    var showsCityTag = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -32,7 +34,10 @@ struct ShowRow: View {
 
             Spacer(minLength: 8)
 
-            VStack(spacing: 6) {
+            VStack(alignment: .trailing, spacing: 6) {
+                if showsCityTag {
+                    CityTag(city: show.city)
+                }
                 if show.isLivestream {
                     Image(systemName: "dot.radiowaves.left.and.right")
                 }
@@ -57,8 +62,25 @@ struct ShowRow: View {
     private var accessibilityText: String {
         var parts = [show.title, show.timeLabel]
         if !show.shortVenue.isEmpty { parts.append(show.shortVenue) }
+        if showsCityTag { parts.append(show.city) }
         if show.isLivestream { parts.append("Livestream available") }
         if show.isFree { parts.append("Free") }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// Small trailing capsule naming a row's city ("NYC" / "CHI" / "LA"), shown
+/// when the selected theaters span more than one city.
+struct CityTag: View {
+    let city: String
+
+    var body: some View {
+        Text(City(rawValue: city)?.short ?? city)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.quaternary, in: Capsule())
+            .accessibilityLabel(city)
     }
 }

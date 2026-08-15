@@ -24,15 +24,6 @@ struct SetupFlowView: View {
                     .listRowSeparator(.hidden)
                 }
 
-                Section {
-                    SetupTheaterRow(
-                        app: app,
-                        id: SourceCatalog.allTheatersID,
-                        name: "All Theaters",
-                        blurb: "Everything, every city"
-                    )
-                }
-
                 ForEach(SourceCatalog.byCity, id: \.city) { group in
                     Section {
                         ForEach(group.entries) { entry in
@@ -75,18 +66,12 @@ private struct SetupTheaterRow: View {
     let blurb: String
 
     var body: some View {
-        let selected = id == SourceCatalog.allTheatersID ? app.isAllTheaters : app.selectedTheaters == [id]
+        let selected = app.selectedTheaters == [id]
         Button {
             app.select(id)
         } label: {
             HStack(spacing: 12) {
-                if id == SourceCatalog.allTheatersID {
-                    Image(systemName: "square.grid.2x2.fill")
-                        .foregroundStyle(selected ? Theme.accent : .secondary)
-                        .frame(width: 28)
-                } else {
-                    TheaterIcon(id: id)
-                }
+                TheaterIcon(id: id)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
                         .font(.body.weight(selected ? .semibold : .regular))

@@ -80,7 +80,8 @@ struct ShowsFeedView: View {
                     OfflineBanner(updatedLabel: store.updatedLabel)
                 }
 
-                ShowSectionsList(sections: sections, namespace: zoom)
+                ShowSectionsList(sections: sections, namespace: zoom,
+                                 showsCityTags: app.spansMultipleCities)
 
                 if let updated = store.updatedLabel, store.phase != .offline {
                     Text(updated)

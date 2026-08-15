@@ -3,13 +3,18 @@ import Observation
 
 /// The single source of truth for *what's on screen*: the set of theaters being
 /// viewed. Theaters span every city (the sidebar lists them all, grouped by
-/// city), so selection is one global set. Both Shows and Classes scope to it.
-/// Persisted across launches so the last selection is remembered.
+/// city), so selection is one global set — always at least one theater, UCB
+/// New York by default. Both Shows and Classes scope to it. Persisted across
+/// launches (and mirrored to iCloud via CloudSync) so the user's selection is
+/// their new normal.
 @MainActor
 @Observable
 final class AppState {
-    /// Currently viewed theaters — a set of `SourceCatalog` source ids, from any
-    /// mix of cities. EMPTY means "All Theaters" (everything, everywhere).
+    /// The out-of-the-box selection.
+    static let defaultTheater = "ucb_ny"
+
+    /// Currently viewed theaters — a non-empty set of `SourceCatalog` source
+    /// ids, from any mix of cities.
     var selectedTheaters: Set<String> {
         didSet {
             UserDefaults.standard.set(Array(selectedTheaters).sorted(), forKey: Self.theatersKey)
@@ -30,51 +35,53 @@ final class AppState {
 
     init() {
         // Restore the saved selection, dropping ids no longer in the catalog.
-        // Migrates the old single-select key (its all-theaters sentinel becomes
-        // the empty set).
+        // An empty result (fresh install, or the retired "All Theaters"
+        // sentinel from older versions) becomes the default theater.
+        var restored: Set<String> = []
         if let saved = UserDefaults.standard.stringArray(forKey: Self.theatersKey) {
-            selectedTheaters = Set(saved).intersection(SourceCatalog.allIDs)
-        } else if let legacy = UserDefaults.standard.string(forKey: Self.legacyTheaterKey) {
-            selectedTheaters = SourceCatalog.allIDs.contains(legacy) ? [legacy] : []
-        } else {
-            selectedTheaters = []
+            restored = Set(saved).intersection(SourceCatalog.allIDs)
+        } else if let legacy = UserDefaults.standard.string(forKey: Self.legacyTheaterKey),
+                  SourceCatalog.allIDs.contains(legacy) {
+            restored = [legacy]
         }
+        selectedTheaters = restored.isEmpty ? [Self.defaultTheater] : restored
     }
 
-    /// Whether the everything scope ("All Theaters") is selected.
-    var isAllTheaters: Bool { selectedTheaters.isEmpty }
-
-    /// The single selected theater's name, or nil for All Theaters / a mix —
-    /// the views fall back to their own tab name ("Shows" / "Classes").
+    /// The single selected theater's name, or nil for a mix — the views fall
+    /// back to their own tab name ("Shows" / "Classes").
     var scopeTheaterName: String? {
         guard selectedTheaters.count == 1, let only = selectedTheaters.first else { return nil }
         return SourceCatalog.entry(only)?.name
     }
 
+    /// Whether the selection spans more than one city — rows then tag each
+    /// show/class with its city.
+    var spansMultipleCities: Bool {
+        Set(selectedTheaters.compactMap { SourceCatalog.entry($0)?.city }).count > 1
+    }
+
     /// Does a show/class from `source` fall inside the current scope?
     func matches(_ source: String) -> Bool {
-        selectedTheaters.isEmpty || selectedTheaters.contains(source)
+        selectedTheaters.contains(source)
     }
 
     /// Toggle one theater in or out of the mix (drawer stays open so several
-    /// can be picked in one visit). Selecting every theater collapses to
-    /// All Theaters.
+    /// can be picked in one visit). The last selected theater can't be removed
+    /// — the selection is never empty.
     func toggle(_ id: String) {
         var next = selectedTheaters
-        if next.contains(id) { next.remove(id) } else { next.insert(id) }
-        if next.count == SourceCatalog.all.count { next = [] }
+        if next.contains(id) {
+            guard next.count > 1 else { return }
+            next.remove(id)
+        } else {
+            next.insert(id)
+        }
         selectedTheaters = next
-    }
-
-    /// Select the everything scope and dismiss the drawer.
-    func selectAll() {
-        selectedTheaters = []
-        sidebarOpen = false
     }
 
     /// Single-select (Setup flow): exactly this theater, drawer closed.
     func select(_ id: String) {
-        selectedTheaters = id == SourceCatalog.allTheatersID ? [] : [id]
+        selectedTheaters = [id]
         sidebarOpen = false
     }
 }

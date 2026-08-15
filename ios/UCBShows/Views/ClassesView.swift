@@ -150,8 +150,10 @@ struct ClassesView: View {
     }
 
     private func rowButton(_ item: ClassItem) -> some View {
-        NavigationLink(value: item) { ClassRow(item: item) }
-            .buttonStyle(.plain)
+        NavigationLink(value: item) {
+            ClassRow(item: item, showsCityTag: app.spansMultipleCities)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: States

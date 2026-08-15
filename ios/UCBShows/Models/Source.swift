@@ -97,9 +97,6 @@ struct Lossy<Element: Decodable>: Decodable {
 
 /// The supported sources (the 4 wired venues + iO, which is currently unavailable).
 enum SourceCatalog {
-    /// Sentinel theater id meaning "every theater in the selected city".
-    static let allTheatersID = "all"
-
     static let all: [SourceCatalogEntry] = [
         .init(id: "ucb_ny", name: "UCB New York", blurb: "Upright Citizens Brigade", city: .newYork),
         .init(id: "brooklyn_cc", name: "Brooklyn Comedy Collective", blurb: "Williamsburg, Brooklyn", city: .newYork),

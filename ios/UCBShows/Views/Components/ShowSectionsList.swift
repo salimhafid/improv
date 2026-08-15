@@ -6,13 +6,14 @@ import SwiftUI
 struct ShowSectionsList: View {
     let sections: [DaySection]
     let namespace: Namespace.ID
+    var showsCityTags = false
 
     var body: some View {
         ForEach(sections) { section in
             Section {
                 ForEach(Array(section.shows.enumerated()), id: \.element.id) { index, show in
                     VStack(spacing: 0) {
-                        NavigationLink(value: show) { ShowRow(show: show) }
+                        NavigationLink(value: show) { ShowRow(show: show, showsCityTag: showsCityTags) }
                             .buttonStyle(.plain)
                             .zoomSource(id: show.id, in: namespace)
                         if index < section.shows.count - 1 {

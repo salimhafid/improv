@@ -1,9 +1,11 @@
 import SwiftUI
 
 /// A single class row: a level-tinted glyph, title + instructor/schedule, theater
-/// label, and a trailing price with an optional "Full" badge.
+/// label, and a trailing price with an optional "Full" badge. When the current
+/// theater selection spans cities, a trailing city tag disambiguates each row.
 struct ClassRow: View {
     let item: ClassItem
+    var showsCityTag = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -36,6 +38,9 @@ struct ClassRow: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .trailing, spacing: 4) {
+                if showsCityTag {
+                    CityTag(city: item.city)
+                }
                 if !item.price.isEmpty {
                     Text(item.price)
                         .font(.subheadline.weight(.semibold))
@@ -66,6 +71,7 @@ struct ClassRow: View {
         var parts = [item.title]
         if !item.subtitleLine.isEmpty { parts.append(item.subtitleLine) }
         parts.append(item.sourceLabel)
+        if showsCityTag { parts.append(item.city) }
         if !item.price.isEmpty { parts.append(item.price) }
         if item.isFull { parts.append("Full") }
         return parts.joined(separator: ", ")
