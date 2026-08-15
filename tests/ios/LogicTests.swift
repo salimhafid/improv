@@ -106,6 +106,20 @@ func testBuildSections() {
                "date grouping: months ascending, TBA last")
 }
 
+func testClassScope() {
+    checkEqual(SourceCatalog.classScope(for: ["ucb_ny"]).sorted(),
+               ["brooklyn_cc", "magnet", "ucb_ny", "wgis_ny"],
+               "one NY theater scopes classes to every NY school")
+    let mixed = SourceCatalog.classScope(for: ["ucb_ny", "annoyance"])
+    check(mixed.contains("magnet") && mixed.contains("second_city"),
+          "a cross-city pick spans both cities")
+    check(!mixed.contains("ucb_la"), "an unpicked city stays out of scope")
+    check(SourceCatalog.classScope(for: []).isEmpty,
+          "empty selection keeps its no-scoping meaning")
+    checkEqual(SourceCatalog.classScope(for: ["nope"]), ["nope"],
+               "an unknown id stays alone — it must never widen to everything")
+}
+
 func testClassItemDecoding() {
     let minimal = classItem([:])
     checkEqual(minimal.title, "Untitled class", "defensive title default")
@@ -212,6 +226,7 @@ struct LogicTests {
     static func main() async {
         await testCoreRank()
         await testBuildSections()
+        testClassScope()
         testClassItemDecoding()
         testShowDecodingAndDayKey()
         testDaySectionGrouping()

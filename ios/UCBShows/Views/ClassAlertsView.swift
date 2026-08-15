@@ -39,7 +39,9 @@ struct ClassAlertsView: View {
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                if alerts.isUCBEnabled(school.id) {
+                                // Bell means "actually pushing", so an on-with-
+                                // nothing school doesn't get one.
+                                if !(alerts.prefs.ucb[school.id] ?? []).isEmpty {
                                     Image(systemName: "bell.fill")
                                         .font(.caption).foregroundStyle(Theme.accent)
                                 }
@@ -83,17 +85,22 @@ struct ClassAlertsView: View {
     }
 
     private func ucbSubtitle(_ id: String) -> String {
-        let set = alerts.prefs.ucb[id] ?? []
-        if set.isEmpty { return "Off" }
+        guard let set = alerts.prefs.ucb[id] else { return "Off" }
+        if set.isEmpty { return "On — no categories picked" }
         if set.count == ClassAlertsStore.ucbCategories.count { return "All categories" }
         return "\(set.count) categor\(set.count == 1 ? "y" : "ies")"
     }
 }
 
 /// Per-city UCB alert customization: on/off plus one toggle per class category.
+/// Switching a school on starts at Improv only, so the header carries an
+/// explicit Select all — the school toggle is no longer a bulk-select in disguise.
 struct UCBAlertDetailView: View {
     let school: ClassAlertsStore.School
     @Environment(ClassAlertsStore.self) private var alerts
+
+    private var selected: Set<String> { alerts.prefs.ucb[school.id] ?? [] }
+    private var allSelected: Bool { selected.count == ClassAlertsStore.ucbCategories.count }
 
     var body: some View {
         List {
@@ -104,17 +111,28 @@ struct UCBAlertDetailView: View {
                 }
                 .tint(Theme.accent)
             } footer: {
-                Text("New classes are checked every 10 minutes and alert immediately.")
+                Text("New classes are checked every 10 minutes and alert immediately. Starts with Improv — add whatever else you want below.")
             }
 
-            Section("Categories") {
+            Section {
                 ForEach(ClassAlertsStore.ucbCategories, id: \.key) { category in
                     Toggle(isOn: Binding(
-                        get: { (alerts.prefs.ucb[school.id] ?? []).contains(category.key) },
+                        get: { selected.contains(category.key) },
                         set: { alerts.setUCBCategory(school.id, category: category.key, enabled: $0) })) {
                         Text(category.label)
                     }
                     .tint(Theme.accent)
+                    .disabled(!alerts.isUCBEnabled(school.id))
+                }
+            } header: {
+                HStack {
+                    Text("Categories")
+                    Spacer()
+                    Button(allSelected ? "Clear all" : "Select all") {
+                        alerts.setAllUCBCategories(school.id, enabled: !allSelected)
+                    }
+                    .font(.caption)
+                    .textCase(nil)
                     .disabled(!alerts.isUCBEnabled(school.id))
                 }
             }

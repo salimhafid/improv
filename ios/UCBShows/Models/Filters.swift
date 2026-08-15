@@ -16,8 +16,8 @@ struct Filters: Equatable, Codable {
         }
     }
 
-    // City + theater are no longer filters — they come from AppState (the Setup
-    // city picker and the theater sidebar). What remains refines within that scope.
+    // City + theater are no longer filters — they come from AppState (the
+    // theater sidebar). What remains refines within that scope.
     var venue: String? = nil
     var comedyTypes: Set<String> = []
     var livestreamOnly = false
@@ -40,24 +40,4 @@ struct Filters: Equatable, Codable {
     }
 
     mutating func clear() { self = Filters() }
-}
-
-/// Filters applied to the classes list within the selected city + theater scope:
-/// level/track and an open-only toggle. (City + theater come from AppState.)
-struct ClassFilters: Equatable, Codable {
-    var level: String? = nil
-    var openOnly = false         // hide classes marked full
-
-    var isActive: Bool {
-        level != nil || openOnly
-    }
-
-    var activeCount: Int {
-        var n = 0
-        if level != nil { n += 1 }
-        if openOnly { n += 1 }
-        return n
-    }
-
-    mutating func clear() { self = ClassFilters() }
 }

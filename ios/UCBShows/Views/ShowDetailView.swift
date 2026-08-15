@@ -304,22 +304,19 @@ struct ShowDetailView: View {
     }
 
     private var bottomBar: some View {
-        VStack(spacing: 10) {
-            // Student-ticket CTA (renders only when it applies to this show).
+        HStack(spacing: StudentReserveButton.barSpacing) {
+            goingButton
             StudentReserveButton(show: show, onSignIn: { showSignIn = true })
-            HStack(spacing: 12) {
-                goingButton
-                if let url = show.url {
-                    Button {
-                        webLink = WebLink(url: url)
-                    } label: {
-                        Label(show.isFree ? "Reserve · Free" : "Get Tickets", systemImage: "ticket.fill")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+            if let url = show.url {
+                Button {
+                    webLink = WebLink(url: url)
+                } label: {
+                    Label(show.isFree ? "Reserve · Free" : "Get Tickets", systemImage: "ticket.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
         }
         .padding(.horizontal, Theme.Space.gutter)

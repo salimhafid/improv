@@ -10,7 +10,6 @@ import SwiftUI
 ///   UITEST_PUSH_SOURCE   — push the first show from this source id that has a cast
 ///   UITEST_TALENT        — with UITEST_PUSH_SOURCE: "directory", "person", or a
 ///                          performer name to push on top of the show detail
-///   UITEST_CLASS_FILTER  — "1" to auto-present the Classes filter sheet
 ///   UITEST_SIDEBAR       — "1" to open the theater sidebar on launch
 struct UITestTabSelection: ViewModifier {
     @Binding var selection: Int
@@ -67,14 +66,6 @@ extension ProcessInfo {
     var uiTestScrollCast: Bool {
         #if DEBUG
         environment["UITEST_SCROLL_CAST"] == "1"
-        #else
-        false
-        #endif
-    }
-
-    var uiTestClassFilter: Bool {
-        #if DEBUG
-        environment["UITEST_CLASS_FILTER"] == "1"
         #else
         false
         #endif

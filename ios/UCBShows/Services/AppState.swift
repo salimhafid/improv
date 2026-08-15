@@ -54,16 +54,21 @@ final class AppState {
         return SourceCatalog.entry(only)?.name
     }
 
-    /// Whether the selection spans more than one city — rows then tag each
-    /// show/class with its city.
-    var spansMultipleCities: Bool {
-        Set(selectedTheaters.compactMap { SourceCatalog.entry($0)?.city }).count > 1
+    /// The cities the selection touches. The app never asks for a city — it's
+    /// always inferred from the theaters picked in the sidebar.
+    var scopeCities: Set<City> {
+        Set(selectedTheaters.compactMap { SourceCatalog.entry($0)?.city })
     }
 
-    /// Does a show/class from `source` fall inside the current scope?
-    func matches(_ source: String) -> Bool {
-        selectedTheaters.contains(source)
+    /// The single city the selection sits in, or nil for a mix. Classes are
+    /// browsed city-wide, so the Classes tab titles by city, not by theater.
+    var scopeCityName: String? {
+        scopeCities.count == 1 ? scopeCities.first?.rawValue : nil
     }
+
+    /// Whether the selection spans more than one city — rows then tag each
+    /// show/class with its city.
+    var spansMultipleCities: Bool { scopeCities.count > 1 }
 
     /// Toggle one theater in or out of the mix (drawer stays open so several
     /// can be picked in one visit). The last selected theater can't be removed
@@ -77,11 +82,5 @@ final class AppState {
             next.insert(id)
         }
         selectedTheaters = next
-    }
-
-    /// Single-select (Setup flow): exactly this theater, drawer closed.
-    func select(_ id: String) {
-        selectedTheaters = [id]
-        sidebarOpen = false
     }
 }

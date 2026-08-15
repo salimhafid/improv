@@ -5,8 +5,9 @@ import SwiftUI
 /// the theaters chosen in the left sidebar (all cities, one list). On iPhone
 /// the sidebar is a drawer overlaying the TabView (opened from each tab's
 /// hamburger button); on iPad (regular width) it's a persistent leading column.
-/// A theater-picker Setup is presented on first launch. Kicks off the initial
-/// loads (cache-first, then network).
+/// There's no onboarding — a fresh install lands on UCB New York and the city
+/// follows from whatever the sidebar holds. Kicks off the initial loads
+/// (cache-first, then network).
 struct RootView: View {
     @Environment(ShowsStore.self) private var store
     @Environment(ClassesStore.self) private var classesStore
@@ -16,7 +17,6 @@ struct RootView: View {
     @Environment(UCBAccountStore.self) private var account
     @Environment(TicketStore.self) private var tickets
     @Environment(\.horizontalSizeClass) private var hSize
-    @AppStorage("hasCompletedSetup") private var hasCompletedSetup = false
 
     var body: some View {
         @Bindable var app = app
@@ -42,12 +42,6 @@ struct RootView: View {
         .task { await talent.loadInitial() }
         .modifier(UITestTabSelection(selection: $app.activeTab))
         .modifier(UITestSidebar())
-        .fullScreenCover(isPresented: Binding(
-            get: { !hasCompletedSetup },
-            set: { if !$0 { hasCompletedSetup = true } }
-        )) {
-            SetupFlowView(app: app) { hasCompletedSetup = true }
-        }
     }
 
     private var tabs: some View {
