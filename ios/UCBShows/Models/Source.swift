@@ -47,6 +47,9 @@ struct SourceCatalogEntry: Identifiable, Hashable {
     let name: String      // display name, e.g. "Brooklyn Comedy Collective"
     let blurb: String     // neighborhood / subtitle
     let city: City
+    /// False for class-only schools (no shows feed) — they're hidden from the
+    /// shows sidebar/Setup, and their classes ride along with their city.
+    var hasShows = true
 }
 
 /// Per-source availability + counts from the feed's `sources` array. Decoded
@@ -101,7 +104,8 @@ enum SourceCatalog {
         .init(id: "ucb_ny", name: "UCB New York", blurb: "Upright Citizens Brigade", city: .newYork),
         .init(id: "brooklyn_cc", name: "Brooklyn Comedy Collective", blurb: "Williamsburg, Brooklyn", city: .newYork),
         .init(id: "magnet", name: "Magnet Theater", blurb: "Chelsea, Manhattan", city: .newYork),
-        .init(id: "wgis_ny", name: "WGIS New York", blurb: "World’s Greatest Improv School", city: .newYork),
+        .init(id: "wgis_ny", name: "WGIS New York", blurb: "World’s Greatest Improv School", city: .newYork,
+              hasShows: false),   // classes only — no shows feed
         .init(id: "ucb_la", name: "UCB Los Angeles", blurb: "Upright Citizens Brigade", city: .losAngeles),
         .init(id: "wgis_la", name: "WGIS Los Angeles", blurb: "World’s Greatest Improv School", city: .losAngeles),
         .init(id: "annoyance", name: "The Annoyance", blurb: "Lakeview, Chicago", city: .chicago),
@@ -113,13 +117,28 @@ enum SourceCatalog {
 
     static let allIDs = Set(all.map(\.id))
 
-    /// Catalog grouped by city, in city order, skipping empty cities.
+    /// Theaters selectable in the sidebar/Setup (shows feed exists).
+    static let showIDs = Set(all.filter(\.hasShows).map(\.id))
+
+    /// Catalog grouped by city, in city order, skipping empty cities. Only
+    /// theaters with shows — this feeds the sidebar and Setup, which scope
+    /// the shows feed.
     static var byCity: [(city: City, entries: [SourceCatalogEntry])] {
         City.allCases.compactMap { city in
-            let entries = all.filter { $0.city == city }
+            let entries = all.filter { $0.city == city && $0.hasShows }
             return entries.isEmpty ? nil : (city, entries)
         }
     }
 
     static func entry(_ id: String) -> SourceCatalogEntry? { all.first { $0.id == id } }
+
+    /// Class sources visible for a theater selection: the selected theaters
+    /// plus class-only schools (unlistable in the sidebar) from the same
+    /// cities — so e.g. WGIS NY's classes appear for anyone scoped to a New
+    /// York theater.
+    static func classScope(for theaters: Set<String>) -> Set<String> {
+        let cities = Set(theaters.compactMap { entry($0)?.city })
+        let classOnly = all.filter { !$0.hasShows && cities.contains($0.city) }.map(\.id)
+        return theaters.union(classOnly)
+    }
 }
