@@ -252,8 +252,79 @@ def send_alerts(alerts: list[dict]) -> None:
                      env, len(alerts) - len(errors), len(errors))
             for e in errors[:3]:
                 log.warning("  %s: %s", env, e.get("serverErrorCode"))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            log.error("%s: CloudKit HTTP %d: %s", env, e.code, body[:500])
         except Exception as e:  # noqa: BLE001
             log.error("%s: CloudKit write failed: %r", env, e)
+
+
+def test_cloudkit() -> int:
+    """Send a single test record to verify CloudKit auth, then delete it."""
+    import urllib.error
+    import urllib.request
+
+    if not KEY_ID or not PRIVATE_KEY_PEM:
+        log.error("CLOUDKIT_KEY_ID and CLOUDKIT_PRIVATE_KEY must be set")
+        return 1
+
+    record_name = f"test-{uuid.uuid4().hex[:12]}"
+    for env in ENVIRONMENTS:
+        subpath = f"/database/1/{CONTAINER}/{env}/public/records/modify"
+        body = json.dumps({"operations": [{
+            "operationType": "create",
+            "record": {
+                "recordType": "ClassAlert",
+                "recordName": record_name,
+                "fields": {
+                    "school": {"value": "__test__"},
+                    "category": {"value": "test"},
+                    "count": {"value": 0},
+                    "pushTitle": {"value": "CloudKit auth test"},
+                    "pushBody": {"value": "This record can be deleted."},
+                    "classIDs": {"value": ""},
+                },
+            },
+        }]}).encode()
+        req = urllib.request.Request(
+            "https://api.apple-cloudkit.com" + subpath, data=body,
+            headers=_sign(subpath, body), method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.load(resp)
+            records = result.get("records", [])
+            errors = [r for r in records if r.get("serverErrorCode")]
+            if errors:
+                log.error("%s: server error: %s", env, errors[0])
+            else:
+                log.info("%s: auth OK — wrote test record %s", env, record_name)
+                _delete_record(env, record_name)
+        except urllib.error.HTTPError as e:
+            body_text = e.read().decode("utf-8", errors="replace")
+            log.error("%s: HTTP %d: %s", env, e.code, body_text[:500])
+            return 1
+        except Exception as e:  # noqa: BLE001
+            log.error("%s: %r", env, e)
+            return 1
+    return 0
+
+
+def _delete_record(env: str, record_name: str) -> None:
+    import urllib.request
+
+    subpath = f"/database/1/{CONTAINER}/{env}/public/records/modify"
+    body = json.dumps({"operations": [{
+        "operationType": "delete",
+        "record": {"recordType": "ClassAlert", "recordName": record_name},
+    }]}).encode()
+    req = urllib.request.Request(
+        "https://api.apple-cloudkit.com" + subpath, data=body,
+        headers=_sign(subpath, body), method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            log.info("%s: cleaned up test record", env)
+    except Exception:  # noqa: BLE001
+        log.warning("%s: could not delete test record %s", env, record_name)
 
 
 def main() -> int:
@@ -261,7 +332,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ucb", action="store_true", help="scan UCB (NY/LA/Online) via Arlo")
     ap.add_argument("--all", action="store_true", help="scan every non-UCB class source")
+    ap.add_argument("--test", action="store_true", help="send a test record to verify CloudKit auth")
     args = ap.parse_args()
+
+    if args.test:
+        return test_cloudkit()
+
     if not (args.ucb or args.all):
         ap.error("pass --ucb and/or --all")
 
