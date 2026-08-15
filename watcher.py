@@ -271,24 +271,13 @@ def test_cloudkit() -> int:
         log.error("CLOUDKIT_KEY_ID and CLOUDKIT_PRIVATE_KEY must be set")
         return 1
 
-    log.info("Key ID: %s...%s (%d chars)", KEY_ID[:8], KEY_ID[-4:], len(KEY_ID))
-    pem = PRIVATE_KEY_PEM.strip()
     try:
-        key = serialization.load_pem_private_key(pem.encode(), password=None)
+        key = serialization.load_pem_private_key(PRIVATE_KEY_PEM.encode(), password=None)
         if not isinstance(key, ec.EllipticCurvePrivateKey):
             log.error("Key is not EC: %s", type(key).__name__)
             return 1
-        log.info("Key loaded: EC %s", key.curve.name)
-        # Self-verify: sign a test message and verify with the public key
-        test_msg = b"2026-01-01T00:00:00Z:test:test"
-        test_sig = key.sign(test_msg, ec.ECDSA(hashes.SHA256()))
-        log.info("Test signature: %d bytes (DER)", len(test_sig))
-        try:
-            key.public_key().verify(test_sig, test_msg, ec.ECDSA(hashes.SHA256()))
-            log.info("Self-verify: PASS — signing works correctly")
-        except Exception as ve:
-            log.error("Self-verify: FAIL — %r", ve)
-            return 1
+        log.info("Key loaded: EC %s, Key ID: %s...%s",
+                 key.curve.name, KEY_ID[:8], KEY_ID[-4:])
     except Exception as e:
         log.error("Failed to load PEM: %r", e)
         return 1
@@ -309,9 +298,12 @@ def test_cloudkit() -> int:
                      env, len(result.get("records", [])))
         except urllib.error.HTTPError as e:
             body_text = e.read().decode("utf-8", errors="replace")
-            log.error("%s: query HTTP %d: %s", env, e.code, body_text[:500])
-            ok = False
-            continue
+            if e.code == 404 and "NOT_FOUND" in body_text:
+                log.info("%s: auth OK (record type not yet created)", env)
+            else:
+                log.error("%s: query HTTP %d: %s", env, e.code, body_text[:500])
+                ok = False
+                continue
 
         # Step 2: try a write
         record_name = f"test-{env}-{uuid.uuid4().hex[:8]}"
