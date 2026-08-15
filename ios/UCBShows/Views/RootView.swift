@@ -2,11 +2,11 @@ import SwiftUI
 
 /// Three-tab shell: Shows, Classes, and Tickets (which also holds the hearted
 /// "I'm Going" shows) — Shows and Classes are scoped to
-/// the theater chosen in the left sidebar. On iPhone the sidebar is a drawer
-/// overlaying the TabView (opened from each tab's hamburger button); on iPad
-/// (regular width) it's a persistent leading column. A city-selector Setup is
-/// presented on first launch / from the sidebar. Kicks off the initial loads
-/// (cache-first, then network).
+/// the theaters chosen in the left sidebar (all cities, one list). On iPhone
+/// the sidebar is a drawer overlaying the TabView (opened from each tab's
+/// hamburger button); on iPad (regular width) it's a persistent leading column.
+/// A theater-picker Setup is presented on first launch. Kicks off the initial
+/// loads (cache-first, then network).
 struct RootView: View {
     @Environment(ShowsStore.self) private var store
     @Environment(ClassesStore.self) private var classesStore
@@ -47,9 +47,6 @@ struct RootView: View {
             set: { if !$0 { hasCompletedSetup = true } }
         )) {
             SetupFlowView(app: app) { hasCompletedSetup = true }
-        }
-        .sheet(isPresented: $app.showCityPicker) {
-            SetupView(app: app, isOnboarding: false) { app.showCityPicker = false }
         }
     }
 

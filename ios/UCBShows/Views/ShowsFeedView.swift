@@ -13,14 +13,17 @@ struct ShowsFeedView: View {
     @State private var path = NavigationPath()
     @Namespace private var zoom
 
-    private var city: String { app.selectedCity.rawValue }
     private var theaters: Set<String> { app.selectedTheaters }
-    private var theaterName: String { app.scopeTitle }
+    /// Single theater's name, or just "Shows" for All Theaters / a mix.
+    private var title: String { app.scopeTheaterName ?? "Shows" }
+    private var searchPrompt: String {
+        app.scopeTheaterName.map { "Search \($0)" } ?? "Search shows"
+    }
 
     var body: some View {
         // One filter+group pass per body evaluation — the emptiness check and
         // the feed both read it (filtering twice was measurable at feed scale).
-        let sections = store.sections(city: city, theaters: theaters, searchText: query)
+        let sections = store.sections(theaters: theaters, searchText: query)
         NavigationStack(path: $path) {
             Group {
                 if store.allShows.isEmpty {
@@ -35,7 +38,7 @@ struct ShowsFeedView: View {
                     feed(sections)
                 }
             }
-            .navigationTitle(theaterName)
+            .navigationTitle(title)
             .toolbar {
                 hamburgerToolbarItem
                 filterToolbarItem
@@ -43,30 +46,24 @@ struct ShowsFeedView: View {
             .navigationDestination(for: Show.self) { show in
                 ShowDetailView(show: show, namespace: zoom)
             }
-            .searchable(text: $query, prompt: "Search \(theaterName)")
+            .searchable(text: $query, prompt: searchPrompt)
             .sheet(isPresented: $showFilters) {
-                FilterSheet(store: store, city: city, theaters: theaters)
+                FilterSheet(store: store, theaters: theaters)
             }
             .refreshable { await store.refresh() }
             .onSwipeRight {                             // swipe L→R opens the theater drawer
                 if hSize == .compact { app.sidebarOpen = true }
             }
-            .task { store.reconcileFilters(city: city, theaters: theaters) }
+            .task { store.reconcileFilters(theaters: theaters) }
             .onChange(of: theaters) { _, _ in
-                // Scope changed — drop venue/types not in the new theater.
-                store.reconcileFilters(city: city, theaters: theaters)
-            }
-            .onChange(of: city) { _, _ in
-                // City changed with All Theaters selected: theater stays "all",
-                // so the onChange above never fires — reconcile here or a stale
-                // venue/type filter from the old city empties the feed.
-                store.reconcileFilters(city: city, theaters: theaters)
+                // Scope changed — drop venue/types not in the new selection.
+                store.reconcileFilters(theaters: theaters)
             }
             .onChange(of: store.lastUpdated) { _, _ in
                 // Re-reconcile on every successful load (keyed on the timestamp,
                 // not the count, so a same-count refresh still reconciles).
                 maybeAutoPush()
-                store.reconcileFilters(city: city, theaters: theaters)
+                store.reconcileFilters(theaters: theaters)
             }
             .onChange(of: talent.loaded) { _, _ in
                 maybeAutoPushTalent()
@@ -126,7 +123,8 @@ struct ShowsFeedView: View {
         ContentUnavailableView {
             Label("No Upcoming Shows", systemImage: "theatermasks")
         } description: {
-            Text("\(theaterName) has no upcoming shows right now. Try another theater.")
+            Text(app.scopeTheaterName.map { "\($0) has no upcoming shows right now. Try another theater." }
+                ?? "The selected theaters have no upcoming shows right now.")
         } actions: {
             // The drawer only exists on compact width — iPad already shows the
             // persistent theater column, so the button would be a dead control.

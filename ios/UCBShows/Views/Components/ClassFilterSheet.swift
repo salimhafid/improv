@@ -1,15 +1,14 @@
 import SwiftUI
 
-/// Sheet for refining the classes list within the current city + theater scope:
-/// level/track and an open-only toggle. (City + theater are chosen elsewhere —
+/// Sheet for refining the classes list within the current theater scope:
+/// level/track and an open-only toggle. (Theaters are chosen elsewhere —
 /// Setup and the sidebar.) Binds directly to the store so changes apply live.
 struct ClassFilterSheet: View {
     @Bindable var store: ClassesStore
-    let city: String
     let theaters: Set<String>
     @Environment(\.dismiss) private var dismiss
 
-    private var levels: [String] { store.availableLevels(city: city, theaters: theaters) }
+    private var levels: [String] { store.availableLevels(theaters: theaters) }
 
     var body: some View {
         NavigationStack {

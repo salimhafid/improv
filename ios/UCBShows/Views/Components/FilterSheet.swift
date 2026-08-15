@@ -1,17 +1,16 @@
 import SwiftUI
 
-/// Sheet for refining the show list within the current city + theater scope:
-/// venue, comedy types, livestream/free, and a date window. Binds directly to the
-/// store so changes apply live. (City + theater are chosen elsewhere — Setup and
+/// Sheet for refining the show list within the current theater scope: venue,
+/// comedy types, livestream/free, and a date window. Binds directly to the
+/// store so changes apply live. (Theaters are chosen elsewhere — Setup and
 /// the sidebar — so they're not filters here.)
 struct FilterSheet: View {
     @Bindable var store: ShowsStore
-    let city: String
     let theaters: Set<String>
     @Environment(\.dismiss) private var dismiss
 
-    private var venues: [String] { store.availableVenues(city: city, theaters: theaters) }
-    private var types: [String] { store.availableTypes(city: city, theaters: theaters) }
+    private var venues: [String] { store.availableVenues(theaters: theaters) }
+    private var types: [String] { store.availableTypes(theaters: theaters) }
 
     var body: some View {
         NavigationStack {
