@@ -272,16 +272,16 @@ def test_cloudkit() -> int:
 
     log.info("Key ID: %s...%s (%d chars)", KEY_ID[:8], KEY_ID[-4:], len(KEY_ID))
     pem = PRIVATE_KEY_PEM.strip()
-    log.info("PEM starts with: %s", pem[:30])
     log.info("PEM has %d lines, %d total chars", pem.count("\n") + 1, len(pem))
     try:
         key = serialization.load_pem_private_key(pem.encode(), password=None)
         if isinstance(key, ec.EllipticCurvePrivateKey):
             log.info("Key type: EC %s (%d-bit)", key.curve.name, key.key_size)
-            pub_bytes = key.public_key().public_bytes(
-                serialization.Encoding.X962,
-                serialization.PublicFormat.UncompressedPoint)
-            log.info("Public key (uncompressed): %d bytes", len(pub_bytes))
+            pub_der = key.public_key().public_bytes(
+                serialization.Encoding.DER,
+                serialization.PublicFormat.SubjectPublicKeyInfo)
+            fingerprint = hashlib.sha256(pub_der).hexdigest()
+            log.info("Public key SHA-256 fingerprint: %s", fingerprint)
         else:
             log.error("Key is not EC: %s", type(key).__name__)
             return 1
@@ -292,10 +292,11 @@ def test_cloudkit() -> int:
     log.info("Container: %s", CONTAINER)
     log.info("Environments: %s", ENVIRONMENTS)
 
-    record_name = f"test-{uuid.uuid4().hex[:12]}"
+    ok = True
     for env in ENVIRONMENTS:
+        record_name = f"test-{env}-{uuid.uuid4().hex[:8]}"
         subpath = f"/database/1/{CONTAINER}/{env}/public/records/modify"
-        body = json.dumps({"operations": [{
+        payload = json.dumps({"operations": [{
             "operationType": "create",
             "record": {
                 "recordType": "ClassAlert",
@@ -310,9 +311,12 @@ def test_cloudkit() -> int:
                 },
             },
         }]}).encode()
+        headers = _sign(subpath, payload)
+        log.info("%s: signing message date=%s subpath=%s",
+                 env, headers["X-Apple-CloudKit-Request-ISO8601Date"], subpath)
         req = urllib.request.Request(
-            "https://api.apple-cloudkit.com" + subpath, data=body,
-            headers=_sign(subpath, body), method="POST")
+            "https://api.apple-cloudkit.com" + subpath, data=payload,
+            headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result = json.load(resp)
@@ -320,17 +324,18 @@ def test_cloudkit() -> int:
             errors = [r for r in records if r.get("serverErrorCode")]
             if errors:
                 log.error("%s: server error: %s", env, errors[0])
+                ok = False
             else:
-                log.info("%s: auth OK — wrote test record %s", env, record_name)
+                log.info("%s: OK — wrote and cleaning up %s", env, record_name)
                 _delete_record(env, record_name)
         except urllib.error.HTTPError as e:
             body_text = e.read().decode("utf-8", errors="replace")
             log.error("%s: HTTP %d: %s", env, e.code, body_text[:500])
-            return 1
+            ok = False
         except Exception as e:  # noqa: BLE001
             log.error("%s: %r", env, e)
-            return 1
-    return 0
+            ok = False
+    return 0 if ok else 1
 
 
 def _delete_record(env: str, record_name: str) -> None:
