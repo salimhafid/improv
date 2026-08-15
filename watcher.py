@@ -284,28 +284,6 @@ def test_cloudkit() -> int:
 
     ok = True
     for env in ENVIRONMENTS:
-        # Step 1: try a read-only query to test auth
-        q_subpath = f"/database/1/{CONTAINER}/{env}/public/records/query"
-        q_payload = json.dumps({"query": {"recordType": "ClassAlert"},
-                                "resultsLimit": 1}).encode()
-        q_req = urllib.request.Request(
-            "https://api.apple-cloudkit.com" + q_subpath, data=q_payload,
-            headers=_sign(q_subpath, q_payload), method="POST")
-        try:
-            with urllib.request.urlopen(q_req, timeout=30) as resp:
-                result = json.load(resp)
-            log.info("%s: query OK — auth works! (%d records)",
-                     env, len(result.get("records", [])))
-        except urllib.error.HTTPError as e:
-            body_text = e.read().decode("utf-8", errors="replace")
-            if e.code == 404 and "NOT_FOUND" in body_text:
-                log.info("%s: auth OK (record type not yet created)", env)
-            else:
-                log.error("%s: query HTTP %d: %s", env, e.code, body_text[:500])
-                ok = False
-                continue
-
-        # Step 2: try a write
         record_name = f"test-{env}-{uuid.uuid4().hex[:8]}"
         w_subpath = f"/database/1/{CONTAINER}/{env}/public/records/modify"
         w_payload = json.dumps({"operations": [{
