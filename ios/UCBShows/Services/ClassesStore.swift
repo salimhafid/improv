@@ -117,10 +117,12 @@ final class ClassesStore {
 
     // MARK: Filter option sources (scoped to the current theaters)
 
-    /// Classes in a given theater scope (no other filters). The empty set
-    /// means every theater.
+    /// Classes in a given theater scope (no other filters). The scope widens
+    /// to class-only schools in the selection's cities (see `classScope`).
+    /// The empty set means every theater.
     func scoped(theaters: Set<String>) -> [ClassItem] {
-        allClasses.filter { theaters.isEmpty || theaters.contains($0.source) }
+        let scope = SourceCatalog.classScope(for: theaters)
+        return allClasses.filter { scope.isEmpty || scope.contains($0.source) }
     }
 
     /// Distinct levels/tracks present in the scope, sorted.
@@ -138,7 +140,8 @@ final class ClassesStore {
         let query = searchText.folding(options: .diacriticInsensitive, locale: .current)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        return allClasses.filter { matches($0, query: query, theaters: theaters) }
+        let scope = SourceCatalog.classScope(for: theaters)
+        return allClasses.filter { matches($0, query: query, theaters: scope) }
     }
 
     private func matches(_ item: ClassItem, query: String, theaters: Set<String>) -> Bool {

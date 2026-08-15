@@ -39,9 +39,9 @@ final class AppState {
         // sentinel from older versions) becomes the default theater.
         var restored: Set<String> = []
         if let saved = UserDefaults.standard.stringArray(forKey: Self.theatersKey) {
-            restored = Set(saved).intersection(SourceCatalog.allIDs)
+            restored = Set(saved).intersection(SourceCatalog.showIDs)
         } else if let legacy = UserDefaults.standard.string(forKey: Self.legacyTheaterKey),
-                  SourceCatalog.allIDs.contains(legacy) {
+                  SourceCatalog.showIDs.contains(legacy) {
             restored = [legacy]
         }
         selectedTheaters = restored.isEmpty ? [Self.defaultTheater] : restored
