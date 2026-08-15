@@ -279,10 +279,16 @@ def test_cloudkit() -> int:
             log.error("Key is not EC: %s", type(key).__name__)
             return 1
         log.info("Key loaded: EC %s", key.curve.name)
-        derived_pub = key.public_key().public_bytes(
-            serialization.Encoding.PEM,
-            serialization.PublicFormat.SubjectPublicKeyInfo).decode().strip()
-        log.info("Derived public key:\n%s", derived_pub)
+        # Self-verify: sign a test message and verify with the public key
+        test_msg = b"2026-01-01T00:00:00Z:test:test"
+        test_sig = key.sign(test_msg, ec.ECDSA(hashes.SHA256()))
+        log.info("Test signature: %d bytes (DER)", len(test_sig))
+        try:
+            key.public_key().verify(test_sig, test_msg, ec.ECDSA(hashes.SHA256()))
+            log.info("Self-verify: PASS — signing works correctly")
+        except Exception as ve:
+            log.error("Self-verify: FAIL — %r", ve)
+            return 1
     except Exception as e:
         log.error("Failed to load PEM: %r", e)
         return 1
