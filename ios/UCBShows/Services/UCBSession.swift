@@ -46,8 +46,43 @@ final class UCBSession {
     /// it outright and it dies with the sheet: never reused, never reparented,
     /// so no gesture state can outlive its window.
     func makeLoginWebView() -> WKWebView {
-        WKWebView(frame: .zero, configuration: Self.configuration(store: dataStore))
+        let cfg = Self.configuration(store: dataStore)
+        cfg.userContentController.addUserScript(
+            WKUserScript(source: Self.rememberMeJS, injectionTime: .atDocumentEnd,
+                         forMainFrameOnly: true))
+        return WKWebView(frame: .zero, configuration: cfg)
     }
+
+    /// Tick WooCommerce's "Remember me" before the user submits.
+    ///
+    /// It ships unchecked, and unchecked is what kept signing people out: WordPress
+    /// only calls `wp_set_auth_cookie($id, true)` when `rememberme` is posted, so
+    /// without it the auth cookie carries no expiry — a *session* cookie, which
+    /// WebKit discards whenever the web content process is recycled, not just on
+    /// relaunch. Checked, WordPress issues the persistent (14-day by default)
+    /// cookie, and because it silently re-issues that cookie once past half-life on
+    /// any authenticated load, the launch `refresh()` keeps rolling it forward — an
+    /// active user stops being logged out at all.
+    ///
+    /// Runs at document-end, and watches for a form rendered late (some themes
+    /// inject the login markup after load). Pure no-op on pages without the field.
+    private static let rememberMeJS = """
+    (() => {
+      const tick = () => {
+        const box = document.querySelector('input[name="rememberme"], #rememberme');
+        if (!box) return false;
+        if (!box.checked) {
+          box.checked = true;
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        return true;
+      };
+      if (tick()) return;
+      const obs = new MutationObserver(() => { if (tick()) obs.disconnect(); });
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(() => obs.disconnect(), 15000);
+    })();
+    """
 
     // MARK: Types
 
