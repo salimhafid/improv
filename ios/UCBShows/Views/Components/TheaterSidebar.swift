@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Left hamburger drawer listing every theater the app knows, grouped by city
-/// (New York, Chicago, Los Angeles), plus an "All Theaters" scope up top.
+/// (New York, Chicago, Los Angeles). Rows multi-select and the selection is
+/// never empty — there is no "All Theaters" scope.
 /// Toggling rows scopes the Shows and Classes tabs via `AppState`. Overlays the
 /// whole TabView from `RootView` on iPhone; on iPad the inner `TheaterListPanel`
 /// is shown as a persistent column instead.

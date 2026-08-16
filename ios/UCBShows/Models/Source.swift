@@ -36,9 +36,6 @@ enum City: String, CaseIterable, Identifiable, Codable {
         case .chicago:    return TimeZone(identifier: "America/Chicago") ?? .current
         }
     }
-
-    /// Gregorian calendar pinned to the city's timezone.
-    var calendar: Calendar { DateUtils.calendar(in: timeZone) }
 }
 
 /// A source the app knows how to show, listed in the sidebar even before the feed
@@ -115,8 +112,6 @@ enum SourceCatalog {
         .init(id: "logan_square", name: "Logan Square Improv", blurb: "Logan Square, Chicago", city: .chicago),
         .init(id: "playground", name: "The Playground Theater", blurb: "Lakeview, Chicago", city: .chicago),
     ]
-
-    static let allIDs = Set(all.map(\.id))
 
     /// Theaters selectable in the sidebar (shows feed exists).
     static let showIDs = Set(all.filter(\.hasShows).map(\.id))

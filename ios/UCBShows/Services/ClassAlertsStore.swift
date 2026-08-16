@@ -23,7 +23,6 @@ final class ClassAlertsStore {
         let id: String
         let name: String
         let city: String
-        var isUCB: Bool { id.hasPrefix("ucb") }
     }
 
     /// UCB rows (customizable, checked every 10 minutes).
@@ -88,7 +87,6 @@ final class ClassAlertsStore {
     private(set) var prefs = Prefs()
     /// Human-readable status of the last subscription sync ("" = fine).
     private(set) var syncIssue = ""
-    private(set) var syncing = false
 
     private static let prefsKey = "classAlertPrefs"
     private let database = CKContainer(identifier: "iCloud.com.salimhafid.UCBShows").publicCloudDatabase
@@ -205,8 +203,6 @@ final class ClassAlertsStore {
     }
 
     func syncSubscriptions() async {
-        syncing = true
-        defer { syncing = false }
         do {
             let existing = try await database.allSubscriptions()
             let ours = existing.filter { $0.subscriptionID.hasPrefix("alert/") }

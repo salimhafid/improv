@@ -44,8 +44,12 @@ Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-07-22.
       peak; the bot's own commits keep the workflow from being auto-disabled
       at 60 days of repo inactivity.
 - [ ] ASC screenshots were captured before Second City / Logan Square /
-      Playground / onboarding shipped. Fine for review, but a refresh would
-      show the fuller Chicago lineup (recipe in CONTEXT.md).
+      Playground shipped, and now also predate the Classes redesign:
+      04-classes.png / 03-classes.png show the retired theater-scoped,
+      level-grouped list with a Classes filter button, and the iPad shot still
+      shows the retired "All Theaters" row and "Change City" footer. A refresh
+      would show the fuller Chicago lineup and the current city-wide
+      school-folder Classes tab (recipe in CONTEXT.md).
 
 ## Nice-to-haves (discussed, not committed)
 
