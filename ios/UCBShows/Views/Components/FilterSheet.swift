@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Sheet for refining the show list within the current theater scope: venue,
 /// comedy types, livestream/free, and a date window. Binds directly to the
-/// store so changes apply live. (Theaters are chosen elsewhere — Setup and
-/// the sidebar — so they're not filters here.)
+/// store so changes apply live. (Theaters are chosen in the sidebar — so
+/// they're not filters here.)
 struct FilterSheet: View {
     @Bindable var store: ShowsStore
     let theaters: Set<String>

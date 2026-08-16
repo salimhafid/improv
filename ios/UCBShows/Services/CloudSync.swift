@@ -15,8 +15,7 @@ import Foundation
 enum CloudSync {
     /// UserDefaults keys mirrored to iCloud. Feed caches stay local.
     static let defaultsKeys = [
-        "selectedTheaters", "filters", "classGrouping", "classAlertPrefs",
-        "calendarProvider", "ucbCoreExpanded",
+        "selectedTheaters", "filters", "classAlertPrefs", "calendarProvider",
     ]
 
     /// AppSupport JSON files mirrored to iCloud (as `file/<name>` data keys).

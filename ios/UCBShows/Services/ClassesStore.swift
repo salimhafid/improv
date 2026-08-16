@@ -1,29 +1,6 @@
 import Foundation
 import Observation
 
-/// A city's worth of classes for the sectioned Classes list.
-struct ClassSection: Identifiable {
-    let id: String          // city raw value, or "other"
-    let title: String       // "New York" / "Los Angeles" / "Chicago"
-    let symbol: String
-    let classes: [ClassItem]
-}
-
-/// How the Classes list is organized. Subject buckets span every school
-/// consistently; Level keeps each school's own ladder; Date is a flat
-/// soonest-first calendar.
-enum ClassGrouping: String, CaseIterable, Identifiable {
-    case subject, level, date
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .subject: return "Subject"
-        case .level: return "Level"
-        case .date: return "Date"
-        }
-    }
-}
-
 /// A subject sub-group inside a school folder.
 struct SubjectGroup: Identifiable {
     let id: String
@@ -63,18 +40,10 @@ final class ClassesStore {
     private(set) var lastUpdated: Date?
     private(set) var sourcesInfo: [SourceInfo] = []
 
-    /// How the list is grouped (persisted).
-    var grouping: ClassGrouping {
-        didSet { UserDefaults.standard.set(grouping.rawValue, forKey: Self.groupingKey) }
-    }
-    private static let groupingKey = "classGrouping"
-
     private let service: FeedService<ClassesPayload>
 
     init(service: FeedService<ClassesPayload> = .classes) {
         self.service = service
-        self.grouping = UserDefaults.standard.string(forKey: Self.groupingKey)
-            .flatMap(ClassGrouping.init(rawValue:)) ?? .subject
     }
 
     // MARK: Loading
@@ -130,8 +99,6 @@ final class ClassesStore {
 
     // MARK: Core curriculum (UCB Improv 101–401)
 
-    static let coreSectionID = "__core__"
-
     /// Rank in UCB's core improv sequence: 101 → 0 … 401 → 3, nil for
     /// everything else. Matched on title or level prefix so a renamed feed
     /// subtitle ("Improv 101: Improv Basics") still qualifies; "Musical
@@ -143,89 +110,6 @@ final class ClassesStore {
             if item.title.hasPrefix(prefix) || item.level.hasPrefix(prefix) { return rank }
         }
         return nil
-    }
-
-    // MARK: Sections (grouped within the theater scope)
-
-    func sections(theaters: Set<String>, searchText: String = "") -> [ClassSection] {
-        Self.buildSections(from: filtered(theaters: theaters, searchText: searchText),
-                           grouping: grouping)
-    }
-
-    /// Pure grouping core, static so tests can drive it without a store.
-    /// Subject/Level keep the pinned UCB Core Curriculum section up top;
-    /// Date is purely chronological (months, TBA last).
-    static func buildSections(from allItems: [ClassItem],
-                              grouping: ClassGrouping = .level) -> [ClassSection] {
-        switch grouping {
-        case .level: return levelSections(from: allItems)
-        case .subject: return subjectSections(from: allItems)
-        case .date: return dateSections(from: allItems)
-        }
-    }
-
-    /// Subject buckets in a fixed order, Core pinned first, date-sorted within.
-    private static func subjectSections(from allItems: [ClassItem]) -> [ClassSection] {
-        var items = allItems
-        var sections: [ClassSection] = []
-        let ranked = items.map { (rank: Self.coreRank($0), item: $0) }
-        let core = ranked.filter { $0.rank != nil }
-        if !core.isEmpty {
-            items = ranked.filter { $0.rank == nil }.map(\.item)
-            sections.append(ClassSection(id: Self.coreSectionID, title: "Core Curriculum",
-                                         symbol: "graduationcap",
-                                         classes: coreSorted(core)))
-        }
-        let bySubject = Dictionary(grouping: items, by: \.subject)
-        for subject in ClassItem.subjectOrder {
-            guard let group = bySubject[subject], !group.isEmpty else { continue }
-            sections.append(ClassSection(id: "subject/\(subject)", title: subject,
-                                         symbol: subjectSymbol(subject),
-                                         classes: dateSorted(group)))
-        }
-        return sections
-    }
-
-    /// Chronological: month sections soonest-first, undated last.
-    private static func dateSections(from allItems: [ClassItem]) -> [ClassSection] {
-        let dated = allItems.filter { $0.startDate != nil }
-        let undated = allItems.filter { $0.startDate == nil }
-        let tz = TimeZone(identifier: "America/New_York") ?? .current
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MMMM yyyy"
-        fmt.timeZone = tz   // must match the bucketing calendar or labels
-                            // drift a month at boundaries on non-ET devices
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = tz
-        let byMonth = Dictionary(grouping: dated) { item -> Date in
-            let d = item.startDate ?? .distantFuture
-            return cal.date(from: cal.dateComponents([.year, .month], from: d)) ?? d
-        }
-        var sections = byMonth.keys.sorted().map { month in
-            ClassSection(id: "month/\(month.timeIntervalSince1970)",
-                         title: fmt.string(from: month), symbol: "calendar",
-                         classes: dateSorted(byMonth[month] ?? []))
-        }
-        if !undated.isEmpty {
-            sections.append(ClassSection(id: "month/tba", title: "Dates TBA",
-                                         symbol: "calendar",
-                                         classes: undated.sorted { $0.title < $1.title }))
-        }
-        return sections
-    }
-
-    private static func subjectSymbol(_ subject: String) -> String {
-        switch subject {
-        case "Musical Improv": return "music.mic"
-        case "Sketch & Writing": return "pencil.and.outline"
-        case "Acting & Character": return "person.crop.rectangle"
-        case "Stand-Up": return "mic"
-        case "Clowning": return "face.smiling"
-        case "Storytelling": return "book"
-        case "Teens & Youth": return "figure.2.and.child.holdinghands"
-        case "Workshops & Drop-Ins": return "sparkles"
-        default: return "theatermasks"
-        }
     }
 
     private static func dateSorted(_ group: [ClassItem]) -> [ClassItem] {
@@ -245,43 +129,6 @@ final class ClassesStore {
             if ld != rd { return ld < rd }
             return lhs.item.title < rhs.item.title
         }.map(\.item)
-    }
-
-    /// The original level grouping.
-    private static func levelSections(from allItems: [ClassItem]) -> [ClassSection] {
-        var items = allItems
-
-        // UCB's core sequence gets its own pinned section up top (collapsible
-        // in the view) so students tracking 101→401 skip the electives.
-        var sections: [ClassSection] = []
-        // Rank each item once (decorate–sort–undecorate) instead of matching
-        // title prefixes inside the comparator.
-        let ranked = items.map { (rank: Self.coreRank($0), item: $0) }
-        let core = ranked.filter { $0.rank != nil }
-        if !core.isEmpty {
-            items = ranked.filter { $0.rank == nil }.map(\.item)
-            sections.append(ClassSection(id: Self.coreSectionID, title: "Core Curriculum",
-                                         symbol: "graduationcap", classes: coreSorted(core)))
-        }
-
-        let byLevel = Dictionary(grouping: items, by: \.level)
-        let keys = byLevel.keys.sorted { a, b in
-            if a.isEmpty != b.isEmpty { return !a.isEmpty }  // empty ("Other") last
-            return a < b
-        }
-        sections += keys.map { key in
-            let sorted = (byLevel[key] ?? []).sorted { lhs, rhs in
-                let ld = lhs.startDate ?? .distantFuture
-                let rd = rhs.startDate ?? .distantFuture
-                if ld != rd { return ld < rd }
-                return lhs.title < rhs.title
-            }
-            return ClassSection(id: key.isEmpty ? "__nolevel__" : key,
-                                title: key.isEmpty ? "Other" : key,
-                                symbol: "graduationcap",
-                                classes: sorted)
-        }
-        return sections
     }
 
     // MARK: School Folders
@@ -313,7 +160,10 @@ final class ClassesStore {
         return SchoolFolderLayout(selected: folders)
     }
 
-    private static func subjectGroups(from classes: [ClassItem], source: String) -> [SubjectGroup] {
+    /// Core Curriculum pinned first, then the fixed subject order, date-sorted
+    /// within. Internal rather than private only so the logic harness can drive
+    /// it directly — `schoolFolders` is the app's entry point.
+    static func subjectGroups(from classes: [ClassItem], source: String) -> [SubjectGroup] {
         let ranked = classes.map { (rank: coreRank($0), item: $0) }
         let core = ranked.filter { $0.rank != nil }
         let rest = ranked.filter { $0.rank == nil }.map(\.item)

@@ -59,51 +59,50 @@ func testCoreRank() {
 }
 
 @MainActor
-func testBuildSections() {
+func testSubjectGroups() {
+    // Core Curriculum pinned first, ordered 101→401 with a start-date tiebreak.
     let items = [
         ucbClass("Character 101", level: "Character", start: "2026-08-01T19:00:00"),
         ucbClass("Improv 201", level: "Improv 201: The Game of the Scene", start: "2026-08-05T19:00:00"),
         ucbClass("Improv 101", level: "Improv 101: Improv Basics", start: "2026-09-01T19:00:00"),
         ucbClass("Improv 101", level: "Improv 101: Improv Basics", start: "2026-08-01T19:00:00"),
-        ucbClass("No Level Class"),
     ]
-    let sections = ClassesStore.buildSections(from: items, grouping: .level)
-    checkEqual(sections.map(\.id), [ClassesStore.coreSectionID, "Character", "__nolevel__"],
-               "core first, levels A-Z, Other last")
-    let core = sections[0]
-    checkEqual(core.title, "Core Curriculum", "core section title")
+    let groups = ClassesStore.subjectGroups(from: items, source: "ucb_ny")
+    checkEqual(groups.map(\.id), ["ucb_ny/core", "ucb_ny/Acting & Character"],
+               "core group pinned first, ids scoped to the school")
+    let core = groups[0]
+    checkEqual(core.title, "Core Curriculum", "core group title")
     checkEqual(core.classes.map(\.title), ["Improv 101", "Improv 101", "Improv 201"],
                "core ordered 101→401")
-    check(core.classes[0].start == "2026-08-01T19:00:00", "same level ordered by date")
-    checkEqual(sections[2].title, "Other", "levelless bucket titled Other")
+    check(core.classes[0].start == "2026-08-01T19:00:00", "same rank ordered by date")
 
     let nonUCB = [classItem(["title": "Improv 101", "source": "magnet", "level": "Improv",
                              "city": "New York"])]
-    checkEqual(ClassesStore.buildSections(from: nonUCB, grouping: .level).map(\.id), ["Improv"],
-               "no core section without UCB core classes")
+    checkEqual(ClassesStore.subjectGroups(from: nonUCB, source: "magnet").map(\.id),
+               ["magnet/Improv"], "no core group without UCB core classes")
 
-    // Subject grouping: consistent buckets across schools, Core still pinned.
+    // Subject buckets come out in the catalog's fixed order, not input order.
     let mixed = [
-        ucbClass("Improv 101", level: "Improv 101: Improv Basics", start: "2026-09-01T19:00:00"),
-        classItem(["title": "AP1", "source": "annoyance", "level": "AP1", "city": "Chicago"]),
-        classItem(["title": "Musical Improv 101", "source": "magnet", "level": "Musical Improv", "city": "New York"]),
-        classItem(["title": "Sketch Writing Intensive", "source": "brooklyn_cc", "level": "Sketch", "city": "New York"]),
         classItem(["title": "Clown One", "source": "brooklyn_cc", "level": "Clown", "city": "New York"]),
+        classItem(["title": "Sketch Writing Intensive", "source": "brooklyn_cc", "level": "Sketch", "city": "New York"]),
+        classItem(["title": "Musical Improv 101", "source": "brooklyn_cc", "level": "Musical", "city": "New York"]),
+        classItem(["title": "House Team Improv", "source": "brooklyn_cc", "level": "Improv", "city": "New York"]),
     ]
-    let subj = ClassesStore.buildSections(from: mixed, grouping: .subject)
-    checkEqual(subj.map(\.title),
-               ["Core Curriculum", "Improv", "Musical Improv", "Sketch & Writing", "Clowning"],
-               "subject buckets in fixed order, core pinned, AP defaults to Improv")
+    checkEqual(ClassesStore.subjectGroups(from: mixed, source: "brooklyn_cc").map(\.title),
+               ["Improv", "Musical Improv", "Sketch & Writing", "Clowning"],
+               "subject buckets in fixed order regardless of input order")
 
-    // Date grouping: chronological months, no pinned core, TBA last.
+    // Within a non-core bucket: date ascending, undated last, title tiebreak.
     let dated = [
-        ucbClass("Improv 101", level: "Improv 101", start: "2026-09-10T19:00:00"),
-        classItem(["title": "August Jam", "source": "magnet", "city": "New York", "start": "2026-08-20T19:00:00"]),
-        classItem(["title": "Someday Workshop", "source": "magnet", "city": "New York"]),
+        classItem(["title": "Someday Workshop", "source": "magnet", "level": "Improv", "city": "New York"]),
+        classItem(["title": "September Jam", "source": "magnet", "level": "Improv",
+                   "city": "New York", "start": "2026-09-10T19:00:00"]),
+        classItem(["title": "August Jam", "source": "magnet", "level": "Improv",
+                   "city": "New York", "start": "2026-08-20T19:00:00"]),
     ]
-    let byDate = ClassesStore.buildSections(from: dated, grouping: .date)
-    checkEqual(byDate.map(\.title), ["August 2026", "September 2026", "Dates TBA"],
-               "date grouping: months ascending, TBA last")
+    checkEqual(ClassesStore.subjectGroups(from: dated, source: "magnet").first?.classes.map(\.title),
+               ["August Jam", "September Jam", "Someday Workshop"],
+               "non-core bucket sorted by date, undated last")
 }
 
 func testClassScope() {
@@ -225,7 +224,7 @@ func testDateUtils() {
 struct LogicTests {
     static func main() async {
         await testCoreRank()
-        await testBuildSections()
+        await testSubjectGroups()
         testClassScope()
         testClassItemDecoding()
         testShowDecodingAndDayKey()

@@ -1,6 +1,6 @@
 # Privacy Policy — Improv
 
-*Last updated: July 16, 2026*
+*Last updated: August 16, 2026*
 
 Improv is an app for browsing upcoming improv and comedy shows and classes.
 It is designed to collect no personal data.
@@ -20,10 +20,16 @@ see it, and it is not linked to you.
 
 ## On-device data
 
-Your chosen city and theater, filters, and saved ("I'm Going") shows are
-stored only on your device. If you use "Add to Calendar", the app writes the
-event using write-only access — it can never read your calendar. Reminder
-notifications are scheduled locally on your device.
+Your selected theaters, filters, class-alert preferences, and saved ("I'm
+Going") shows are stored on your device. So that they follow you between
+your own devices, they are also mirrored through your personal iCloud
+account — that goes to Apple under Apple's privacy policy, never to any
+server we run. Turning on class alerts additionally registers a
+notification subscription in the app's iCloud container, recording which
+schools and categories you picked, so Apple can deliver the alert. If you
+use "Add to Calendar", the app writes the event using write-only access —
+it can never read your calendar. Reminder notifications are scheduled
+locally on your device.
 
 ## Ticket purchases
 

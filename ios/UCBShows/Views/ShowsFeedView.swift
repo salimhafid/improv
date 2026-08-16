@@ -14,7 +14,7 @@ struct ShowsFeedView: View {
     @Namespace private var zoom
 
     private var theaters: Set<String> { app.selectedTheaters }
-    /// Single theater's name, or just "Shows" for All Theaters / a mix.
+    /// Single theater's name, or just "Shows" when several are selected.
     private var title: String { app.scopeTheaterName ?? "Shows" }
     private var searchPrompt: String {
         app.scopeTheaterName.map { "Search \($0)" } ?? "Search shows"

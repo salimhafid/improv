@@ -166,8 +166,8 @@ xcrun simctl io <udid> screenshot out.png
 
 Gotchas learned the hard way:
 - `simctl spawn defaults write` writes DEVICE-level prefs that **survive app
-  uninstall** — `defaults delete <bundle>` to truly reset (e.g. to test
-  onboarding).
+  uninstall** — `defaults delete <bundle>` to truly reset (e.g. to get back to
+  the out-of-the-box UCB New York selection).
 - Wait ~30s after boot or a system notification banner photobombs shots.
 - After pushing feed changes, raw CDN needs ~30–60s; verification runs
   should uninstall+reinstall the app to drop stale caches.

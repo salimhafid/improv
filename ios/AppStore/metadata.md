@@ -48,8 +48,9 @@ and descriptions. Filters persist and never strand you — anything that stops
 being available clears itself.
 
 CLASSES TOO
-Every theater's classes and workshops, grouped by level, with instructor,
-schedule, price, and open-seat filtering. Register in a couple of taps.
+Every school in your city — not just the theater you picked — with its classes
+and workshops in a collapsible card, grouped by subject inside, each with
+instructor, schedule, and price. Register in a couple of taps.
 
 BUILT LIKE APPLE BUILT IT
 Native SwiftUI, full Dynamic Type, light and dark mode, offline support (your
@@ -92,8 +93,9 @@ reminders for shows the user saves.
 ```
 
 ## Screenshots (required before submission)
-- 6.7" iPhone (1290×2796): Shows feed, show detail, I'm Going, Classes,
-  sidebar/All Theaters. 13" iPad (2064×2752) if iPad screenshots are enabled.
+- 6.9" iPhone (1320×2868): Shows feed, show detail, I'm Going, Classes,
+  theater sidebar (multi-select, grouped by city). 13" iPad (2064×2752) if
+  iPad screenshots are enabled.
 - Capture from the simulator once CoreSimulator is fixed (reboot/update);
   the repo's UITEST_* launch variables can drive each screen deterministically.
 

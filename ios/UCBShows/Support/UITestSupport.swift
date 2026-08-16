@@ -5,12 +5,15 @@ import SwiftUI
 /// builds and only when the corresponding variable is set, so shipping behavior
 /// is completely unaffected.
 ///
-/// Supported variables:
-///   UITEST_TAB           — initial tab index (0 Shows, 1 Tickets, 2 Classes)
-///   UITEST_PUSH_SOURCE   — push the first show from this source id that has a cast
-///   UITEST_TALENT        — with UITEST_PUSH_SOURCE: "directory", "person", or a
-///                          performer name to push on top of the show detail
-///   UITEST_SIDEBAR       — "1" to open the theater sidebar on launch
+/// Supported variables (the last two are read inline in ShowDetailView):
+///   UITEST_TAB              — initial tab index (0 Shows, 1 Tickets, 2 Classes)
+///   UITEST_PUSH_SOURCE      — push the first show from this source id that has a cast
+///   UITEST_TALENT           — with UITEST_PUSH_SOURCE: "directory", "person", or a
+///                             performer name to push on top of the show detail
+///   UITEST_SCROLL_CAST      — "1" to scroll the show detail to its cast section
+///   UITEST_SIDEBAR          — "1" to open the theater sidebar on launch
+///   UITEST_CALENDAR_DIALOG  — "1" to open the Add-to-Calendar dialog
+///   UITEST_SHARE            — "1" to open the share sheet
 struct UITestTabSelection: ViewModifier {
     @Binding var selection: Int
 
