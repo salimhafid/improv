@@ -38,11 +38,10 @@
    "annoyance/mi1-thursdays-with-tbd",
    "annoyance/standup-tuesdays-with-st-james-jackson",
    "annoyance/variety-alternative-comedy-thursdays-with-danny-wightkin",
-   "annoyance/workshop-beat-sketch-process-with-best-of-annoyance-sketch",
    "annoyance/workshop-drop-in-improv-classes",
    "annoyance/workshop-improv-auditions"
   ],
-  "updated": "2026-08-18T13:49:27.699613+00:00"
+  "updated": "2026-08-19T13:51:02.941480+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -86,7 +85,7 @@
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-aug",
    "brooklyn_cc/use-your-dang-voice-noelle"
   ],
-  "updated": "2026-08-18T13:49:27.699613+00:00"
+  "updated": "2026-08-19T13:51:02.941480+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -136,11 +135,11 @@
    "io_chicago/teen-sketch-fall-2026",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-08-18T13:49:27.699613+00:00"
+  "updated": "2026-08-19T13:51:02.941480+00:00"
  },
  "logan_square": {
   "ids": [],
-  "updated": "2026-08-18T13:49:27.699613+00:00"
+  "updated": "2026-08-19T13:51:02.941480+00:00"
  },
  "magnet": {
   "ids": [
@@ -160,7 +159,6 @@
    "magnet/11984",
    "magnet/11985",
    "magnet/11986",
-   "magnet/11988",
    "magnet/11989",
    "magnet/11990",
    "magnet/11991",
@@ -174,6 +172,7 @@
    "magnet/12000",
    "magnet/12002",
    "magnet/12003",
+   "magnet/12004",
    "magnet/12005",
    "magnet/12006",
    "magnet/12007",
@@ -192,7 +191,7 @@
    "magnet/12022",
    "magnet/12023"
   ],
-  "updated": "2026-08-18T13:49:27.699613+00:00"
+  "updated": "2026-08-19T13:51:02.941480+00:00"
  },
  "second_city": {
   "ids": [
@@ -297,6 +296,7 @@
    "second_city/46165",
    "second_city/46166",
    "second_city/46167",
+   "second_city/46168",
    "second_city/46172",
    "second_city/46174",
    "second_city/46175",
@@ -313,13 +313,14 @@
    "second_city/46247",
    "second_city/46249",
    "second_city/46251",
+   "second_city/46268",
    "second_city/46272",
    "second_city/46274",
    "second_city/46275",
    "second_city/46282",
    "second_city/46284"
   ],
-  "updated": "2026-08-18T13:49:27.699613+00:00"
+  "updated": "2026-08-19T13:51:02.941480+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -388,7 +389,7 @@
    "41637",
    "41647"
   ],
-  "updated": "2026-08-19T13:03:43.449506+00:00"
+  "updated": "2026-08-19T13:50:47.393813+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -452,7 +453,7 @@
    "41675",
    "41685"
   ],
-  "updated": "2026-08-19T13:03:43.449506+00:00"
+  "updated": "2026-08-19T13:50:47.393813+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -474,7 +475,7 @@
    "41410",
    "41611"
   ],
-  "updated": "2026-08-19T13:03:43.449506+00:00"
+  "updated": "2026-08-19T13:50:47.393813+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -516,12 +517,12 @@
    "wgis_la/1818",
    "wgis_la/1820"
   ],
-  "updated": "2026-08-18T13:49:27.699613+00:00"
+  "updated": "2026-08-19T13:51:02.941480+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-08-18T13:49:27.699613+00:00"
+  "updated": "2026-08-19T13:51:02.941480+00:00"
  }
 }
