@@ -38,10 +38,12 @@
    "annoyance/mi1-thursdays-with-tbd",
    "annoyance/standup-tuesdays-with-st-james-jackson",
    "annoyance/variety-alternative-comedy-thursdays-with-danny-wightkin",
+   "annoyance/voice-for-improv-acting-saturdays-with-seth-k-lowery",
    "annoyance/workshop-drop-in-improv-classes",
-   "annoyance/workshop-improv-auditions"
+   "annoyance/workshop-improv-auditions-saturday-with-lauren-rivas",
+   "annoyance/workshop-voice-for-improv-acting-with-seth-k-lowery"
   ],
-  "updated": "2026-08-20T13:52:41.679964+00:00"
+  "updated": "2026-08-21T13:51:52.874763+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -54,8 +56,8 @@
    "brooklyn_cc/clown-town-level-up",
    "brooklyn_cc/crafting-characters-jamie-sept-oct-26",
    "brooklyn_cc/drop-in-anya-september-26th",
-   "brooklyn_cc/drop-in-hannah-aug-19",
    "brooklyn_cc/drop-in-joann-intro-drop-in",
+   "brooklyn_cc/drop-in-september-19th",
    "brooklyn_cc/improv-1-kenny-july-aug-2026",
    "brooklyn_cc/improv-1-molly-aug-oct-26",
    "brooklyn_cc/improv-1-molly-aug-oct-26-mon",
@@ -67,6 +69,7 @@
    "brooklyn_cc/improv-3-tej-khanna-aug-oct-26",
    "brooklyn_cc/improv-4-andy-junk-sep-oct-26",
    "brooklyn_cc/improv-drop-in-andy-bcc-aug-20",
+   "brooklyn_cc/improv-drop-in-andy-bcc-september-12th",
    "brooklyn_cc/improv-level-2-devin-bockrath-aug-oct-26",
    "brooklyn_cc/improv-level-3-john-aug-oct-26",
    "brooklyn_cc/improv-level-3-julian-aug-oct-26",
@@ -84,7 +87,7 @@
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-aug",
    "brooklyn_cc/use-your-dang-voice-noelle"
   ],
-  "updated": "2026-08-20T13:52:41.679964+00:00"
+  "updated": "2026-08-21T13:51:52.874763+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -134,20 +137,18 @@
    "io_chicago/teen-sketch-fall-2026",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-08-20T13:52:41.679964+00:00"
+  "updated": "2026-08-21T13:51:52.874763+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/agents-auditions-more-free-workshop-with-dina-facklis"
   ],
-  "updated": "2026-08-20T13:52:41.679964+00:00"
+  "updated": "2026-08-21T13:51:52.874763+00:00"
  },
  "magnet": {
   "ids": [
    "magnet/11964",
    "magnet/11965",
-   "magnet/11969",
-   "magnet/11970",
    "magnet/11971",
    "magnet/11974",
    "magnet/11976",
@@ -191,7 +192,7 @@
    "magnet/12022",
    "magnet/12023"
   ],
-  "updated": "2026-08-20T13:52:41.679964+00:00"
+  "updated": "2026-08-21T13:51:52.874763+00:00"
  },
  "second_city": {
   "ids": [
@@ -225,10 +226,11 @@
    "second_city/44628",
    "second_city/44629",
    "second_city/44630",
-   "second_city/44906",
-   "second_city/44908",
-   "second_city/44909",
-   "second_city/44941",
+   "second_city/44813",
+   "second_city/44814",
+   "second_city/44815",
+   "second_city/44816",
+   "second_city/44817",
    "second_city/45972",
    "second_city/45973",
    "second_city/45975",
@@ -241,7 +243,6 @@
    "second_city/46001",
    "second_city/46023",
    "second_city/46025",
-   "second_city/46027",
    "second_city/46078",
    "second_city/46079",
    "second_city/46080",
@@ -302,7 +303,6 @@
    "second_city/46175",
    "second_city/46177",
    "second_city/46179",
-   "second_city/46181",
    "second_city/46240",
    "second_city/46241",
    "second_city/46242",
@@ -318,9 +318,10 @@
    "second_city/46274",
    "second_city/46275",
    "second_city/46282",
-   "second_city/46284"
+   "second_city/46284",
+   "second_city/46287"
   ],
-  "updated": "2026-08-20T13:52:41.679964+00:00"
+  "updated": "2026-08-21T13:51:52.874763+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -386,7 +387,7 @@
    "41637",
    "41647"
   ],
-  "updated": "2026-08-21T13:04:55.910714+00:00"
+  "updated": "2026-08-21T13:51:39.139432+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -448,7 +449,7 @@
    "41675",
    "41685"
   ],
-  "updated": "2026-08-21T13:04:55.910714+00:00"
+  "updated": "2026-08-21T13:51:39.139432+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -470,12 +471,11 @@
    "41410",
    "41611"
   ],
-  "updated": "2026-08-21T13:04:55.910714+00:00"
+  "updated": "2026-08-21T13:51:39.139432+00:00"
  },
  "wgis_la": {
   "ids": [
    "wgis_la/1590",
-   "wgis_la/1704",
    "wgis_la/1705",
    "wgis_la/1706",
    "wgis_la/1738",
@@ -512,12 +512,12 @@
    "wgis_la/1818",
    "wgis_la/1820"
   ],
-  "updated": "2026-08-20T13:52:41.679964+00:00"
+  "updated": "2026-08-21T13:51:52.874763+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-08-20T13:52:41.679964+00:00"
+  "updated": "2026-08-21T13:51:52.874763+00:00"
  }
 }
