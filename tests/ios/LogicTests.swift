@@ -220,6 +220,75 @@ func testDateUtils() {
                "2026-08-01", "dayKey respects venue zone across midnight UTC")
 }
 
+func testReminderPlan() {
+    let ny = TimeZone(identifier: "America/New_York")!
+    let start = DateUtils.parse("2026-08-14T19:00:00", in: ny)!
+
+    // An hour before showtime, and nothing at all once that moment has passed.
+    checkEqual(ReminderPlan.fireDate(forStart: start, now: start.addingTimeInterval(-7200)),
+               start.addingTimeInterval(-3600), "reminder fires an hour before showtime")
+    check(ReminderPlan.fireDate(forStart: start, now: start.addingTimeInterval(-1800)) == nil,
+          "no reminder inside the last hour")
+    check(ReminderPlan.fireDate(forStart: start, now: start.addingTimeInterval(3600)) == nil,
+          "no reminder after the show started")
+
+    // Ticket ↔ hearted-show dedup: same night out, allowing for the feed and
+    // the account page rounding the showtime differently.
+    check(ReminderPlan.sameEvent("The Prophecy", start,
+                                 "the prophecy", start.addingTimeInterval(30)),
+          "sameEvent matches case-insensitively within a minute")
+    check(!ReminderPlan.sameEvent("The Prophecy", start,
+                                  "The Prophecy", start.addingTimeInterval(86400)),
+          "sameEvent rejects the same title a night later")
+    check(!ReminderPlan.sameEvent("The Prophecy", start, "ASSSSCAT", start),
+          "sameEvent rejects a different show at the same time")
+    check(!ReminderPlan.sameEvent("The Prophecy", nil, "The Prophecy", start),
+          "sameEvent needs both starts")
+
+    // Reserve-time join: same title on the same venue-local night.
+    let later = DateUtils.parse("2026-08-14T21:30:00", in: ny)!
+    check(ReminderPlan.sameBooking(ticketTitle: "ASSSSCAT", ticketStart: start,
+                                   showTitle: "asssscat", showStart: later, in: ny),
+          "sameBooking matches a different showtime on the same night")
+    check(!ReminderPlan.sameBooking(ticketTitle: "ASSSSCAT", ticketStart: start,
+                                    showTitle: "ASSSSCAT",
+                                    showStart: start.addingTimeInterval(7 * 86400), in: ny),
+          "sameBooking rejects next week's run of the same show")
+    check(ReminderPlan.sameBooking(ticketTitle: "ASSSSCAT", ticketStart: nil,
+                                   showTitle: "ASSSSCAT", showStart: later, in: ny),
+          "sameBooking falls back to the title when UCB's meta line didn't parse")
+}
+
+func testReminderCoverage() {
+    let ny = TimeZone(identifier: "America/New_York")!
+    let start = DateUtils.parse("2026-08-14T19:00:00", in: ny)!
+
+    // In-app reserve stamps the join, so the id alone suppresses the heart.
+    let joined = ReminderCoverage(showIDs: ["ucb_ny/the-prophecy"])
+    check(joined.covers(showID: "ucb_ny/the-prophecy", title: "The Prophecy", start: start),
+          "a ticket with the show id covers that show")
+    check(!joined.covers(showID: "ucb_ny/asssscat", title: "ASSSSCAT", start: start),
+          "coverage doesn't leak to other shows")
+
+    // Website-reserved tickets carry no id — title + start still covers a show
+    // hearted after the ticket was found.
+    let scraped = ReminderCoverage(events: [.init(title: "The Prophecy", start: start)])
+    check(scraped.covers(showID: "ucb_ny/the-prophecy", title: "the prophecy",
+                         start: start.addingTimeInterval(30)),
+          "a website-reserved ticket covers the matching show by title + start")
+    check(!scraped.covers(showID: "ucb_ny/the-prophecy", title: "The Prophecy",
+                          start: start.addingTimeInterval(86400)),
+          "a website-reserved ticket doesn't cover another night of the same show")
+    check(!scraped.covers(showID: "ucb_ny/the-prophecy", title: "The Prophecy", start: nil),
+          "an undated show is never covered by title alone")
+
+    // Releasing the ticket empties coverage, which is what restores the heart's
+    // own reminder.
+    check(!ReminderCoverage().covers(showID: "ucb_ny/the-prophecy",
+                                     title: "The Prophecy", start: start),
+          "empty coverage suppresses nothing")
+}
+
 @main
 struct LogicTests {
     static func main() async {
@@ -231,7 +300,111 @@ struct LogicTests {
         testDaySectionGrouping()
         testLossyPayloadDecoding()
         testDateUtils()
+        testReminderPlan()
+        testReminderCoverage()
+        await testClassesLayoutMemo()
+        await testSearchByteParity()
+        await testSchoolFolderOrder()
+        await testPickedTheaterWithNoClasses()
         print(failures == 0 ? "\nALL SWIFT LOGIC TESTS PASSED" : "\n\(failures) FAILURE(S)")
         exit(failures == 0 ? 0 : 1)
     }
+}
+
+// MARK: Classes tab layout (memoization, search, folder order)
+
+func classesPayload(_ items: [[String: Any]]) -> ClassesPayload {
+    let data = try! JSONSerialization.data(withJSONObject: ["classes": items])
+    return try! JSONDecoder().decode(ClassesPayload.self, from: data)
+}
+
+private let nyClasses: [[String: Any]] = [
+    ["title": "Improv 101", "source": "ucb_ny", "level": "Improv 101",
+     "city": "New York", "org": "UCB", "instructor": "Renée Márquez"],
+    ["title": "Musical Improv 201", "source": "ucb_ny", "level": "Musical Improv 201",
+     "city": "New York", "org": "UCB"],
+    ["title": "Level One", "source": "magnet", "city": "New York", "org": "Magnet Theater",
+     "description": "Clown work and play"],
+    ["title": "Sketch Writing", "source": "brooklyn_cc", "city": "New York",
+     "org": "Brooklyn Comedy Collective"],
+]
+
+@MainActor
+func testClassesLayoutMemo() {
+    let store = ClassesStore()
+    store.apply(classesPayload(nyClasses))
+
+    let first = store.schoolFolders(theaters: ["magnet"])
+    let builds = store.layoutBuildCount
+    let second = store.schoolFolders(theaters: ["magnet"])
+    checkEqual(store.layoutBuildCount, builds, "repeating a layout call is a memo hit")
+    check(first == second, "the memoized layout is identical")
+
+    _ = store.schoolFolders(theaters: ["magnet"], searchText: "improv")
+    check(store.layoutBuildCount > builds, "a new query misses the memo")
+
+    _ = store.schoolFolders(theaters: ["magnet"])
+    let beforeApply = store.layoutBuildCount
+    store.apply(classesPayload([nyClasses[0]]))
+    let afterApply = store.schoolFolders(theaters: ["magnet"])
+    check(store.layoutBuildCount > beforeApply, "a feed apply invalidates the memo")
+    check(afterApply != first, "the rebuilt layout reflects the new feed")
+}
+
+@MainActor
+func testSearchByteParity() {
+    let items = nyClasses.map { classItem($0) }
+    for raw in ["improv", "musical", "clown", "Renée", "renee", "perez presents", "", "  "] {
+        let query = ClassesStore.normalizedQuery(raw)
+        let needle = Array(query.utf8)
+        for item in items {
+            // Both sides are already diacritic-folded and lowercased, so the
+            // byte scan has to agree with String.contains on every item.
+            let want = query.isEmpty ? true : item.searchHay.contains(query)
+            checkEqual(ClassesStore.containsBytes(item.searchBytes, needle), want,
+                       "byte scan matches String.contains for \"\(raw)\" in \(item.title)")
+        }
+    }
+}
+
+@MainActor
+func testSchoolFolderOrder() {
+    let store = ClassesStore()
+    store.apply(classesPayload(nyClasses))
+
+    let magnet = store.schoolFolders(theaters: ["magnet"])
+    checkEqual(magnet.selected.map(\.id).first, "magnet", "a picked non-UCB theater leads its city")
+    let ucb = store.schoolFolders(theaters: ["ucb_ny"])
+    checkEqual(ucb.selected.map(\.id).first, "ucb_ny", "the default theater still leads")
+    // The reorder animation is keyed on orderKey, so it has to move with order.
+    check(magnet.orderKey != ucb.orderKey, "orderKey changes when the folder order does")
+    checkEqual(magnet.orderKey, magnet.selected.map(\.id).joined(separator: "|"),
+               "orderKey is the folder id sequence")
+}
+
+@MainActor
+func testPickedTheaterWithNoClasses() {
+    let store = ClassesStore()
+    store.apply(classesPayload([
+        ["title": "Improv Level 1", "source": "second_city", "city": "Chicago", "org": "The Second City"],
+        ["title": "Art of Slack", "source": "annoyance", "city": "Chicago", "org": "The Annoyance"],
+    ]))
+
+    // Logan Square has shows but no classes in the feed; picking it used to
+    // make the chosen theater silently vanish from the list.
+    let picked = store.schoolFolders(theaters: ["logan_square"])
+    let ids = picked.selected.map(\.id)
+    check(ids.contains("logan_square"), "a picked theater with no classes still gets a folder")
+    checkEqual(ids.first, "logan_square", "...and it still leads its city")
+    checkEqual(picked.selected.first { $0.id == "logan_square" }?.count, 0, "...reporting zero classes")
+    check(picked.selected.first { $0.id == "logan_square" }?.subjects.isEmpty == true,
+          "...with no subject groups, so the card renders inert")
+
+    let searching = store.schoolFolders(theaters: ["logan_square"], searchText: "improv")
+    check(!searching.selected.contains { $0.id == "logan_square" },
+          "an empty picked folder is suppressed during a search")
+
+    // An unpicked empty theater is still dropped.
+    check(!picked.selected.contains { $0.id == "playground" },
+          "an unpicked theater with no classes stays out of the list")
 }

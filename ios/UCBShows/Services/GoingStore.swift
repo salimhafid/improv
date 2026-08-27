@@ -6,7 +6,9 @@ import UserNotifications
 /// just ids) so they stay renderable even after dropping out of the live feed,
 /// and across all cities/theaters regardless of the current sidebar scope.
 /// Hearting a show with a known start time also schedules a local reminder
-/// notification a few hours before showtime.
+/// notification an hour before showtime — unless the user holds a ticket to
+/// that show, in which case `TicketStore` owns the reminder and this one stands
+/// down, so one show never posts two banners.
 @MainActor
 @Observable
 final class GoingStore {
@@ -16,11 +18,14 @@ final class GoingStore {
     private var ids: Set<String> = []
     private let fileURL: URL
 
-    /// Lead time for the pre-show reminder notification.
-    private static let reminderLead: TimeInterval = 3600
     /// Keep a show listed until well after it has started (people arrive late,
     /// and "what was that show called?" outlives the start time by a bit).
     private static let expiryGrace: TimeInterval = 6 * 3600
+
+    /// What the user's held tickets already cover, published by `TicketStore`.
+    /// Its reminder wins (tapping it opens the QR at the door), so those shows
+    /// get no heart reminder of their own.
+    private var coverage = ReminderCoverage()
 
     init() {
         fileURL = AppSupport.file("going.json")
@@ -32,9 +37,14 @@ final class GoingStore {
             guard note.object as? String == "going.json" else { return }
             MainActor.assumeIsolated { self?.load() }
         }
+        // Whichever feature obtained the grant, ours has to re-arm: anything
+        // we tried to schedule while unauthorized was rejected, not queued.
+        NotificationCenter.default.addObserver(
+            forName: NotificationAuth.didGrant, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.armReminders() }
+        }
     }
-
-    var count: Int { shows.count }
 
     func isGoing(_ show: Show) -> Bool { ids.contains(show.id) }
 
@@ -47,7 +57,8 @@ final class GoingStore {
             ids.insert(show.id)
             shows.append(show)
             sort()
-            scheduleReminder(for: show)
+            // A heart is a notifiable action, so this is where we ask.
+            scheduleReminder(for: show, ask: true)
         }
         save()
     }
@@ -70,12 +81,7 @@ final class GoingStore {
         ids = Set(shows.map(\.id))
         sort()
         if shows.count != saved.count { save() }
-        // Re-schedule pending reminders so lead-time changes apply to shows
-        // saved under an older lead (cancel + add is idempotent per show id).
-        for show in shows {
-            cancelReminder(for: show)
-            scheduleReminder(for: show)
-        }
+        armReminders()
     }
 
     private func save() {
@@ -91,13 +97,40 @@ final class GoingStore {
 
     // MARK: Reminders
 
-    /// Best-effort local notification one hour before showtime. Asks for
-    /// permission on the first heart; if the user declines, hearting still
+    /// (Re)arm every hearted show, silently. Runs at launch, when the lead time
+    /// changes, and whenever the held-ticket set moves — none of which are
+    /// moments to raise a permission prompt, so the adds simply no-op if
+    /// permission was never granted; the next heart or reserve is what asks.
+    func armReminders() {
+        for show in shows {
+            cancelReminder(for: show)
+            scheduleReminder(for: show)
+        }
+    }
+
+    /// Published by `TicketStore` whenever the held-ticket set changes.
+    /// Re-arming everything is what makes the suppression reversible: release
+    /// the ticket and the hearted show's own reminder comes back.
+    func setTicketCoverage(_ new: ReminderCoverage) {
+        guard new != coverage else { return }
+        coverage = new
+        armReminders()
+    }
+
+    /// Best-effort local notification one hour before showtime. `ask` is true
+    /// only for a fresh heart — the user-initiated moment where a permission
+    /// prompt has obvious context. If the user declines, hearting still
     /// works — there's just no reminder.
-    private func scheduleReminder(for show: Show) {
-        guard let start = show.startDate else { return }
-        let fireDate = start.addingTimeInterval(-Self.reminderLead)
-        guard fireDate > Date() else { return }
+    private func scheduleReminder(for show: Show, ask: Bool = false) {
+        guard let start = show.startDate,
+              let fireDate = ReminderPlan.fireDate(forStart: start) else { return }
+        // One reminder per show: when the user holds a ticket to this one,
+        // `TicketStore` owns the reminder (tapping it opens the QR at the
+        // door). A fresh heart still asks for permission in that case — the
+        // ticket's reminder is exactly what the grant unblocks, and the ticket
+        // store re-arms it on `NotificationAuth.didGrant`.
+        let ticketed = coverage.covers(showID: show.id, title: show.title, start: show.startDate)
+        guard ask || !ticketed else { return }
 
         let content = UNMutableNotificationContent()
         content.title = show.title
@@ -111,10 +144,13 @@ final class GoingStore {
         let request = UNNotificationRequest(identifier: show.id, content: content, trigger: trigger)
 
         Task {
-            let center = UNUserNotificationCenter.current()
-            let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
-            guard granted else { return }
-            try? await center.add(request)
+            if ask, await NotificationAuth.ensure() == false { return }
+            // Re-read coverage rather than trusting the value captured above:
+            // the user can sit on the permission alert long enough for the
+            // ticket to land, and adding this request afterwards would post a
+            // second banner for a show `TicketStore` is already reminding about.
+            guard !coverage.covers(showID: show.id, title: show.title, start: show.startDate) else { return }
+            try? await UNUserNotificationCenter.current().add(request)
         }
     }
 

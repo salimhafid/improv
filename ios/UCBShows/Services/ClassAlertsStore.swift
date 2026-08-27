@@ -87,15 +87,56 @@ final class ClassAlertsStore {
     private(set) var prefs = Prefs()
     /// Human-readable status of the last subscription sync ("" = fine).
     private(set) var syncIssue = ""
+    /// In-flight reconcile, so overlapping callers coalesce onto one run.
+    @ObservationIgnored private var syncTask: Task<Void, Never>?
+    /// The user turned notifications off for the app, so alerts are switched on
+    /// and going nowhere. Surfaced in the sheet with a route to Settings.
+    private(set) var authorizationDenied = false
+    /// Last APNs registration failure ("" = fine). Kept apart from `syncIssue`
+    /// so a successful subscription reconcile doesn't erase it — the two fail
+    /// independently, and a device with no push token receives nothing however
+    /// healthy its subscriptions look.
+    private(set) var registrationIssue = ""
 
     private static let prefsKey = "classAlertPrefs"
-    private let database = CKContainer(identifier: "iCloud.com.salimhafid.UCBShows").publicCloudDatabase
+
+    /// Lazy on purpose: `CKContainer(identifier:)` traps when the build lacks
+    /// the iCloud entitlement, and as a stored property that took the whole app
+    /// down inside `UCBShowsApp.init()` rather than degrading class alerts.
+    @ObservationIgnored
+    private lazy var database = CKContainer(identifier: "iCloud.com.salimhafid.UCBShows").publicCloudDatabase
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.prefsKey),
            let saved = try? JSONDecoder().decode(Prefs.self, from: data) {
             prefs = saved
             migrateIfNeeded()
+        }
+        // Whichever feature obtained the grant, ours has to re-arm — matching
+        // TicketStore and GoingStore. Without this, a user who granted via a
+        // heart or a ticket left class alerts unregistered forever.
+        NotificationCenter.default.addObserver(
+            forName: NotificationAuth.didGrant, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.authorizationDenied = false
+                UIApplication.shared.registerForRemoteNotifications()
+                Task { await self.syncSubscriptions() }
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: PushRegistrationDelegate.didRegister, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.registrationIssue = "" }
+        }
+        NotificationCenter.default.addObserver(
+            forName: PushRegistrationDelegate.didFail, object: nil, queue: .main
+        ) { [weak self] note in
+            let reason = (note.object as? Error)?.localizedDescription ?? "unknown error"
+            MainActor.assumeIsolated {
+                self?.registrationIssue = "Couldn’t register for push notifications. (\(reason))"
+            }
         }
     }
 
@@ -123,7 +164,13 @@ final class ClassAlertsStore {
 
     func setMaster(_ on: Bool) {
         prefs.master = on
-        if on { requestPushAuthorization() }
+        if on {
+            // The ask and the subscribe are independent: a declined prompt
+            // still leaves the subscriptions correct for a later grant.
+            Task { await requestPushAuthorization() }
+        } else {
+            authorizationDenied = false
+        }
         persistAndSync()
     }
 
@@ -176,12 +223,58 @@ final class ClassAlertsStore {
         Task { await syncSubscriptions() }
     }
 
-    private func requestPushAuthorization() {
-        Task {
-            let center = UNUserNotificationCenter.current()
-            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+    // MARK: Arming (permission + APNs registration)
+
+    /// Prompt, then register — the toggle is the notifiable moment. Honors the
+    /// answer: registering after a "Don't Allow" achieves nothing, and the
+    /// switch has to stop claiming otherwise.
+    private func requestPushAuthorization() async {
+        let granted = await NotificationAuth.ensure()
+        authorizationDenied = !granted
+        guard granted else { return }
+        // APNs registration is specific to class alerts: these arrive as
+        // CloudKit pushes, unlike the on-device ticket/show reminders.
+        UIApplication.shared.registerForRemoteNotifications()
+    }
+
+    /// Silent re-arm, for launch and every foreground. NEVER prompts — that
+    /// would be the contextless ask `NotificationAuth` exists to prevent.
+    ///
+    /// This is what makes class alerts work at all on a device that never
+    /// flipped the switch itself: `classAlertPrefs` rides iCloud, so a fresh
+    /// install or a second device comes up with the master switch already ON,
+    /// and nothing here used to run. Apple also documents registering on every
+    /// launch, because the device token rotates.
+    func armOnLaunch() async {
+        guard prefs.master else { return }
+        switch await NotificationAuth.status() {
+        case .denied:
+            authorizationDenied = true
+        case .notDetermined:
+            // Not our moment to ask — `armIfNeeded` handles it when the user
+            // opens the sheet.
+            break
+        default:
+            authorizationDenied = false
             UIApplication.shared.registerForRemoteNotifications()
+            // Idempotent (it diffs against CloudKit's own list), and the only
+            // thing that ever retries a reconcile that failed offline.
+            await syncSubscriptions()
         }
+    }
+
+    /// Arm from the Class Alerts sheet, prompting if we've never asked. Opening
+    /// this screen with alerts already on IS a notifiable moment, and it's the
+    /// only one a user whose prefs arrived from iCloud will ever reach — they
+    /// never touch the toggle, so `setMaster` never fires.
+    func armIfNeeded() async {
+        guard prefs.master else { return }
+        guard await NotificationAuth.status() == .notDetermined else {
+            await armOnLaunch()
+            return
+        }
+        await requestPushAuthorization()
+        await syncSubscriptions()
     }
 
     // MARK: CloudKit subscription reconcile
@@ -202,7 +295,22 @@ final class ClassAlertsStore {
         return out
     }
 
+    /// Serialized: the reconcile is a read-modify-write (read `allSubscriptions`,
+    /// diff, then `modifySubscriptions`) and `@MainActor` does not prevent
+    /// reentrancy — each `await` is a suspension another caller walks straight
+    /// into. Two overlapping runs diff against the same stale snapshot and race
+    /// identical CloudKit writes and unordered `syncIssue` updates. `didGrant`
+    /// fanning out alongside a `setMaster`/`armIfNeeded` call makes that a
+    /// deterministic collision, not a rare one.
     func syncSubscriptions() async {
+        if let inFlight = syncTask { await inFlight.value; return }
+        let task = Task { await performSync() }
+        syncTask = task
+        await task.value
+        syncTask = nil
+    }
+
+    private func performSync() async {
         do {
             let existing = try await database.allSubscriptions()
             let ours = existing.filter { $0.subscriptionID.hasPrefix("alert/") }

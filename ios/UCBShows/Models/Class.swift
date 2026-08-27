@@ -48,6 +48,13 @@ struct ClassItem: Decodable, Identifiable, Hashable {
     let startDate: Date?
     /// Pre-folded lowercase haystack for search matching.
     let searchHay: String
+    /// UTF-8 bytes of `searchHay`. `String.contains` does Unicode
+    /// canonical-equivalence matching with no early exit, so a *miss* scans the
+    /// whole ~700-character haystack — measured at 3.4 ms per keystroke across
+    /// one city's classes, and getting worse the more the user types. Both
+    /// sides are already folded and lowercased, so a byte compare is the same
+    /// predicate ~30x cheaper.
+    let searchBytes: [UInt8]
     /// Cross-school subject bucket ("Improv", "Sketch & Writing", …) — computed
     /// once at decode; drives the Classes tab's Subject grouping.
     let subject: String
@@ -91,6 +98,7 @@ struct ClassItem: Decodable, Identifiable, Hashable {
         searchHay = ([title, instructor, level, org, classDescription]
             .joined(separator: " "))
             .folding(options: .diacriticInsensitive, locale: .current).lowercased()
+        searchBytes = Array(searchHay.utf8)
         subject = Self.classifySubject(level: level, title: title)
     }
 

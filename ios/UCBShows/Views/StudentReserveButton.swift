@@ -114,6 +114,10 @@ struct StudentReserveButton: View {
 
     private func evaluate() async {
         guard isUCB, !excluded, let url = show.url else { phase = .hidden; return }
+        // Mid-restore we don't know yet, and "sign in for a free student
+        // ticket" is the wrong thing to tell someone who already is. `taskKey`
+        // interpolates `account.phase`, so this re-runs the moment it resolves.
+        guard !account.isRestoring else { phase = .hidden; return }
         guard account.isSignedIn else { phase = .signInPrompt; return }
         if case .reserved = phase { return }
         phase = .checking

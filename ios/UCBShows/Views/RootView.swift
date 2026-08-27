@@ -11,11 +11,8 @@ import SwiftUI
 struct RootView: View {
     @Environment(ShowsStore.self) private var store
     @Environment(ClassesStore.self) private var classesStore
-    @Environment(GoingStore.self) private var going
     @Environment(TalentStore.self) private var talent
     @Environment(AppState.self) private var app
-    @Environment(UCBAccountStore.self) private var account
-    @Environment(TicketStore.self) private var tickets
     @Environment(\.horizontalSizeClass) private var hSize
 
     var body: some View {
@@ -51,9 +48,10 @@ struct RootView: View {
                 .tabItem { Label("Shows", systemImage: "theatermasks") }
                 .tag(0)
 
+            // No count badge on this tab: the reminder an hour before showtime
+            // is the proactive surface, not a permanent red number.
             TicketWalletView()
                 .tabItem { Label("Tickets", systemImage: "ticket") }
-                .badge(tickets.reserved.count + going.count)
                 .tag(1)
 
             ClassesView()

@@ -10,6 +10,14 @@ enum DebugFixtures {
             || ProcessInfo.processInfo.arguments.contains("-UITestFakeTickets")
     }
 
+    /// `UITEST_RESTORING=1` holds the account in the launch-restore phase, so
+    /// the Tickets tab's optimistic state (cached QR + "Updating…" chip) and
+    /// its no-cache placeholder can be captured. Combine with
+    /// `UITEST_FAKE_TICKETS=1` to put a cached wallet behind it.
+    static var stuckRestoring: Bool {
+        ProcessInfo.processInfo.environment["UITEST_RESTORING"] == "1"
+    }
+
     @MainActor
     static func seed(account: UCBAccountStore, tickets: TicketStore) {
         print("DebugFixtures: seeding fake tickets (args: \(ProcessInfo.processInfo.arguments))")

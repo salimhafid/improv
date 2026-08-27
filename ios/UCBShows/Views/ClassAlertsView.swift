@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The Class Alerts sheet: master switch, customizable UCB rows (NY / LA /
 /// Online, each with per-category toggles), and simple on/off rows for every
@@ -22,8 +23,25 @@ struct ClassAlertsView: View {
                     }
                     .tint(Theme.accent)
                 } footer: {
-                    if !alerts.syncIssue.isEmpty {
-                        Text(alerts.syncIssue).foregroundStyle(.red)
+                    VStack(alignment: .leading, spacing: 8) {
+                        // A green switch and silence is the worst outcome: say
+                        // what's wrong and hand over a way to fix it.
+                        if alerts.authorizationDenied {
+                            Text("Notifications are turned off for Improv, so class alerts can’t reach you.")
+                                .foregroundStyle(.red)
+                            Button("Open Settings") {
+                                if let url = URL(string: UIApplication.openSettingsURLString) {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                            .font(.footnote)
+                        }
+                        if !alerts.registrationIssue.isEmpty {
+                            Text(alerts.registrationIssue).foregroundStyle(.red)
+                        }
+                        if !alerts.syncIssue.isEmpty {
+                            Text(alerts.syncIssue).foregroundStyle(.red)
+                        }
                     }
                 }
 
@@ -81,6 +99,11 @@ struct ClassAlertsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            // Opening this screen with alerts already on is the notifiable
+            // moment for anyone whose prefs came from iCloud — they never touch
+            // the toggle, so nothing else would ever ask. Silent when alerts
+            // are off or permission is already settled.
+            .task { await alerts.armIfNeeded() }
         }
     }
 

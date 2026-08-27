@@ -37,9 +37,9 @@ that opens the theater's own box office.
 
 I'M GOING
 Tap the heart on any show and it lands in your I'm Going list — grouped by
-date, badged with a count, and saved even if the listing later leaves the
-feed. Allow notifications and you'll get a reminder a few hours before
-showtime. One tap adds the show to your calendar.
+date, and saved even if the listing later leaves the feed. Allow notifications
+and you'll get a reminder an hour before showtime. One tap adds the show to
+your calendar.
 
 FIND EXACTLY YOUR KIND OF FUNNY
 Filter by comedy type (improv, sketch, standup, character), venue, free shows,

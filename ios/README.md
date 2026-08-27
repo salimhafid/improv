@@ -40,9 +40,10 @@ XcodeGen.
 - **Shows tab** — a date-sectioned chronological feed for the selected scope
   (Today / Tomorrow / weekday headers, pinned), with an inline search bar.
 - **I'm Going tab** — tap the heart on a show's page to save it. Saved shows
-  persist across launches (even after they leave the feed), group by date,
-  badge the tab with a count, and schedule a local reminder ~3 hours before
-  showtime (if you allow notifications).
+  persist across launches (even after they leave the feed), group by date, and
+  schedule a local reminder an hour before showtime (if you allow
+  notifications). A show you also hold a ticket to gets exactly one reminder —
+  the ticket's, which opens the QR.
 - **Classes tab** — browsed city-wide rather than theater-by-theater: every
   school in the selected theaters' cities gets a collapsible card (the picked
   theaters first), grouped by subject inside. Each class has a native detail
