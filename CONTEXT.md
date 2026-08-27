@@ -142,8 +142,11 @@ xcodebuild -exportArchive -archivePath <path>/Improv.xcarchive \
 - ExportOptions.plist (recreate if missing): method `app-store-connect`,
   teamID `8FKP6A38FJ`, signingStyle automatic, uploadSymbols true,
   destination `upload` (or `export` for a local .ipa).
-- **Version rule**: a train closes once approved — 1.1 is closed; new
-  uploads must carry MARKETING_VERSION ≥ 1.2. Both settings appear twice in
+- **Version rule**: a train closes once approved — 1.3 is closed (builds 19
+  and 20 were uploaded into it and are stranded); new uploads must carry
+  MARKETING_VERSION ≥ 1.4. The upload fails at the very END of a ~15 min
+  export with "Invalid Pre-Release Train", so check the train before
+  archiving, not after. Both settings appear twice in
   the pbxproj (Debug+Release) — sed with /g.
 - `ITSAppUsesNonExemptEncryption = NO` is baked in — no compliance prompt.
 - **"Failed to Use Accounts"** on upload = Xcode's ASC session expired →
