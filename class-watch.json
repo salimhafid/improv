@@ -1,23 +1,22 @@
 {
  "annoyance": {
   "ids": [
-   "annoyance/ap1-mondays-with-tbd-72678b3b-51ac-490e-81c0-65a72f99fc33",
+   "annoyance/ap1-mondays-with-lily-ludwig-cd760137-4c11-4cf0-b780-e8915d68ad9a",
    "annoyance/ap1-sundays-with-tbd-e24ef233-d5dc-41f5-8344-3020fefa14ba",
-   "annoyance/ap1-thursdays-with-tbd-5782b26a-17f1-4618-a87e-9afcf83f106c",
+   "annoyance/ap1-thursdays-with-greg-lovelace",
    "annoyance/ap1-tuesdays-with-jeff-quintana",
    "annoyance/ap1-wednesdays-with-tbd-ad33f2f6-f775-467d-bbe3-4e05d56bfbf8",
-   "annoyance/ap2-mondays-with-tbd-da8ac574-41ef-43e9-aaaa-98d62e7307df",
+   "annoyance/ap2-mondays-with-jen-connor-4569961c-859b-4594-94dc-81248aa75907",
    "annoyance/ap2-sundays-with-justin-swinson-8d63c8b3-2189-4266-9ec9-4a31d402f21b",
    "annoyance/ap2-thursdays-with-chris-kervick-90f8732e-52d1-46fe-b49a-7f99eb1f5cbf",
-   "annoyance/ap2-thursdays-with-tbd-1f54fca8-05dd-42b1-b3a7-dad686bf4741",
    "annoyance/ap2-tuesdays-with-megan-johns-b08079a4-b41f-4c81-8dab-07a634a1b8ec",
    "annoyance/ap2-wednesdays-with-casey-alltop-37470518-d940-491a-91a2-38f8538f517f",
-   "annoyance/ap3-mondays-with-tbd-a7ccc563-4758-4359-92f0-ed7b2094fe81",
-   "annoyance/ap3-sundays-with-tbd-4a227e5c-6d91-48d1-ba7f-c5b055404768",
-   "annoyance/ap3-thursdays-with-tbd-8e1dbae8-c8ed-4926-8a46-b64dd28579f9",
+   "annoyance/ap3-mondays-with-johanna-medrano",
+   "annoyance/ap3-sundays-with-johanna-medrano",
+   "annoyance/ap3-thursdays-with-jeff-quintana",
    "annoyance/ap3-tuesdays-with-maria-sharps",
    "annoyance/ap3-wednesdays-with-chris-kervick-05182ad6-b2bb-437f-bba3-c2429258eb3b",
-   "annoyance/ap4-sundays-with-tbd-5f6f97fe-3b1c-4107-8ef1-60e174e66688",
+   "annoyance/ap4-sundays-with-greg-lovelace-73ddb1e4-b36d-4630-a82b-9583d165d4ff",
    "annoyance/ap4-thursdays-with-ross-taylor-5c2fd96d-495a-420e-81d1-22de6aa9e1e8",
    "annoyance/ap4-wednesdays-with-bruce-phillips-5a43f4ce-3762-4215-a196-aa2637b81272",
    "annoyance/ap5-sundays-with-tbd-a684c218-1be1-46bf-b584-b6f443a27817",
@@ -40,7 +39,7 @@
    "annoyance/workshop-improv-auditions-saturday-with-lauren-rivas",
    "annoyance/workshop-voice-for-improv-acting-with-seth-k-lowery"
   ],
-  "updated": "2026-08-26T13:59:46.209337+00:00"
+  "updated": "2026-08-27T22:55:18.950996+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -82,7 +81,7 @@
    "brooklyn_cc/stand-up-2-shalewa-aug-oct-26",
    "brooklyn_cc/use-your-dang-voice-noelle"
   ],
-  "updated": "2026-08-26T13:59:46.209337+00:00"
+  "updated": "2026-08-27T22:55:18.950996+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -92,7 +91,6 @@
    "io_chicago/drop-in-improv-to-sketch",
    "io_chicago/drop-in-improv-with-gretchen-eng",
    "io_chicago/fall-one-week-intensive-2026",
-   "io_chicago/improv-to-sketch-2-thursdays-7-10pm-with-andy-bolduc",
    "io_chicago/io-improv-advanced-harold-with-nicole-carter",
    "io_chicago/io-improv-level-1-mondays-from-7-10pm-with-damian-anaya",
    "io_chicago/io-improv-level-1-saturdays-from-12-3pm-with-jonathan-lee-rey",
@@ -121,7 +119,6 @@
    "io_chicago/music-improv-one-week-spring-intensive-march-2027",
    "io_chicago/music-improv-one-week-summer-intensive-june-2027",
    "io_chicago/new-year-one-week-intensive-2027",
-   "io_chicago/sketch-performance-lab-wednesdays-7-10pm-with-julia-morales",
    "io_chicago/solo-character-weekend-intensive-january-9th-10th",
    "io_chicago/solo-character-weekend-intensive-march-6th-7th",
    "io_chicago/spring-one-week-intensive-2027",
@@ -133,18 +130,17 @@
    "io_chicago/the-fest-vol-2-workshop-producing-panel-with-tyler-vanduvall-guests",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-08-26T13:59:46.209337+00:00"
+  "updated": "2026-08-27T22:55:18.950996+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/agents-auditions-more-free-workshop-with-dina-facklis",
    "logan_square/clowning-fundamentals-with-ian-ornstein-668bf1f7-82ab-4e32-98a5-f1783368a920"
   ],
-  "updated": "2026-08-26T13:59:46.209337+00:00"
+  "updated": "2026-08-27T22:55:18.950996+00:00"
  },
  "magnet": {
   "ids": [
-   "magnet/11974",
    "magnet/11976",
    "magnet/11977",
    "magnet/11978",
@@ -168,6 +164,7 @@
    "magnet/12003",
    "magnet/12004",
    "magnet/12005",
+   "magnet/12006",
    "magnet/12007",
    "magnet/12008",
    "magnet/12009",
@@ -185,9 +182,11 @@
    "magnet/12023",
    "magnet/12024",
    "magnet/12025",
-   "magnet/12026"
+   "magnet/12026",
+   "magnet/12027",
+   "magnet/12029"
   ],
-  "updated": "2026-08-26T13:59:46.209337+00:00"
+  "updated": "2026-08-27T22:55:18.950996+00:00"
  },
  "second_city": {
   "ids": [
@@ -196,7 +195,6 @@
    "second_city/44578",
    "second_city/44579",
    "second_city/44580",
-   "second_city/44581",
    "second_city/44582",
    "second_city/44584",
    "second_city/44585",
@@ -204,7 +202,6 @@
    "second_city/44588",
    "second_city/44589",
    "second_city/44590",
-   "second_city/44592",
    "second_city/44594",
    "second_city/44612",
    "second_city/44613",
@@ -234,7 +231,6 @@
    "second_city/45982",
    "second_city/45983",
    "second_city/45984",
-   "second_city/46079",
    "second_city/46082",
    "second_city/46083",
    "second_city/46085",
@@ -250,7 +246,6 @@
    "second_city/46109",
    "second_city/46111",
    "second_city/46112",
-   "second_city/46113",
    "second_city/46114",
    "second_city/46115",
    "second_city/46118",
@@ -302,9 +297,10 @@
    "second_city/46284",
    "second_city/46287",
    "second_city/46288",
-   "second_city/46290"
+   "second_city/46290",
+   "second_city/46302"
   ],
-  "updated": "2026-08-26T13:59:46.209337+00:00"
+  "updated": "2026-08-27T22:55:18.950996+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -381,7 +377,7 @@
    "42032",
    "42041"
   ],
-  "updated": "2026-08-27T20:43:24.059875+00:00"
+  "updated": "2026-08-27T22:55:04.439955+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -448,7 +444,7 @@
    "41927",
    "41960"
   ],
-  "updated": "2026-08-27T20:43:24.059875+00:00"
+  "updated": "2026-08-27T22:55:04.439955+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -468,7 +464,7 @@
    "41611",
    "41936"
   ],
-  "updated": "2026-08-27T20:43:24.059875+00:00"
+  "updated": "2026-08-27T22:55:04.439955+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -506,12 +502,12 @@
    "wgis_la/1832",
    "wgis_la/1840"
   ],
-  "updated": "2026-08-26T13:59:46.209337+00:00"
+  "updated": "2026-08-27T22:55:18.950996+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-08-26T13:59:46.209337+00:00"
+  "updated": "2026-08-27T22:55:18.950996+00:00"
  }
 }
