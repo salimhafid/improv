@@ -104,6 +104,7 @@ struct ClassAlertsView: View {
             // the toggle, so nothing else would ever ask. Silent when alerts
             // are off or permission is already settled.
             .task { await alerts.armIfNeeded() }
+            .deniedNotificationsAlert(alerts)
         }
     }
 
@@ -162,5 +163,33 @@ struct UCBAlertDetailView: View {
         }
         .navigationTitle(school.name)
         .navigationBarTitleDisplayMode(.inline)
+        .deniedNotificationsAlert(alerts)
+    }
+}
+
+/// The "you switched this on but notifications are off" alert. Lives as a
+/// modifier because it has to sit on BOTH screens — the per-school and
+/// per-category toggles are in `UCBAlertDetailView`, where the sheet's footer
+/// isn't, so that screen would otherwise flip a switch green and say nothing.
+private struct DeniedNotificationsAlert: ViewModifier {
+    @Bindable var alerts: ClassAlertsStore
+
+    func body(content: Content) -> some View {
+        content.alert("Turn On Notifications", isPresented: $alerts.deniedPromptVisible) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Not Now", role: .cancel) {}
+        } message: {
+            Text("Notifications are turned off for Improv, so class alerts can\u{2019}t reach you. Turn them on in Settings and your picks here will start arriving.")
+        }
+    }
+}
+
+private extension View {
+    func deniedNotificationsAlert(_ alerts: ClassAlertsStore) -> some View {
+        modifier(DeniedNotificationsAlert(alerts: alerts))
     }
 }

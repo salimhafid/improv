@@ -92,6 +92,11 @@ final class ClassAlertsStore {
     /// The user turned notifications off for the app, so alerts are switched on
     /// and going nowhere. Surfaced in the sheet with a route to Settings.
     private(set) var authorizationDenied = false
+    /// Raised when the user switches something on while notifications are
+    /// denied. The footer states the condition, but a switch that flips green
+    /// and can never deliver needs saying at the moment of the tap — and the
+    /// per-school toggles live on a screen the footer isn't even on.
+    var deniedPromptVisible = false
     /// Last APNs registration failure ("" = fine). Kept apart from `syncIssue`
     /// so a successful subscription reconcile doesn't erase it — the two fail
     /// independently, and a device with no push token receives nothing however
@@ -167,15 +172,20 @@ final class ClassAlertsStore {
         if on {
             // The ask and the subscribe are independent: a declined prompt
             // still leaves the subscriptions correct for a later grant.
-            Task { await requestPushAuthorization() }
+            Task {
+                if await promptIfAlreadyDenied() { return }
+                await requestPushAuthorization()
+            }
         } else {
             authorizationDenied = false
+            deniedPromptVisible = false
         }
         persistAndSync()
     }
 
     func setSchool(_ id: String, enabled: Bool) {
         if enabled { prefs.schools.insert(id) } else { prefs.schools.remove(id) }
+        if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
     }
 
@@ -184,6 +194,7 @@ final class ClassAlertsStore {
             // Only seed a school that has no entry at all — an existing pick
             // (including the deliberate on-with-nothing state) is never rewritten.
             if prefs.ucb[id] == nil { prefs.ucb[id] = Self.defaultUCBCategories }
+            Task { await promptIfAlreadyDenied() }
         } else {
             prefs.ucb[id] = nil
         }
@@ -196,6 +207,7 @@ final class ClassAlertsStore {
         guard var set = prefs.ucb[id] else { return }
         if enabled { set.insert(category) } else { set.remove(category) }
         prefs.ucb[id] = set
+        if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
     }
 
@@ -203,6 +215,7 @@ final class ClassAlertsStore {
     func setAllUCBCategories(_ id: String, enabled: Bool) {
         guard prefs.ucb[id] != nil else { return }
         prefs.ucb[id] = enabled ? Set(Self.ucbCategories.map(\.key)) : []
+        if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
     }
 
@@ -224,6 +237,18 @@ final class ClassAlertsStore {
     }
 
     // MARK: Arming (permission + APNs registration)
+
+    /// Every "switch this on" gesture routes through here. Only fires when the
+    /// refusal is ALREADY on record: declining the system prompt seconds
+    /// earlier is not a moment to stack a second dialog on top of, and the
+    /// footer covers that case.
+    @discardableResult
+    private func promptIfAlreadyDenied() async -> Bool {
+        guard await NotificationAuth.status() == .denied else { return false }
+        authorizationDenied = true
+        deniedPromptVisible = true
+        return true
+    }
 
     /// Prompt, then register — the toggle is the notifiable moment. Honors the
     /// answer: registering after a "Don't Allow" achieves nothing, and the
