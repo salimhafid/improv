@@ -306,6 +306,9 @@ struct LogicTests {
         await testSearchByteParity()
         await testSchoolFolderOrder()
         await testPickedTheaterWithNoClasses()
+        await testShowSearchByteParity()
+        await testShowsSectionMemo()
+        await testShowsSearchFiltering()
         print(failures == 0 ? "\nALL SWIFT LOGIC TESTS PASSED" : "\n\(failures) FAILURE(S)")
         exit(failures == 0 ? 0 : 1)
     }
@@ -407,4 +410,99 @@ func testPickedTheaterWithNoClasses() {
     // An unpicked empty theater is still dropped.
     check(!picked.selected.contains { $0.id == "playground" },
           "an unpicked theater with no classes stays out of the list")
+}
+
+// MARK: Shows tab feed (search byte parity, section memoization)
+
+func showsPayload(_ items: [[String: Any]]) -> ShowsPayload {
+    let data = try! JSONSerialization.data(withJSONObject: ["shows": items])
+    return try! JSONDecoder().decode(ShowsPayload.self, from: data)
+}
+
+private let nyShows: [[String: Any]] = [
+    ["title": "Harold Night", "source": "ucb_ny", "city": "New York",
+     "start": "2026-08-01T20:00:00", "has_time": true,
+     "excerpt": "The Harold, every night", "comedy_types": ["Improv"]],
+    ["title": "Pérez Presents", "source": "ucb_ny", "city": "New York",
+     "start": "2026-08-02T20:00:00", "has_time": true,
+     "excerpt": "A showcase", "comedy_types": ["Stand-Up"]],
+    ["title": "Magnet Megawatt", "source": "magnet", "city": "New York",
+     "start": "2026-08-02T21:00:00", "has_time": true,
+     "comedy_types": ["Improv"]],
+    ["title": "Dates TBA Sketch Hour", "source": "ucb_ny", "city": "New York",
+     "excerpt": "Sketch comedy"],
+]
+
+@MainActor
+func testShowSearchByteParity() {
+    let items = nyShows.map { show($0) }
+    for raw in ["harold", "improv", "stand-up", "Pérez", "perez", "sketch comedy",
+                "zzzznope", "", "  "] {
+        let query = SearchText.normalized(raw)
+        let needle = Array(query.utf8)
+        for item in items {
+            // Both sides are already diacritic-folded and lowercased, so the
+            // byte scan has to agree with String.contains on every show.
+            let want = query.isEmpty ? true : item.searchHay.contains(query)
+            checkEqual(SearchText.contains(item.searchBytes, needle), want,
+                       "byte scan matches String.contains for \"\(raw)\" in \(item.title)")
+        }
+    }
+}
+
+@MainActor
+func testShowsSearchFiltering() {
+    let store = ShowsStore()
+    store.filters = Filters()   // ignore anything a previous run persisted
+    store.apply(showsPayload(nyShows))
+
+    checkEqual(store.filtered(theaters: [], searchText: "harold").map(\.title),
+               ["Harold Night"], "search matches the title")
+    checkEqual(store.filtered(theaters: [], searchText: "sketch comedy").map(\.title),
+               ["Dates TBA Sketch Hour"], "search matches the excerpt")
+    checkEqual(store.filtered(theaters: [], searchText: "improv").map(\.title),
+               ["Harold Night", "Magnet Megawatt"], "search matches comedy types")
+    checkEqual(store.filtered(theaters: [], searchText: "perez").map(\.title),
+               ["Pérez Presents"], "a folded query matches an accented title")
+    checkEqual(store.filtered(theaters: [], searchText: "Pérez").map(\.title),
+               ["Pérez Presents"], "...and so does an accented query")
+    check(store.filtered(theaters: [], searchText: "zzzznope").isEmpty,
+          "a miss returns nothing — the case the byte scan made fast")
+    checkEqual(store.filtered(theaters: [], searchText: "   ").count, nyShows.count,
+               "a whitespace-only query filters nothing")
+    checkEqual(store.filtered(theaters: ["magnet"], searchText: "improv").map(\.title),
+               ["Magnet Megawatt"], "theater scope still applies alongside search")
+}
+
+@MainActor
+func testShowsSectionMemo() {
+    let store = ShowsStore()
+    store.filters = Filters()
+    store.apply(showsPayload(nyShows))
+
+    let first = store.sections(theaters: ["ucb_ny"])
+    let builds = store.sectionBuildCount
+    let second = store.sections(theaters: ["ucb_ny"])
+    checkEqual(store.sectionBuildCount, builds, "repeating a sections call is a memo hit")
+    checkEqual(second.map(\.id), first.map(\.id), "the memoized sections are identical")
+
+    _ = store.sections(theaters: ["ucb_ny"], searchText: "harold")
+    check(store.sectionBuildCount > builds, "a new query misses the memo")
+
+    _ = store.sections(theaters: ["magnet"])
+    let beforeFilter = store.sectionBuildCount
+    _ = store.sections(theaters: ["magnet"])
+    checkEqual(store.sectionBuildCount, beforeFilter, "...and the new key memoizes in turn")
+    store.filters.freeOnly = true
+    _ = store.sections(theaters: ["magnet"])
+    check(store.sectionBuildCount > beforeFilter, "a filter change misses the memo")
+    store.filters = Filters()
+
+    _ = store.sections(theaters: ["ucb_ny"])
+    let beforeApply = store.sectionBuildCount
+    store.apply(showsPayload([nyShows[0]]))
+    let afterApply = store.sections(theaters: ["ucb_ny"])
+    check(store.sectionBuildCount > beforeApply, "a feed apply invalidates the memo")
+    checkEqual(afterApply.flatMap { $0.shows.map(\.title) }, ["Harold Night"],
+               "the rebuilt sections reflect the new feed")
 }

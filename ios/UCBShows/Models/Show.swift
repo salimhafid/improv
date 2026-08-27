@@ -84,6 +84,13 @@ struct Show: Codable, Identifiable, Hashable {
     let dayKey: String
     /// Pre-folded lowercase haystack for search matching.
     let searchHay: String
+    /// UTF-8 bytes of `searchHay`. `String.contains` does Unicode
+    /// canonical-equivalence matching with no early exit, so a *miss* scans the
+    /// whole haystack — the same defect measured at 3.4 ms per keystroke over
+    /// one city's classes, and the shows feed is an order of magnitude larger.
+    /// Both sides are already folded and lowercased, so a byte compare is the
+    /// same predicate far cheaper (see `SearchText.contains`).
+    let searchBytes: [UInt8]
 
     enum CodingKeys: String, CodingKey {
         case postID = "post_id"
@@ -140,6 +147,7 @@ struct Show: Codable, Identifiable, Hashable {
         dayKey = startDate.map { DateUtils.dayKey($0, in: tz) } ?? "tba"
         searchHay = (title + " " + excerpt + " " + comedyTypes.joined(separator: " "))
             .folding(options: .diacriticInsensitive, locale: .current).lowercased()
+        searchBytes = Array(searchHay.utf8)
     }
 
     private static func nonEmpty(_ s: String?) -> String? {

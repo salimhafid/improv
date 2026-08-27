@@ -53,6 +53,47 @@ final class ShowsStore {
     private let service: FeedService<ShowsPayload>
     private static let filtersKey = "filters"
 
+    /// Memo for `sections`, which is called from inside `ShowsFeedView.body`.
+    /// `@ObservationIgnored` is LOAD-BEARING: an observed write during body
+    /// evaluation would invalidate the view that just read it — an endless
+    /// re-render loop. Single-entry, which is safe only because `ShowsFeedView`
+    /// is the sole caller; a second view calling it with a different key in the
+    /// same frame would thrash the cache to a 0% hit rate.
+    @ObservationIgnored private var sectionCache: (key: SectionKey, sections: [DaySection])?
+
+    /// Bumped on every feed apply. Deliberately NOT `@ObservationIgnored`:
+    /// reading it in `sections` is what registers the view's dependency on the
+    /// feed on the cache-hit path, where `allShows` is never touched. Only ever
+    /// written from `apply`, never during body evaluation.
+    private var feedVersion = 0
+
+    /// Diagnostic: how many times the sections were actually rebuilt, i.e. the
+    /// memo's miss count. Read by the offline logic harness.
+    @ObservationIgnored private(set) var sectionBuildCount = 0
+
+    /// Reading `filters` here is also what registers the view's dependency on
+    /// the filter set, which the cache-hit path would otherwise skip.
+    private struct SectionKey: Equatable {
+        let theaters: Set<String>
+        /// Already normalized (see `SearchText.normalized`).
+        let query: String
+        let filters: Filters
+        let version: Int
+        /// See `dayStamp` — the only key component that moves on its own.
+        let days: [Date]
+    }
+
+    /// Start-of-today in every city the app covers. Unlike the classes layout,
+    /// this pipeline reads the clock: `inDateWindow` measures from the show's
+    /// own city midnight, and `DaySection.group` labels sections "Today" /
+    /// "Tomorrow". Without this the cache would happily serve yesterday's
+    /// "Today" to a feed left on screen across midnight. Cheap — the calendars
+    /// are pre-cached, so it's a few `startOfDay` calls and no formatting.
+    private static func dayStamp() -> [Date] {
+        let now = Date()
+        return City.allCases.map { DateUtils.calendar(in: $0.timeZone).startOfDay(for: now) }
+    }
+
     init(service: FeedService<ShowsPayload> = .shows) {
         self.service = service
         self.filters = Self.loadFilters() ?? Filters()
@@ -109,12 +150,17 @@ final class ShowsStore {
         }
     }
 
-    private func apply(_ payload: ShowsPayload) {
+    /// The single write path for show data — both loaders above go through it,
+    /// as does the offline logic harness (which has no network and no bundle
+    /// cache to load from).
+    func apply(_ payload: ShowsPayload) {
         allShows = payload.shows.sorted { lhs, rhs in
             (lhs.startDate ?? .distantFuture) < (rhs.startDate ?? .distantFuture)
         }
         lastUpdated = payload.generatedAt.flatMap(DateUtils.parseTimestamp)
         sourcesInfo = payload.sources ?? []
+        feedVersion &+= 1
+        sectionCache = nil
     }
 
     var updatedLabel: String? {
@@ -149,13 +195,15 @@ final class ShowsStore {
 
     /// Shows in the theater scope, refined by the active filters + search.
     func filtered(theaters: Set<String>, searchText: String = "") -> [Show] {
-        let query = searchText.folding(options: .diacriticInsensitive, locale: .current)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        return allShows.filter { matches($0, query: query, theaters: theaters) }
+        filtered(theaters: theaters, normalized: SearchText.normalized(searchText))
     }
 
-    private func matches(_ show: Show, query: String, theaters: Set<String>) -> Bool {
+    private func filtered(theaters: Set<String>, normalized query: String) -> [Show] {
+        let needle = Array(query.utf8)   // once, not once per show
+        return allShows.filter { matches($0, needle: needle, theaters: theaters) }
+    }
+
+    private func matches(_ show: Show, needle: [UInt8], theaters: Set<String>) -> Bool {
         if !theaters.isEmpty, !theaters.contains(show.source) { return false }
         if let venue = filters.venue, show.venue != venue { return false }
         if !filters.comedyTypes.isEmpty,
@@ -163,7 +211,7 @@ final class ShowsStore {
         if filters.livestreamOnly, !show.isLivestream { return false }
         if filters.freeOnly, !show.isFree { return false }
         if filters.dateWindow != .all, !inDateWindow(show) { return false }
-        if !query.isEmpty, !show.searchHay.contains(query) { return false }
+        if !needle.isEmpty, !SearchText.contains(show.searchBytes, needle) { return false }
         return true
     }
 
@@ -208,7 +256,20 @@ final class ShowsStore {
     // MARK: Sections
 
     /// Date-grouped sections of the current theater scope's shows (filtered).
+    /// Called from inside `ShowsFeedView.body`, so it is memoized on
+    /// (theaters, query, filters, feed). A rebuild filters and re-groups the
+    /// whole feed and, worse, hands back freshly allocated buffers that defeat
+    /// SwiftUI's diff, so every row re-rendered on every body evaluation.
     func sections(theaters: Set<String>, searchText: String = "") -> [DaySection] {
-        DaySection.group(filtered(theaters: theaters, searchText: searchText))
+        let key = SectionKey(theaters: theaters,
+                             query: SearchText.normalized(searchText),
+                             filters: filters,
+                             version: feedVersion,
+                             days: Self.dayStamp())
+        if let cached = sectionCache, cached.key == key { return cached.sections }
+        sectionBuildCount &+= 1
+        let sections = DaySection.group(filtered(theaters: theaters, normalized: key.query))
+        sectionCache = (key, sections)
+        return sections
     }
 }

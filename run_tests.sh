@@ -19,6 +19,7 @@ xcrun swiftc -parse-as-library -o "$BIN" \
   ios/UCBShows/Models/Filters.swift \
   ios/UCBShows/Models/Talent.swift \
   ios/UCBShows/Support/AppSupport.swift \
+  ios/UCBShows/Support/SearchText.swift \
   ios/UCBShows/Services/FeedService.swift \
   ios/UCBShows/Services/ReminderPlan.swift \
   ios/UCBShows/Services/ShowsStore.swift \

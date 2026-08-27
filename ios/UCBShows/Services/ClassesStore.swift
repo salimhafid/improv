@@ -122,9 +122,7 @@ final class ClassesStore {
     /// Fold + trim + lowercase, to match `ClassItem.searchHay`. Hoisted out of
     /// `filtered` so the memo key and the match can share one normalization.
     static func normalizedQuery(_ text: String) -> String {
-        text.folding(options: .diacriticInsensitive, locale: .current)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
+        SearchText.normalized(text)
     }
 
     /// Classes matching the search text within the selection's cities (see
@@ -145,27 +143,11 @@ final class ClassesStore {
         return true
     }
 
-    /// Plain substring scan over pre-folded UTF-8. Same predicate as
-    /// `searchHay.contains(query)` — both sides are already
-    /// diacritic-folded and lowercased — without `String.contains`'s Unicode
-    /// canonical-equivalence machinery, which has no early exit and made a
-    /// zero-hit query the *slowest* one. Internal so the logic harness can
-    /// assert the parity directly.
+    /// Plain substring scan over pre-folded UTF-8 — see `SearchText.contains`,
+    /// which `ShowsStore` shares. Kept as a named entry point here so the logic
+    /// harness can assert the parity through the store it guards.
     static func containsBytes(_ hay: [UInt8], _ needle: [UInt8]) -> Bool {
-        guard !needle.isEmpty else { return true }
-        guard hay.count >= needle.count else { return false }
-        let first = needle[0]
-        let limit = hay.count - needle.count
-        var i = 0
-        while i <= limit {
-            if hay[i] == first {
-                var j = 1
-                while j < needle.count, hay[i + j] == needle[j] { j += 1 }
-                if j == needle.count { return true }
-            }
-            i += 1
-        }
-        return false
+        SearchText.contains(hay, needle)
     }
 
     // MARK: Core curriculum (UCB Improv 101–401)
