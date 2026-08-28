@@ -39,7 +39,7 @@
    "annoyance/workshop-improv-auditions-saturday-with-lauren-rivas",
    "annoyance/workshop-voice-for-improv-acting-with-seth-k-lowery"
   ],
-  "updated": "2026-08-27T22:55:18.950996+00:00"
+  "updated": "2026-08-28T22:59:46.598711+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -52,7 +52,6 @@
    "brooklyn_cc/clown-town-level-up",
    "brooklyn_cc/crafting-characters-jamie-sept-oct-26",
    "brooklyn_cc/drop-in-anya-september-26th",
-   "brooklyn_cc/drop-in-joann-intro-drop-in",
    "brooklyn_cc/drop-in-september-19th",
    "brooklyn_cc/improv-1-kenny-july-aug-2026",
    "brooklyn_cc/improv-1-molly-aug-oct-26",
@@ -81,7 +80,7 @@
    "brooklyn_cc/stand-up-2-shalewa-aug-oct-26",
    "brooklyn_cc/use-your-dang-voice-noelle"
   ],
-  "updated": "2026-08-27T22:55:18.950996+00:00"
+  "updated": "2026-08-28T22:59:46.598711+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -103,7 +102,7 @@
    "io_chicago/io-improv-level-2-tuesdays-from-7-10pm-with-janelle-soulliere",
    "io_chicago/io-improv-level-2-wednesdays-from-7-10pm-with-avery-ford",
    "io_chicago/io-improv-level-3-mondays-from-7-10pm-with-steve-plock",
-   "io_chicago/io-improv-level-3-saturdays-from-12-3pm-with-andy-carey",
+   "io_chicago/io-improv-level-3-saturdays-from-12-3pm-with-andy-bolduc",
    "io_chicago/io-improv-level-3-thursdays-from-7-10pm-with-sarah-dell-amico",
    "io_chicago/io-improv-level-3-wednesdays-from-7-10pm-with-leila-gorstein",
    "io_chicago/io-improv-level-4-mondays-from-7-10pm-with-adonis-holmes",
@@ -130,14 +129,14 @@
    "io_chicago/the-fest-vol-2-workshop-producing-panel-with-tyler-vanduvall-guests",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-08-27T22:55:18.950996+00:00"
+  "updated": "2026-08-28T22:59:46.598711+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/agents-auditions-more-free-workshop-with-dina-facklis",
    "logan_square/clowning-fundamentals-with-ian-ornstein-668bf1f7-82ab-4e32-98a5-f1783368a920"
   ],
-  "updated": "2026-08-27T22:55:18.950996+00:00"
+  "updated": "2026-08-28T22:59:46.598711+00:00"
  },
  "magnet": {
   "ids": [
@@ -164,7 +163,6 @@
    "magnet/12003",
    "magnet/12004",
    "magnet/12005",
-   "magnet/12006",
    "magnet/12007",
    "magnet/12008",
    "magnet/12009",
@@ -186,7 +184,7 @@
    "magnet/12027",
    "magnet/12029"
   ],
-  "updated": "2026-08-27T22:55:18.950996+00:00"
+  "updated": "2026-08-28T22:59:46.598711+00:00"
  },
  "second_city": {
   "ids": [
@@ -300,7 +298,7 @@
    "second_city/46290",
    "second_city/46302"
   ],
-  "updated": "2026-08-27T22:55:18.950996+00:00"
+  "updated": "2026-08-28T22:59:46.598711+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -377,7 +375,7 @@
    "42032",
    "42041"
   ],
-  "updated": "2026-08-28T16:50:03.820946+00:00"
+  "updated": "2026-08-28T22:59:38.702907+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -442,9 +440,15 @@
    "41909",
    "41918",
    "41927",
-   "41960"
+   "41960",
+   "42059",
+   "42069",
+   "42079",
+   "42089",
+   "42099",
+   "42126"
   ],
-  "updated": "2026-08-28T16:50:03.820946+00:00"
+  "updated": "2026-08-28T22:59:38.702907+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -462,9 +466,11 @@
    "41393",
    "41410",
    "41611",
-   "41936"
+   "41936",
+   "42108",
+   "42117"
   ],
-  "updated": "2026-08-28T16:50:03.820946+00:00"
+  "updated": "2026-08-28T22:59:38.702907+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -502,12 +508,12 @@
    "wgis_la/1832",
    "wgis_la/1840"
   ],
-  "updated": "2026-08-27T22:55:18.950996+00:00"
+  "updated": "2026-08-28T22:59:46.598711+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-08-27T22:55:18.950996+00:00"
+  "updated": "2026-08-28T22:59:46.598711+00:00"
  }
 }
