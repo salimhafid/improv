@@ -38,7 +38,7 @@
    "annoyance/workshop-drop-in-improv-classes",
    "annoyance/workshop-improv-auditions-saturday-with-lauren-rivas"
   ],
-  "updated": "2026-08-30T17:20:21.361589+00:00"
+  "updated": "2026-08-31T19:29:17.017254+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -79,7 +79,7 @@
    "brooklyn_cc/stand-up-2-shalewa-aug-oct-26",
    "brooklyn_cc/use-your-dang-voice-noelle"
   ],
-  "updated": "2026-08-30T17:20:21.361589+00:00"
+  "updated": "2026-08-31T19:29:17.017254+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -126,15 +126,16 @@
    "io_chicago/teen-sketch-fall-2026",
    "io_chicago/the-fest-vol-2-workshop-build-your-own-form-with-avery-ford",
    "io_chicago/the-fest-vol-2-workshop-producing-panel-with-tyler-vanduvall-guests",
-   "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
+   "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901",
+   "io_chicago/workshop-scenework-scenework-scenework-with-joe-canale"
   ],
-  "updated": "2026-08-30T17:20:21.361589+00:00"
+  "updated": "2026-08-31T19:29:17.017254+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/clowning-fundamentals-with-ian-ornstein-668bf1f7-82ab-4e32-98a5-f1783368a920"
   ],
-  "updated": "2026-08-30T17:20:21.361589+00:00"
+  "updated": "2026-08-31T19:29:17.017254+00:00"
  },
  "magnet": {
   "ids": [
@@ -183,7 +184,7 @@
    "magnet/12028",
    "magnet/12029"
   ],
-  "updated": "2026-08-30T17:20:21.361589+00:00"
+  "updated": "2026-08-31T19:29:17.017254+00:00"
  },
  "second_city": {
   "ids": [
@@ -191,12 +192,9 @@
    "second_city/44577",
    "second_city/44578",
    "second_city/44579",
-   "second_city/44582",
    "second_city/44584",
    "second_city/44585",
    "second_city/44588",
-   "second_city/44590",
-   "second_city/44594",
    "second_city/44612",
    "second_city/44613",
    "second_city/44614",
@@ -226,43 +224,33 @@
    "second_city/45983",
    "second_city/45984",
    "second_city/46083",
-   "second_city/46085",
    "second_city/46088",
    "second_city/46089",
    "second_city/46091",
    "second_city/46092",
-   "second_city/46094",
    "second_city/46100",
    "second_city/46102",
    "second_city/46103",
-   "second_city/46104",
    "second_city/46109",
    "second_city/46111",
    "second_city/46112",
    "second_city/46114",
-   "second_city/46118",
-   "second_city/46119",
    "second_city/46122",
    "second_city/46123",
    "second_city/46125",
    "second_city/46127",
    "second_city/46130",
    "second_city/46131",
-   "second_city/46135",
    "second_city/46139",
    "second_city/46140",
-   "second_city/46144",
    "second_city/46150",
-   "second_city/46151",
    "second_city/46155",
    "second_city/46156",
    "second_city/46158",
    "second_city/46163",
-   "second_city/46165",
    "second_city/46166",
    "second_city/46167",
    "second_city/46168",
-   "second_city/46172",
    "second_city/46174",
    "second_city/46240",
    "second_city/46241",
@@ -281,12 +269,17 @@
    "second_city/46275",
    "second_city/46281",
    "second_city/46284",
-   "second_city/46287",
    "second_city/46288",
    "second_city/46290",
-   "second_city/46302"
+   "second_city/46297",
+   "second_city/46298",
+   "second_city/46299",
+   "second_city/46300",
+   "second_city/46301",
+   "second_city/46302",
+   "second_city/46303"
   ],
-  "updated": "2026-08-30T17:20:21.361589+00:00"
+  "updated": "2026-08-31T19:29:17.017254+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -363,7 +356,7 @@
    "42032",
    "42041"
   ],
-  "updated": "2026-08-31T14:11:39.888228+00:00"
+  "updated": "2026-08-31T19:29:02.351622+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -435,7 +428,7 @@
    "42099",
    "42126"
   ],
-  "updated": "2026-08-31T14:11:39.888228+00:00"
+  "updated": "2026-08-31T19:29:02.351622+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -457,21 +450,19 @@
    "42108",
    "42117"
   ],
-  "updated": "2026-08-31T14:11:39.888228+00:00"
+  "updated": "2026-08-31T19:29:02.351622+00:00"
  },
  "wgis_la": {
   "ids": [
    "wgis_la/1590",
    "wgis_la/1705",
    "wgis_la/1706",
-   "wgis_la/1757",
    "wgis_la/1775",
    "wgis_la/1777",
    "wgis_la/1778",
    "wgis_la/1788",
    "wgis_la/1789",
    "wgis_la/1790",
-   "wgis_la/1791",
    "wgis_la/1794",
    "wgis_la/1800",
    "wgis_la/1806",
@@ -496,12 +487,12 @@
    "wgis_la/1833",
    "wgis_la/1840"
   ],
-  "updated": "2026-08-30T17:20:21.361589+00:00"
+  "updated": "2026-08-31T19:29:17.017254+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-08-30T17:20:21.361589+00:00"
+  "updated": "2026-08-31T19:29:17.017254+00:00"
  }
 }
