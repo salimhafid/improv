@@ -4,10 +4,11 @@ CKQuerySubscriptions — see the app's ClassAlertsStore).
 
 Two modes, run by .github/workflows/class-watch.yml:
 
-  --ucb    every 10 minutes: one Arlo catalog pull, split into
+  --ucb    on the workflow's schedule: one Arlo catalog pull, split into
            ucb_ny / ucb_la / ucb_online by LOC_* tag, categorized by CTG_* tag.
-           New classes alert per (school, category) so devices subscribed to
-           only some categories get only those pushes.
+           New classes are bundled per (school, category set) — a record lists
+           every category its classes carry, and a device's subscription
+           matches on any one of them.
   --all    daily: every non-UCB class source; new classes alert per school
            as a single daily bundle (category "all").
 
@@ -55,7 +56,8 @@ DISPLAY = {
     "second_city": "The Second City", "logan_square": "Logan Square Improv",
 }
 
-# Arlo tag → canonical category key (first match wins; order = priority).
+# Arlo tag → canonical category key. Order = priority: the first match is the
+# record's primary `category`; every match lands in `categories`.
 UCB_CATEGORY_TAGS = [
     ("CTG_Improv_Electives", "improv_electives"),
     ("CTG_Improv", "improv"),
@@ -83,11 +85,20 @@ CATEGORY_LABEL = {
 UCB_LOCATIONS = [("LOC_NY", "ucb_ny"), ("LOC_LA", "ucb_la"), ("LOC_Online", "ucb_online")]
 
 
+def _categories(tags: list[str]) -> list[str]:
+    """Every category a class carries, in priority order. A workshop tagged
+    Featured Programs + Improv Electives + Sketch Electives is all three, and
+    a device subscribed to any one of them should hear about it — picking only
+    the first is how a Kevin McDonald workshop went out as `improv_electives`
+    alone and reached nobody subscribed to Improv, Sketch, or Featured."""
+    keys = [key for tag, key in UCB_CATEGORY_TAGS if tag in tags]
+    return keys or ["other"]
+
+
 def _category(tags: list[str]) -> str:
-    for tag, key in UCB_CATEGORY_TAGS:
-        if tag in tags:
-            return key
-    return "other"
+    """Primary category — the first match. Still written as the record's
+    scalar `category` so builds subscribed on `category ==` keep matching."""
+    return _categories(tags)[0]
 
 
 def scan_ucb() -> dict[str, dict[str, dict]]:
@@ -105,7 +116,7 @@ def scan_ucb() -> dict[str, dict[str, dict]]:
             if tag in tags:
                 when = (ev.get("StartDateTime") or "")[:10]
                 out[school][str(ev.get("EventID"))] = {
-                    "title": title, "when": when, "category": _category(tags),
+                    "title": title, "when": when, "categories": _categories(tags),
                 }
     return out
 
@@ -159,18 +170,21 @@ def diff_and_alert(scanned: dict[str, dict[str, dict]], state: dict, per_categor
         new = [meta | {"id": cid} for cid, meta in current.items() if cid not in known]
         if not new:
             continue
-        groups: dict[str, list[dict]] = {}
+        groups: dict[tuple[str, ...], list[dict]] = {}
         for item in new:
-            key = item.get("category", "all") if per_category else "all"
+            key = tuple(item.get("categories") or ["other"]) if per_category else ("all",)
             groups.setdefault(key, []).append(item)
-        for category, items in sorted(groups.items()):
-            alerts.append(compose(school, category, items))
+        for categories, items in sorted(groups.items()):
+            alerts.append(compose(school, list(categories), items))
     return alerts
 
 
-def compose(school: str, category: str, items: list[dict]) -> dict:
+def compose(school: str, categories: list[str], items: list[dict]) -> dict:
+    """One alert payload. `categories` is the full set every item carries;
+    `category` (its first entry) is the primary, kept for older subscribers."""
     name = DISPLAY.get(school, school)
     titles = [i["title"] for i in items]
+    category = categories[0]
     if school.startswith("ucb"):
         label = CATEGORY_LABEL.get(category, "")
         if len(items) == 1:
@@ -183,8 +197,8 @@ def compose(school: str, category: str, items: list[dict]) -> dict:
         title = f"New class at {name}" if len(items) == 1 else f"New classes at {name}"
         body = titles[0] if len(items) == 1 else _list_body(titles)
     return {
-        "school": school, "category": category, "count": len(items),
-        "pushTitle": title, "pushBody": body,
+        "school": school, "category": category, "categories": categories,
+        "count": len(items), "pushTitle": title, "pushBody": body,
         "classIDs": ",".join(i["id"] for i in items)[:900],
     }
 
@@ -227,7 +241,8 @@ def send_alerts(alerts: list[dict]) -> None:
     if not KEY_ID or not PRIVATE_KEY_PEM:
         log.warning("DRY RUN (no CloudKit key configured) — would send:")
         for a in alerts:
-            log.warning("  [%s/%s] %s — %s", a["school"], a["category"], a["pushTitle"], a["pushBody"])
+            log.warning("  [%s/%s] %s — %s", a["school"], "+".join(a["categories"]),
+                        a["pushTitle"], a["pushBody"])
         return
 
     batch = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -241,6 +256,7 @@ def send_alerts(alerts: list[dict]) -> None:
                 "fields": {
                     "school": {"value": a["school"], "type": "STRING"},
                     "category": {"value": a["category"], "type": "STRING"},
+                    "categories": {"value": a["categories"], "type": "STRING_LIST"},
                     "count": {"value": a["count"], "type": "INT64"},
                     "pushTitle": {"value": a["pushTitle"], "type": "STRING"},
                     "pushBody": {"value": a["pushBody"], "type": "STRING"},
@@ -301,6 +317,7 @@ def test_cloudkit() -> int:
                 "fields": {
                     "school": {"value": "__test__", "type": "STRING"},
                     "category": {"value": "test", "type": "STRING"},
+                    "categories": {"value": ["test"], "type": "STRING_LIST"},
                     "count": {"value": 0, "type": "INT64"},
                     "pushTitle": {"value": "CloudKit auth test", "type": "STRING"},
                     "pushBody": {"value": "This record can be deleted.", "type": "STRING"},

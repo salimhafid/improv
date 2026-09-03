@@ -8,13 +8,18 @@ import UserNotifications
 ///
 /// The GitHub Actions watcher (watcher.py) writes a `ClassAlert` record to the
 /// app's public CloudKit database whenever a school posts new classes — UCB
-/// checked every 10 minutes (one record per category), every other school
-/// daily (one bundled record). Each device turns its toggles into
-/// `CKQuerySubscription`s, so Apple's push infrastructure delivers exactly the
-/// alerts this user asked for — no server of ours involved.
+/// checked on a schedule (one record per bundle of classes sharing a category
+/// set), every other school daily (one bundled record). Each device turns its
+/// toggles into `CKQuerySubscription`s, so Apple's push infrastructure
+/// delivers exactly the alerts this user asked for — no server of ours involved.
 ///
-/// Subscription IDs are deterministic ("alert/<school>/<category>") so the
-/// desired set can be reconciled against CloudKit's on every change.
+/// A UCB record carries every category its classes belong to, and a
+/// subscription matches if ANY of them is one the user picked — a Kevin
+/// McDonald workshop tagged Improv Electives + Sketch Electives + Featured
+/// Programs reaches all three audiences. Subscription IDs are deterministic
+/// ("alert/v2/<school>/<category>") so the desired set can be reconciled
+/// against CloudKit's on every change; the "v2" retires the first-generation
+/// IDs, whose `category ==` predicate only ever saw a class's primary tag.
 @MainActor
 @Observable
 final class ClassAlertsStore {
@@ -25,7 +30,7 @@ final class ClassAlertsStore {
         let city: String
     }
 
-    /// UCB rows (customizable, checked every 10 minutes).
+    /// UCB rows (customizable, per-category).
     static let ucbSchools: [School] = [
         School(id: "ucb_ny", name: "UCB New York", city: "New York"),
         School(id: "ucb_la", name: "UCB Los Angeles", city: "Los Angeles"),
@@ -61,10 +66,12 @@ final class ClassAlertsStore {
         ("other", "Everything Else"),
     ]
 
-    /// Categories switched on when a UCB school is first enabled — deliberately
-    /// just the core improv track. Everything else is opt-in (use "Select all"
-    /// in the detail view to take the lot).
-    static let defaultUCBCategories: Set<String> = ["improv"]
+    /// Categories switched on when a UCB school is first enabled: the core
+    /// improv track, its electives, and the marquee Featured Programs — the
+    /// last two are where one-off workshops with visiting names land, and
+    /// "Improv only" silently dropped exactly those. Everything else is opt-in
+    /// (use "Select all" in the detail view to take the lot).
+    static let defaultUCBCategories: Set<String> = ["improv", "improv_electives", "featured_programs"]
 
     // MARK: Preferences (persisted)
 
@@ -313,8 +320,12 @@ final class ClassAlertsStore {
         }
         for (school, categories) in prefs.ucb {
             for category in categories {
-                out["alert/\(school)/\(category)"] =
-                    NSPredicate(format: "school == %@ AND category == %@", school, category)
+                // CONTAINS on a list field is CloudKit's documented membership
+                // test ("favoriteColors CONTAINS 'red'"). The record also still
+                // carries a scalar `category`, but matching on it would recreate
+                // the one-tag-per-class bug this replaces.
+                out["alert/v2/\(school)/\(category)"] =
+                    NSPredicate(format: "school == %@ AND categories CONTAINS %@", school, category)
             }
         }
         return out

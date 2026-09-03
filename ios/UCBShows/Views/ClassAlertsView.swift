@@ -135,7 +135,7 @@ struct UCBAlertDetailView: View {
                 }
                 .tint(Theme.accent)
             } footer: {
-                Text("New classes are checked every 10 minutes and alert immediately. Starts with Improv — add whatever else you want below.")
+                Text("New classes are checked every 10 minutes and alert immediately. Starts with Improv, Improv Electives, and Featured Programs — add whatever else you want below.")
             }
 
             Section {
