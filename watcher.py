@@ -2,15 +2,20 @@
 records that fan out as push notifications (via each device's
 CKQuerySubscriptions — see the app's ClassAlertsStore).
 
-Two modes, run by .github/workflows/class-watch.yml:
+Two modes, run by .github/workflows/class-watch.yml — a self-perpetuating
+job that loops "run, sleep 10 min" for ~5.5 h and then dispatches its own
+successor, because GitHub delays *scheduled* runs by hours but not running
+ones. Three staggered odd-minute crons (class-watch-kick-*.yml) only restart
+the chain if it has died.
 
-  --ucb    on the workflow's schedule: one Arlo catalog pull, split into
+  --ucb    every iteration: one Arlo catalog pull, split into
            ucb_ny / ucb_la / ucb_online by LOC_* tag, categorized by CTG_* tag.
            New classes are bundled per (school, category set) — a record lists
            every category its classes carry, and a device's subscription
            matches on any one of them.
-  --all    daily: every non-UCB class source; new classes alert per school
-           as a single daily bundle (category "all").
+  --all    every non-UCB class source; new classes alert per school as one
+           bundle (category "all"). The chain passes --all-if-stale 20 so this
+           stays a roughly daily scan rather than one per iteration.
 
 State (known class ids per school) lives in state/class-watch.json on the
 `class-watch-state` branch — the workflow checks it out and commits it back.
@@ -140,6 +145,21 @@ def scan_others() -> dict[str, dict[str, dict]]:
             for c in items if c.get("id")
         }
     return out
+
+
+def others_stale(state: dict, hours: float) -> bool:
+    """True when the non-UCB schools haven't been scanned within `hours` — or
+    never have. Lets a job that runs every 10 minutes keep the other schools on
+    a daily cadence without a second workflow racing it for the state branch."""
+    stamps = [v.get("updated") for k, v in state.items()
+              if not k.startswith("ucb") and isinstance(v, dict)]
+    stamps = [t for t in stamps if t]
+    if not stamps:
+        return True
+    newest = datetime.fromisoformat(max(stamps))
+    if newest.tzinfo is None:
+        newest = newest.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - newest).total_seconds() > hours * 3600
 
 
 def load_state() -> dict:
@@ -372,16 +392,22 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ucb", action="store_true", help="scan UCB (NY/LA/Online) via Arlo")
     ap.add_argument("--all", action="store_true", help="scan every non-UCB class source")
+    ap.add_argument("--all-if-stale", type=float, metavar="HOURS",
+                    help="scan the non-UCB sources only if their state is older than HOURS")
     ap.add_argument("--test", action="store_true", help="send a test record to verify CloudKit auth")
     args = ap.parse_args()
 
     if args.test:
         return test_cloudkit()
 
-    if not (args.ucb or args.all):
-        ap.error("pass --ucb and/or --all")
+    if not (args.ucb or args.all or args.all_if_stale is not None):
+        ap.error("pass --ucb, --all, and/or --all-if-stale")
 
     state = load_state()
+    if args.all_if_stale is not None and not args.all:
+        args.all = others_stale(state, args.all_if_stale)
+        log.info("non-UCB scan %s (stale threshold %.0fh)",
+                 "due" if args.all else "skipped", args.all_if_stale)
     alerts: list[dict] = []
     if args.ucb:
         alerts += diff_and_alert(scan_ucb(), state, per_category=True)

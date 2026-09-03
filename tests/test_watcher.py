@@ -92,6 +92,32 @@ class DiffAndAlertTests(unittest.TestCase):
         self.assertEqual(state["ucb_ny"]["ids"], ["new"], "dropped classes leave state")
 
 
+class OthersStaleTests(unittest.TestCase):
+    def _state(self, hours_ago):
+        from datetime import datetime, timedelta, timezone
+        ts = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+        return {"ucb_ny": {"ids": [], "updated": ts},
+                "magnet": {"ids": [], "updated": ts},
+                "second_city": {"ids": [], "updated": ts}}
+
+    def test_never_scanned_is_stale(self):
+        self.assertTrue(watcher.others_stale({}, 20))
+        self.assertTrue(watcher.others_stale({"ucb_ny": {"ids": [], "updated": "2026-09-03T00:00:00+00:00"}}, 20),
+                        "UCB-only state has no non-UCB scan on record")
+
+    def test_recent_scan_is_not_stale(self):
+        self.assertFalse(watcher.others_stale(self._state(hours_ago=2), 20))
+
+    def test_old_scan_is_stale(self):
+        self.assertTrue(watcher.others_stale(self._state(hours_ago=25), 20))
+
+    def test_ucb_freshness_does_not_count(self):
+        state = self._state(hours_ago=30)
+        from datetime import datetime, timezone
+        state["ucb_ny"]["updated"] = datetime.now(timezone.utc).isoformat()
+        self.assertTrue(watcher.others_stale(state, 20), "a fresh UCB scan must not mask stale others")
+
+
 class ComposeTests(unittest.TestCase):
     def test_primary_drives_the_multi_class_label(self):
         a = compose("ucb_la", ["sketch_electives", "featured_programs"],

@@ -1,0 +1,38 @@
+name: Class alert watcher · kick 1
+
+# Restart-only. The watcher itself is a self-perpetuating chain
+# (class-watch.yml); this cron exists purely to bring it back if it dies.
+# Three of these run on staggered odd-minute schedules because GitHub
+# delays scheduled runs by hours on a quiet repo and :00 is the worst slot —
+# more tickets in the lottery, each one idempotent. While a chain is alive
+# this exits in seconds without dispatching anything.
+on:
+  schedule:
+    - cron: "4,24,44 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  kick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch a chain only if none is alive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Any in-flight or pending chain means nothing to do. If the API
+          # itself fails, do nothing: a spurious dispatch would only queue
+          # behind the live chain and become a redundant 5.5 h successor.
+          if ! ACTIVE=$(gh run list --workflow class-watch.yml --limit 20 --json status \
+                --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting" or .status == "pending" or .status == "requested")] | length'); then
+            echo "::warning::could not read run list; not dispatching"; exit 0
+          fi
+          if [ "$ACTIVE" != "0" ]; then
+            echo "chain alive ($ACTIVE active run(s)); nothing to do"; exit 0
+          fi
+          echo "no chain running — dispatching"
+          gh workflow run class-watch.yml -f mode=chain

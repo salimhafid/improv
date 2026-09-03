@@ -1,29 +1,42 @@
 name: Class alert watcher
 
-# UCB every 10 minutes; everything else once a day (13:03 UTC ≈ 9am ET).
-# New classes become CloudKit ClassAlert records, which fan out as pushes to
-# every device whose in-app alert toggles subscribe to them.
+# The watcher runs as a self-perpetuating chain: one job loops "scan, sleep
+# 10 min" for ~5.5 h (under the 6 h job cap), then dispatches its own
+# successor. GitHub delays *scheduled* runs by hours on a quiet repo, but a
+# running job keeps its clock — so this is the only way to get a real
+# 10-minute cadence out of Actions alone. Three staggered odd-minute crons
+# (class-watch-kick-*.yml) restart the chain if it ever dies; they never run
+# the scan themselves. New classes become CloudKit ClassAlert records, which
+# fan out as pushes to every device whose in-app alert toggles subscribe.
 on:
-  schedule:
-    - cron: "*/10 * * * *"
-    - cron: "3 13 * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: "ucb | all | both | test"
-        default: "both"
+        description: "chain (loop + self-dispatch) | ucb | all | both | test (one-shot)"
+        default: "chain"
 
+# One chain at a time. A second dispatch queues rather than cancels, and
+# GitHub collapses extra pending runs to one — so a kicker firing while a
+# chain is alive can never fork it.
 concurrency:
   group: class-watch
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: write   # state branch
+  actions: write    # dispatch the successor
+
+env:
+  # Loop budget. 330 min of iterations + setup + the final dispatch stays
+  # comfortably inside the 355-minute job timeout below.
+  CHAIN_BUDGET_MIN: "330"
+  ITERATION_SLEEP_SEC: "600"
+  ALL_IF_STALE_HOURS: "20"
 
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
 
@@ -42,30 +55,9 @@ jobs:
 
       - run: pip install -r requirements.txt cryptography
 
-      - name: Run watcher
-        env:
-          WATCH_STATE: state-branch/class-watch.json
-          CLOUDKIT_CONTAINER: iCloud.com.salimhafid.UCBShows
-          CLOUDKIT_KEY_ID: ${{ secrets.CLOUDKIT_KEY_ID }}
-          CLOUDKIT_KEY_ID_PROD: ${{ secrets.CLOUDKIT_KEY_ID_PROD }}
-          CLOUDKIT_PRIVATE_KEY: ${{ secrets.CLOUDKIT_PRIVATE_KEY }}
+      - name: Prepare state branch
         run: |
-          MODE="${{ github.event.inputs.mode }}"
-          if [ -z "$MODE" ]; then
-            if [ "${{ github.event.schedule }}" = "3 13 * * *" ]; then MODE=both; else MODE=ucb; fi
-          fi
-          if [ "$MODE" = "test" ]; then
-            python watcher.py --test
-          else
-            FLAGS=""
-            [ "$MODE" = "ucb" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --ucb"
-            [ "$MODE" = "all" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --all"
-            mkdir -p state-branch
-            python watcher.py $FLAGS
-          fi
-
-      - name: Commit state
-        run: |
+          mkdir -p state-branch
           cd state-branch
           if [ ! -d .git ]; then
             git init -b class-watch-state
@@ -73,7 +65,83 @@ jobs:
           fi
           git config user.name "class-watch-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add -A
-          git diff --cached --quiet && exit 0
-          git commit -m "Update class-watch state"
-          git push origin HEAD:class-watch-state
+
+      - name: Run watcher
+        id: run
+        env:
+          WATCH_STATE: state-branch/class-watch.json
+          CLOUDKIT_CONTAINER: iCloud.com.salimhafid.UCBShows
+          CLOUDKIT_KEY_ID: ${{ secrets.CLOUDKIT_KEY_ID }}
+          CLOUDKIT_KEY_ID_PROD: ${{ secrets.CLOUDKIT_KEY_ID_PROD }}
+          CLOUDKIT_PRIVATE_KEY: ${{ secrets.CLOUDKIT_PRIVATE_KEY }}
+          MODE: ${{ github.event.inputs.mode || 'chain' }}
+        run: |
+          set -u
+          # Commit + push the state file. Our file is the newest truth (it was
+          # just computed from the live catalog), so on a non-fast-forward we
+          # re-base our commit on top of the remote tip and push again rather
+          # than merging.
+          commit_state() {
+            ( cd state-branch
+              git add -A
+              git diff --cached --quiet && return 0
+              git commit -q -m "Update class-watch state"
+              if git push -q origin HEAD:class-watch-state; then return 0; fi
+              echo "state push rejected; re-applying on top of remote"
+              git fetch -q origin class-watch-state
+              git reset -q --soft FETCH_HEAD
+              git commit -q -m "Update class-watch state"
+              git push -q origin HEAD:class-watch-state )
+          }
+
+          case "$MODE" in
+            test)
+              python watcher.py --test
+              exit $?
+              ;;
+            ucb|all|both)
+              FLAGS=""
+              [ "$MODE" = "ucb" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --ucb"
+              [ "$MODE" = "all" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --all"
+              python watcher.py $FLAGS
+              commit_state
+              exit $?
+              ;;
+          esac
+
+          # chain: scan every ITERATION_SLEEP_SEC until the budget runs out.
+          # One failed iteration must not end the chain — log it and keep going.
+          START=$SECONDS
+          BUDGET=$(( CHAIN_BUDGET_MIN * 60 ))
+          n=0
+          while [ $(( SECONDS - START )) -lt "$BUDGET" ]; do
+            n=$(( n + 1 ))
+            echo "::group::iteration $n ($(date -u +%H:%M:%SZ), $(( (SECONDS - START) / 60 )) min in)"
+            if python watcher.py --ucb --all-if-stale "$ALL_IF_STALE_HOURS"; then
+              commit_state || echo "::warning::state commit failed on iteration $n"
+            else
+              echo "::warning::watcher failed on iteration $n (exit $?)"
+            fi
+            echo "::endgroup::"
+            # Don't sleep into the timeout: stop if the next scan wouldn't fit.
+            if [ $(( SECONDS - START + ITERATION_SLEEP_SEC + 120 )) -ge "$BUDGET" ]; then break; fi
+            sleep "$ITERATION_SLEEP_SEC"
+          done
+          echo "chain complete after $n iteration(s), $(( (SECONDS - START) / 60 )) min"
+
+      # Hand off to the successor no matter how this run ended — a crashed
+      # loop that failed to dispatch would leave alerts dead until a kicker's
+      # (throttled) cron happened to fire.
+      - name: Dispatch successor
+        if: always() && (github.event.inputs.mode == 'chain' || github.event.inputs.mode == '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in 1 2 3; do
+            if gh workflow run class-watch.yml -f mode=chain; then
+              echo "successor dispatched"; exit 0
+            fi
+            sleep $(( attempt * 20 ))
+          done
+          echo "::error::could not dispatch successor; a kicker cron will restart the chain"
+          exit 1
