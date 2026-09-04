@@ -36,7 +36,7 @@
    "annoyance/workshop-drop-in-improv-classes",
    "annoyance/workshop-improv-auditions-saturday-with-lauren-rivas"
   ],
-  "updated": "2026-09-03T17:00:43.474561+00:00"
+  "updated": "2026-09-04T13:06:38.209470+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -77,7 +77,7 @@
    "brooklyn_cc/stand-up-2-shalewa-aug-oct-26",
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-sep"
   ],
-  "updated": "2026-09-03T17:00:43.474561+00:00"
+  "updated": "2026-09-04T13:06:38.209470+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -127,13 +127,13 @@
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901",
    "io_chicago/workshop-scenework-scenework-scenework-with-joe-canale"
   ],
-  "updated": "2026-09-03T17:00:43.474561+00:00"
+  "updated": "2026-09-04T13:06:38.209470+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/clowning-fundamentals-with-ian-ornstein-668bf1f7-82ab-4e32-98a5-f1783368a920"
   ],
-  "updated": "2026-09-03T17:00:43.474561+00:00"
+  "updated": "2026-09-04T13:06:38.209470+00:00"
  },
  "magnet": {
   "ids": [
@@ -183,9 +183,11 @@
    "magnet/12029",
    "magnet/12032",
    "magnet/12033",
-   "magnet/12034"
+   "magnet/12034",
+   "magnet/12035",
+   "magnet/12036"
   ],
-  "updated": "2026-09-03T17:00:43.474561+00:00"
+  "updated": "2026-09-04T13:06:38.209470+00:00"
  },
  "second_city": {
   "ids": [
@@ -212,10 +214,8 @@
    "second_city/45982",
    "second_city/45983",
    "second_city/45984",
-   "second_city/46088",
    "second_city/46089",
    "second_city/46091",
-   "second_city/46092",
    "second_city/46122",
    "second_city/46123",
    "second_city/46125",
@@ -245,7 +245,7 @@
    "second_city/46307",
    "second_city/46328"
   ],
-  "updated": "2026-09-03T17:00:43.474561+00:00"
+  "updated": "2026-09-04T13:06:38.209470+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -316,7 +316,7 @@
    "42175",
    "42181"
   ],
-  "updated": "2026-09-04T12:56:26.219868+00:00"
+  "updated": "2026-09-04T13:06:28.218687+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -384,7 +384,7 @@
    "42126",
    "42174"
   ],
-  "updated": "2026-09-04T12:56:26.219868+00:00"
+  "updated": "2026-09-04T13:06:28.218687+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -404,13 +404,12 @@
    "42108",
    "42117"
   ],
-  "updated": "2026-09-04T12:56:26.219868+00:00"
+  "updated": "2026-09-04T13:06:28.218687+00:00"
  },
  "wgis_la": {
   "ids": [
    "wgis_la/1590",
    "wgis_la/1705",
-   "wgis_la/1706",
    "wgis_la/1775",
    "wgis_la/1777",
    "wgis_la/1778",
@@ -448,12 +447,12 @@
    "wgis_la/1850",
    "wgis_la/1851"
   ],
-  "updated": "2026-09-03T17:00:43.474561+00:00"
+  "updated": "2026-09-04T13:06:38.209470+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-09-03T17:00:43.474561+00:00"
+  "updated": "2026-09-04T13:06:38.209470+00:00"
  }
 }
