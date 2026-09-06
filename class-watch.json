@@ -36,7 +36,7 @@
    "annoyance/workshop-drop-in-improv-classes",
    "annoyance/workshop-improv-auditions-saturday-with-lauren-rivas"
   ],
-  "updated": "2026-09-05T09:12:11.929479+00:00"
+  "updated": "2026-09-06T05:17:25.385609+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -77,14 +77,13 @@
    "brooklyn_cc/stand-up-2-shalewa-aug-oct-26",
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-sep"
   ],
-  "updated": "2026-09-05T09:12:11.929479+00:00"
+  "updated": "2026-09-06T05:17:25.385609+00:00"
  },
  "io_chicago": {
   "ids": [
    "io_chicago/advanced-harold-weekend-intensive-august-7th-8th",
    "io_chicago/advanced-harold-weekend-intensive-may-22nd-23rd",
    "io_chicago/advanced-harold-weekend-intensive-october-24th-25th",
-   "io_chicago/drop-in-improv-to-sketch",
    "io_chicago/drop-in-improv-with-gretchen-eng",
    "io_chicago/fall-one-week-intensive-2026",
    "io_chicago/io-improv-advanced-harold-with-nicole-carter",
@@ -122,17 +121,16 @@
    "io_chicago/summer-one-week-intensive-august-2027",
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/teen-sketch-fall-2026",
-   "io_chicago/the-fest-vol-2-workshop-producing-panel-with-tyler-vanduvall-guests",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901",
    "io_chicago/workshop-scenework-scenework-scenework-with-joe-canale"
   ],
-  "updated": "2026-09-05T09:12:11.929479+00:00"
+  "updated": "2026-09-06T05:17:25.385609+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/clowning-fundamentals-with-ian-ornstein-668bf1f7-82ab-4e32-98a5-f1783368a920"
   ],
-  "updated": "2026-09-05T09:12:11.929479+00:00"
+  "updated": "2026-09-06T05:17:25.385609+00:00"
  },
  "magnet": {
   "ids": [
@@ -186,7 +184,7 @@
    "magnet/12035",
    "magnet/12036"
   ],
-  "updated": "2026-09-05T09:12:11.929479+00:00"
+  "updated": "2026-09-06T05:17:25.385609+00:00"
  },
  "second_city": {
   "ids": [
@@ -244,7 +242,7 @@
    "second_city/46307",
    "second_city/46328"
   ],
-  "updated": "2026-09-05T09:12:11.929479+00:00"
+  "updated": "2026-09-06T05:17:25.385609+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -318,7 +316,7 @@
    "42273",
    "42283"
   ],
-  "updated": "2026-09-06T05:07:15.511014+00:00"
+  "updated": "2026-09-06T05:17:17.412972+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -391,7 +389,7 @@
    "42230",
    "42353"
   ],
-  "updated": "2026-09-06T05:07:15.511014+00:00"
+  "updated": "2026-09-06T05:17:17.412972+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -412,7 +410,7 @@
    "42117",
    "42305"
   ],
-  "updated": "2026-09-06T05:07:15.511014+00:00"
+  "updated": "2026-09-06T05:17:17.412972+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -436,10 +434,10 @@
    "wgis_la/1817",
    "wgis_la/1818",
    "wgis_la/1820",
-   "wgis_la/1821",
    "wgis_la/1822",
    "wgis_la/1823",
    "wgis_la/1824",
+   "wgis_la/1825",
    "wgis_la/1830",
    "wgis_la/1831",
    "wgis_la/1832",
@@ -455,12 +453,12 @@
    "wgis_la/1851",
    "wgis_la/1855"
   ],
-  "updated": "2026-09-05T09:12:11.929479+00:00"
+  "updated": "2026-09-06T05:17:25.385609+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-09-05T09:12:11.929479+00:00"
+  "updated": "2026-09-06T05:17:25.385609+00:00"
  }
 }
