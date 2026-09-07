@@ -132,7 +132,7 @@ Chicago additions; refresh with the simulator recipe in CONTEXT.md
 before the next listing update.
 
 ## Build
-- Bundle ID: com.salimhafid.UCBShows · Version 1.4 · Build 23 (pbxproj
+- Bundle ID: com.salimhafid.UCBShows · Version 1.5 · Build 24, uploaded 2026-09-07 (pbxproj
   `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`, both configurations).
 - `xcodebuild -exportArchive` with `ios/ExportOptions.plist` uploads straight
   to App Store Connect (`destination = upload`); no local IPA is produced

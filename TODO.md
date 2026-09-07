@@ -1,13 +1,14 @@
 # TODO.md — open items, watchlist, and likely next steps
 
-Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-09-07 (branch
-`fix/deep-read-issues`, app at 1.4 build 23).
+Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-09-07 (fixes merged
+to main; app at 1.5 build 24, uploaded to App Store Connect and processing).
 
 ## Release (user actions in App Store Connect — web-only)
 
-- [ ] Check the state of the **1.4** train before the next archive: 1.2 and 1.3
-      closed on approval; builds 19/20 are stranded in 1.3. Anything new must
-      bump CURRENT_PROJECT_VERSION (both configs) past 23.
+- [ ] **Ship 1.5**: build 1.5 (24) was uploaded on 2026-09-07 (1.4 had closed
+      on approval). Create version 1.5 on the app's page, write What's New,
+      select build 24 once processing finishes, and Submit for Review. Anything
+      new after that must bump CURRENT_PROJECT_VERSION (both configs) past 24.
 - [ ] Confirm ASC Support URL = `https://github.com/salimhafid/improv` and
       Privacy Policy URL = `.../blob/main/PRIVACY.md` (changed after 1.1 was
       prepared; may still show old salimhafid.com values).

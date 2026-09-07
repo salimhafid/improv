@@ -19,11 +19,12 @@ key-value storage that mirrors the user's own settings, and APNs.
 
 - Repo: **github.com/salimhafid/improv** (public) — this directory.
 - App Store: bundle `com.salimhafid.UCBShows`, display name **Improv**,
-  team `8FKP6A38FJ`. v1.1 approved and live July 2026; the 1.2 and 1.3
-  trains closed on approval (2026-08-08, 2026-08-27). The project is at
-  **MARKETING_VERSION 1.4, CURRENT_PROJECT_VERSION 23** (build bumped
-  2026-09-03). Whether 1.4 (23) has been submitted is only visible in App
-  Store Connect (web-only) — check the train before archiving.
+  team `8FKP6A38FJ`. v1.1 approved and live July 2026; the 1.2, 1.3 and
+  1.4 trains closed on approval (2026-08-08, 2026-08-27, and by 2026-09-07
+  when App Store Connect showed 1.4 "Ready for Distribution"). The project
+  is at **MARKETING_VERSION 1.5, CURRENT_PROJECT_VERSION 24**; build 1.5
+  (24) was uploaded on 2026-09-07 and is processing. Creating the 1.5
+  version page and submitting it are web-only steps still to do.
 - Accounts: none of ours. The app offers an **optional UCB student sign-in**
   (ucbcomedy.com, inside a web view) for reserving free student tickets — see
   "UCB session engine" below and PRIVACY.md.
@@ -433,9 +434,9 @@ xcodebuild -exportArchive -archivePath <path>/Improv.xcarchive \
   destination `upload` (or `export` for a local .ipa — nothing local is
   produced by default), `manageAppVersionAndBuildNumber` false (the build
   number is bumped by hand; Xcode must not rewrite it at upload).
-- **Version rule**: a train closes once approved — 1.2 and 1.3 are closed
-  (builds 19 and 20 were uploaded into 1.3 and are stranded); new uploads
-  must carry MARKETING_VERSION ≥ 1.4 (currently 1.4). The upload fails at
+- **Version rule**: a train closes once approved — 1.2, 1.3 and 1.4 are
+  closed (builds 19 and 20 were uploaded into 1.3 and are stranded); new
+  uploads must carry MARKETING_VERSION ≥ 1.5 (currently 1.5). The upload fails at
   the very END of a ~15 min export with "Invalid Pre-Release Train", so
   check the train before archiving, not after. Both settings appear twice in
   the pbxproj (Debug+Release) — sed with /g.
