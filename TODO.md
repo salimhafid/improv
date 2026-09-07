@@ -1,24 +1,34 @@
 # TODO.md — open items, watchlist, and likely next steps
 
 Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-09-07 (fixes merged
-to main; app at 1.5 build 24, uploaded to App Store Connect and processing).
+to main; app 1.5 build 25 submitted for review, WAITING_FOR_REVIEW).
 
-## Release (user actions in App Store Connect — web-only)
+## Release
 
-- [ ] **Ship 1.5**: builds 1.5 (24) and 1.5 (25) were uploaded on 2026-09-07
-      (1.4 had closed on approval). Use **build 25** — it is the first build
-      with Wallet pass signing provisioned; 24 hides Add to Wallet. Create
-      version 1.5 on the app's page, write What's New, select build 25 once
-      processing finishes, and Submit for Review. Anything new after that must
-      bump CURRENT_PROJECT_VERSION (both configs) past 25.
-- [ ] Confirm ASC Support URL = `https://github.com/salimhafid/improv` and
-      Privacy Policy URL = `.../blob/main/PRIVACY.md` (changed after 1.1 was
-      prepared; may still show old salimhafid.com values).
-- [ ] App Review notes and the App Privacy answers in ASC must match the
-      updated `ios/AppStore/metadata.md` (optional UCB account, CloudKit
-      pushes, iCloud sync) — the previous notes said "no account or login".
+- [x] **Ship 1.5** — done 2026-09-07 via `tools/asc_release.py`: version 1.5
+      created, What's New + promo text set, App Review notes rewritten, build
+      **25** (the first with Wallet pass signing; 24 hides Add to Wallet)
+      attached, submitted (submission `bc15d605…`, WAITING_FOR_REVIEW).
+      Anything new after that must bump CURRENT_PROJECT_VERSION (both
+      configs) past 25.
+- [ ] **Watch the 1.5 review**: it was submitted without a demo UCB student
+      login (see below). If App Review asks for one under guideline 2.1,
+      reply in the Resolution Center with credentials rather than
+      resubmitting. Once approved, the train closes — 1.6 next.
+- [x] Support / Privacy URLs confirmed 2026-09-07: the live Support and
+      Marketing URL is `https://mabbles.org/improv/` (a working landing page,
+      deliberately kept — not the GitHub URL metadata.md used to list);
+      Privacy Policy URL is `https://github.com/salimhafid/improv/blob/main/PRIVACY.md`.
+- [x] App Review notes on 1.5 now match `ios/AppStore/metadata.md` (optional
+      UCB account, CloudKit pushes, iCloud sync); the old "no account or
+      login" text is gone.
+- [ ] App Privacy answers in ASC (web-only, no API): re-read against
+      PRIVACY.md — nothing collected by us, CloudKit subscription for class
+      alerts, iCloud KVS for settings/saved shows. Unchanged since 1.4 and
+      not re-checked this round.
 - [ ] A demo UCB student login for App Review (the reserve / QR / Wallet flow
-      is invisible without one) — placeholder in metadata.md.
+      is invisible without one). 1.5's notes state the flow needs an enrolled
+      UCB student account and that the rest of the app reviews without one.
 
 ## Watchlist (check occasionally; all fail-soft)
 

@@ -22,9 +22,11 @@ key-value storage that mirrors the user's own settings, and APNs.
   team `8FKP6A38FJ`. v1.1 approved and live July 2026; the 1.2, 1.3 and
   1.4 trains closed on approval (2026-08-08, 2026-08-27, and by 2026-09-07
   when App Store Connect showed 1.4 "Ready for Distribution"). The project
-  is at **MARKETING_VERSION 1.5, CURRENT_PROJECT_VERSION 24**; build 1.5
-  (24) was uploaded on 2026-09-07 and is processing. Creating the 1.5
-  version page and submitting it are web-only steps still to do.
+  is at **MARKETING_VERSION 1.5, CURRENT_PROJECT_VERSION 25**; builds 1.5
+  (24) and 1.5 (25) were uploaded on 2026-09-07, and **version 1.5 with
+  build 25 was submitted for review the same day** (state
+  WAITING_FOR_REVIEW) through the App Store Connect API via
+  `tools/asc_release.py`. The next app change must bump the build past 25.
 - Accounts: none of ours. The app offers an **optional UCB student sign-in**
   (ucbcomedy.com, inside a web view) for reserving free student tickets — see
   "UCB session engine" below and PRIVACY.md.
@@ -460,7 +462,16 @@ xcodebuild -exportArchive -archivePath <path>/Improv.xcarchive \
   be revoked).
 - **"Failed to Use Accounts"** on upload = Xcode's ASC session expired →
   user signs in via Xcode ▸ Settings ▸ Accounts, then retry (no rebuild).
-- App record creation / version pages / Submit are **web-only** (no API).
+- App record creation is web-only, but everything the version page does —
+  create the version, What's New, promotional text, App Review notes, build
+  selection, Submit for Review — works through the ASC API with an Admin or
+  App Manager key: `tools/asc_release.py` (see its docstring; a new version
+  inherits the previous localization, screenshots and review contact, but
+  not What's New / promo text). App Privacy answers and the age rating are
+  still edited on the web. The live listing's Support and Marketing URL is
+  `https://mabbles.org/improv/` (a landing page — the GitHub URL in
+  metadata.md was never applied); the Privacy Policy URL is
+  `https://github.com/salimhafid/improv/blob/main/PRIVACY.md`.
   Listing copy lives in ios/AppStore/metadata.md; screenshots in
   ios/screenshots/appstore{,-65,-ipad}/ (6.9" 1320×2868 native; 6.5"
   1284×2778 derived via sips resize+crop; iPad 13" 2064×2752). They predate
