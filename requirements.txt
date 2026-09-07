@@ -1,5 +1,9 @@
+# Python >= 3.9: the code uses PEP 604 unions in annotations (with
+# `from __future__ import annotations`), `dict | dict` merges (watcher.py) and
+# zoneinfo. The local .venv is 3.9; CI and the Actions runner use 3.12.
 curl_cffi>=0.7
 beautifulsoup4>=4.12
 lxml>=5.0
 python-dateutil>=2.9
 tzdata>=2024.1
+cryptography>=42      # watcher.py (class-watch alert signing)

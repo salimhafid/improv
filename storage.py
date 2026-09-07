@@ -4,10 +4,11 @@ One backend: LOCAL_STORE_DIR, plain JSON files in a directory. The GitHub
 Actions publisher runs with LOCAL_STORE_DIR=docs so the checked-out repo's
 docs/ folder is both the previous-payload cache (per-source scrape cadences
 carry across runs) and the content the raw CDN serves. With LOCAL_STORE_DIR
-unset (bare local dev), loads return None and saves return False so
-everything still runs statelessly.
+unset (bare local dev), loads return None and saves return False so the
+aggregators still run statelessly (publish_static.py treats a False save as a
+failed publish and exits 1).
 
-(An earlier object-storage backend was removed 2026-07-22 along with the
+(An earlier object-storage backend was removed 2026-08-08 along with the
 rest of that stack.)
 """
 from __future__ import annotations
@@ -44,9 +45,9 @@ def save(name: str, payload: dict) -> bool:
     if not LOCAL_DIR:
         return False
     path = os.path.join(LOCAL_DIR, name)
+    tmp = f"{path}.tmp"
     try:
         os.makedirs(LOCAL_DIR, exist_ok=True)
-        tmp = f"{path}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
         os.replace(tmp, path)
@@ -54,6 +55,10 @@ def save(name: str, payload: dict) -> bool:
         return True
     except Exception as e:  # noqa: BLE001 - cache is best-effort
         log.warning("local save failed for %s: %r", path, e)
+        try:
+            os.remove(tmp)    # a half-written .tmp must not linger in docs/
+        except OSError:
+            pass
         return False
 
 

@@ -1,7 +1,7 @@
-"""The shared per-source cadence/carry loop behind both feed aggregators.
+"""The shared per-source cadence/carry loop behind the feed aggregators.
 
-scraper.py (shows) and classes.py (classes) used to hand-roll identical loops;
-they now both call run_sources(). The contract, unchanged from the originals:
+scraper.py (shows) and classes.py (classes) both call run_sources(); talent.py
+mirrors the same contract for its groups with its own loop. The contract:
 
   - A source is scraped only when due per its interval (with a grace window so
     a slightly-early scheduler tick still counts). Sources not due carry their
@@ -33,6 +33,23 @@ def parse_dt(value) -> datetime | None:
         return None
 
 
+def _filter_carried(items, keep, today, log, label, sid) -> list[dict]:
+    """keep() over the previous payload's items, dropping (not raising on) a
+    row it cannot judge — a corrupt carried row must not abort the run, and
+    this runs before the per-source try."""
+    kept: list[dict] = []
+    dropped = 0
+    for x in items:
+        try:
+            if keep(x, today):
+                kept.append(x)
+        except Exception:  # noqa: BLE001 - malformed previous row
+            dropped += 1
+    if dropped:
+        log.warning("%s %s: dropped %d malformed carried item(s)", label, sid, dropped)
+    return kept
+
+
 def run_sources(
     sources: list[dict],
     *,
@@ -46,6 +63,7 @@ def run_sources(
     on_scraped: Callable[[dict, list[dict]], None] | None = None,
     log: logging.Logger | None = None,
     label: str = "source",
+    force: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     """Run each source when due, carrying previous items otherwise.
 
@@ -55,6 +73,8 @@ def run_sources(
     runner would drop the current night's shows from evening builds).
     on_scraped(src, items) runs after a successful scrape (e.g. detail
     enrichment) — its cost counts toward that source's try/except.
+    force=True treats every source as due (a one-run cache buster) while the
+    previous stamps stay available for carry rows' provenance.
     Returns (all_items, summary).
     """
     log = log or logging.getLogger("ucb.aggregation")
@@ -66,8 +86,8 @@ def run_sources(
         today = local_today(city, now)
         interval = intervals.get(sid, default_interval)
         last = parse_dt(prev_scraped.get(sid))
-        due = last is None or (now - last).total_seconds() >= (interval - grace)
-        carried = [x for x in previous_items.get(sid, []) if keep(x, today)]
+        due = force or last is None or (now - last).total_seconds() >= (interval - grace)
+        carried = _filter_carried(previous_items.get(sid, []), keep, today, log, label, sid)
 
         def carry(*, stale: bool, error: str | None) -> None:
             all_items.extend(carried)

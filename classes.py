@@ -42,7 +42,8 @@ def aggregate_classes(now: datetime | None = None) -> dict:
     previous = storage.load_classes() or {}
     prev_by_source: dict[str, list[dict]] = {}
     for c in previous.get("classes", []):
-        prev_by_source.setdefault(c.get("source"), []).append(c)
+        if isinstance(c, dict):    # a corrupt previous row is dropped, not fatal
+            prev_by_source.setdefault(c.get("source"), []).append(c)
     prev_scraped = {s.get("id"): s.get("scraped_at") for s in previous.get("sources", [])}
 
     all_classes, summary = run_sources(
@@ -51,9 +52,11 @@ def aggregate_classes(now: datetime | None = None) -> dict:
         default_interval=_DEFAULT_CLASS_INTERVAL, grace=_GRACE,
         keep=_is_upcoming, log=log, label="class source",
     )
-    all_classes.sort(key=lambda c: (c.get("start") or "9999-12-31", c.get("title", "")))
+    # `or ""` (not a .get default): a present-but-null title would otherwise
+    # make the tie-break compare None with str and abort the run.
+    all_classes.sort(key=lambda c: (c.get("start") or "9999-12-31", c.get("title") or ""))
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
         "count": len(all_classes),
         "sources": summary,
         "classes": all_classes,

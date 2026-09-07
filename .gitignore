@@ -3,8 +3,11 @@
 __pycache__/
 *.pyc
 
-# Secrets / local state
-.refresh_token.local
+# Local state / scratch output (never committed)
+state/
+state-branch/
+probe-out/
+docs/*.tmp
 
 # macOS
 .DS_Store
