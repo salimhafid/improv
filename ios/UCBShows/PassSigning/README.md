@@ -31,6 +31,24 @@ commit them:
 4. Put both files in this folder and rebuild. The pass type identifier and
    team id are read from the certificate itself — no other config.
 
+## Alternative: issue the certificate from the CLI (what was done 2026-09-07)
+
+No Keychain Access, no `.p12`: generate the key and CSR here, then have the
+App Store Connect API issue the certificate against the existing Pass Type
+ID. Needs an ASC API key with the **Admin** role (a Developer-role key gets
+HTTP 403 on certificate creation).
+
+    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out pass_key.pem
+    openssl req -new -key pass_key.pem -subj "/CN=Improv Pass Signing/OU=8FKP6A38FJ/O=Salim Hafid/C=US" -out /tmp/pass.csr
+    ASC_ISSUER_ID=… ASC_KEY_ID=… ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_….p8 \
+      python3 ../../../tools/asc_pass_cert.py whoami                      # lists pass type ids + certs
+    … asc_pass_cert.py create-cert <passTypeId resource id> /tmp/pass.csr pass_cert.pem
+
+The certificate Apple returns already carries `UID` = pass type id and
+`OU` = team, which is all `WalletPass.signingIdentity` reads. Verify the pair
+with `openssl x509 -in pass_cert.pem -noout -modulus | openssl md5` versus
+`openssl pkey -in pass_key.pem -pubout | openssl rsa -pubin -noout -modulus | openssl md5`.
+
 `wwdr_g4.pem` is Apple's public WWDR G4 intermediate (expires 2030) and is
 committed. Passes are signed ON DEVICE; if you ever ship this to the App
 Store, remember the key ships inside the binary — an extractor could sign

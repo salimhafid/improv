@@ -5,10 +5,12 @@ to main; app at 1.5 build 24, uploaded to App Store Connect and processing).
 
 ## Release (user actions in App Store Connect — web-only)
 
-- [ ] **Ship 1.5**: build 1.5 (24) was uploaded on 2026-09-07 (1.4 had closed
-      on approval). Create version 1.5 on the app's page, write What's New,
-      select build 24 once processing finishes, and Submit for Review. Anything
-      new after that must bump CURRENT_PROJECT_VERSION (both configs) past 24.
+- [ ] **Ship 1.5**: builds 1.5 (24) and 1.5 (25) were uploaded on 2026-09-07
+      (1.4 had closed on approval). Use **build 25** — it is the first build
+      with Wallet pass signing provisioned; 24 hides Add to Wallet. Create
+      version 1.5 on the app's page, write What's New, select build 25 once
+      processing finishes, and Submit for Review. Anything new after that must
+      bump CURRENT_PROJECT_VERSION (both configs) past 25.
 - [ ] Confirm ASC Support URL = `https://github.com/salimhafid/improv` and
       Privacy Policy URL = `.../blob/main/PRIVACY.md` (changed after 1.1 was
       prepared; may still show old salimhafid.com values).

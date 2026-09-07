@@ -446,8 +446,18 @@ xcodebuild -exportArchive -archivePath <path>/Improv.xcarchive \
   writes alerts to both CloudKit environments, so development and App Store
   builds both receive them.
 - Wallet passes need `PassSigning/pass_cert.pem` + `pass_key.pem` in the
-  tree at build time (git-ignored) — see ios/UCBShows/PassSigning/README.md
-  (the `openssl … -legacy` step needs OpenSSL 3, not macOS's LibreSSL).
+  tree at build time (git-ignored) — see ios/UCBShows/PassSigning/README.md.
+  **Provisioned 2026-09-07 on this Mac**: the key was generated locally and
+  the certificate (Pass Type ID cert `W9X9BAT6PU` for
+  `pass.com.salimhafid.UCBShows.studentid`, expires **2027-10-07**) was issued
+  through the App Store Connect API with an Admin API key
+  (`~/.appstoreconnect/private_keys/AuthKey_Z2D635L4F3.p8`, issuer
+  `69a6de7b-5ff3-47e3-e053-5b8c7c11a4d1`) using `tools/asc_pass_cert.py`.
+  Build 1.5 (25) is the first build that carries the PEMs. To renew: run the
+  same script with a fresh CSR before the expiry; a certificate created from
+  someone else's CSR is useless here (its key is not on this Mac — the
+  keyless August certificate `9Q4BX69A2Y` still sits in the account and can
+  be revoked).
 - **"Failed to Use Accounts"** on upload = Xcode's ASC session expired →
   user signs in via Xcode ▸ Settings ▸ Accounts, then retry (no rebuild).
 - App record creation / version pages / Submit are **web-only** (no API).
