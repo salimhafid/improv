@@ -91,6 +91,34 @@ class DiffAndAlertTests(unittest.TestCase):
         diff_and_alert(scanned, state, per_category=True)
         self.assertEqual(state["ucb_ny"]["ids"], ["new"], "dropped classes leave state")
 
+    def test_empty_scan_keeps_prior_state_and_alerts_nothing(self):
+        # A 200-OK-but-empty scrape (markup change, transient empty body) must
+        # not wipe the known ids — the next good scan would alert on all of them.
+        state = {"ucb_ny": {"ids": ["1", "2"], "updated": "t0"}, "magnet": {"ids": ["a"], "updated": "t0"}}
+        with self.assertLogs("ucb.watcher", level="WARNING"):
+            alerts = diff_and_alert({"ucb_ny": {}}, state, per_category=True)
+            alerts += diff_and_alert({"magnet": {}}, state, per_category=False)
+        self.assertEqual(alerts, [])
+        self.assertEqual(state["ucb_ny"], {"ids": ["1", "2"], "updated": "t0"})
+        self.assertEqual(state["magnet"], {"ids": ["a"], "updated": "t0"})
+        # ...and the following good scan alerts only on what is genuinely new.
+        alerts = diff_and_alert({"ucb_ny": dict([_ucb("A", ["improv"], "1"),
+                                                 _ucb("B", ["improv"], "2"),
+                                                 _ucb("C", ["improv"], "3")])}, state, per_category=True)
+        self.assertEqual([a["classIDs"] for a in alerts], ["3"])
+
+    def test_empty_scan_of_a_school_that_was_empty_is_fine(self):
+        state = {"ucb_la": {"ids": [], "updated": "t0"}}
+        self.assertEqual(diff_and_alert({"ucb_la": {}}, state, per_category=True), [])
+        self.assertNotEqual(state["ucb_la"]["updated"], "t0", "a legitimately empty school still advances")
+
+    def test_corrupt_state_entry_is_rebaselined(self):
+        state = {"ucb_ny": ["not", "a", "dict"]}
+        with self.assertLogs("ucb.watcher", level="WARNING"):
+            alerts = diff_and_alert({"ucb_ny": dict([_ucb("X", ["improv"], "1")])}, state, per_category=True)
+        self.assertEqual(alerts, [])
+        self.assertEqual(state["ucb_ny"]["ids"], ["1"])
+
 
 class OthersStaleTests(unittest.TestCase):
     def _state(self, hours_ago):
@@ -133,6 +161,182 @@ class ComposeTests(unittest.TestCase):
     def test_every_category_key_has_a_label(self):
         for _, key in watcher.UCB_CATEGORY_TAGS:
             self.assertIn(key, watcher.CATEGORY_LABEL)
+
+    def test_single_class_body_is_capped_like_the_list_body(self):
+        a = compose("ucb_ny", ["improv"], [{"id": "1", "title": "T" * 300, "when": "2026-11-01"}])
+        self.assertEqual(len(a["pushBody"]), 170)
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def read(self):
+        import json
+        return json.dumps(self._payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _alert(school="ucb_ny", cid="1"):
+    return compose(school, ["improv"], [{"id": cid, "title": "Improv 101", "when": ""}])
+
+
+class SendAlertsRetryTests(unittest.TestCase):
+    """CloudKit is never contacted: urlopen and _sign are patched."""
+
+    def setUp(self):
+        from unittest.mock import patch
+        p1 = patch.object(watcher, "KEY_ID", "key")
+        p2 = patch.object(watcher, "PRIVATE_KEY_PEM", "pem")
+        p3 = patch.object(watcher, "ENVIRONMENTS", ["development", "production"])
+        p4 = patch.object(watcher, "_sign", return_value={})
+        for p in (p1, p2, p3, p4):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _run(self, alerts, responder):
+        from unittest.mock import patch
+        calls = []
+
+        def urlopen(req, timeout=None):
+            env = req.full_url.split("/")[6]
+            calls.append(env)
+            return responder(env)
+        with patch.object(watcher.urllib.request, "urlopen", side_effect=urlopen):
+            return watcher.send_alerts(alerts), calls
+
+    def test_all_accepted_returns_nothing(self):
+        unsent, calls = self._run([_alert()], lambda env: _FakeResponse({"records": [{}]}))
+        self.assertEqual(unsent, [])
+        self.assertEqual(calls, ["development", "production"])
+
+    def test_failed_environment_is_returned_tagged_for_retry(self):
+        import io, urllib.error
+
+        def responder(env):
+            if env == "production":
+                raise urllib.error.HTTPError("u", 401, "auth", {}, io.BytesIO(b"bad key"))
+            return _FakeResponse({"records": [{}]})
+        unsent, _ = self._run([_alert(), _alert(cid="2")], responder)
+        self.assertEqual([a["envs"] for a in unsent], [["production"], ["production"]])
+        self.assertEqual([a["classIDs"] for a in unsent], ["1", "2"])
+
+    def test_per_record_server_error_counts_as_unsent(self):
+        def urlopen_echo(req, timeout=None):
+            # Echo the record names back, failing the last one.
+            import json
+            ops = json.loads(req.data)["operations"]
+            recs = [{"recordName": op["record"]["recordName"]} for op in ops]
+            recs[-1]["serverErrorCode"] = "BAD_REQUEST"
+            return _FakeResponse({"records": recs})
+        from unittest.mock import patch
+        with patch.object(watcher.urllib.request, "urlopen", side_effect=urlopen_echo):
+            unsent = watcher.send_alerts([_alert(), _alert(cid="2")])
+        self.assertEqual([(a["classIDs"], a["envs"]) for a in unsent],
+                         [("2", ["development", "production"])])
+
+    def test_retried_alert_only_goes_to_the_environments_it_is_owed(self):
+        parked = dict(_alert(), envs=["production"])
+        unsent, calls = self._run([parked], lambda env: _FakeResponse({"records": [{}]}))
+        self.assertEqual(calls, ["production"])
+        self.assertEqual(unsent, [])
+
+    def test_bad_key_does_not_raise_out_of_send(self):
+        from unittest.mock import patch
+        with patch.object(watcher, "_sign", side_effect=ValueError("not a PEM")):
+            unsent, calls = self._run([_alert()], lambda env: _FakeResponse({"records": [{}]}))
+        self.assertEqual(calls, [], "signing failed before any request")
+        self.assertEqual(unsent[0]["envs"], ["development", "production"])
+
+
+class MainAtLeastOnceTests(unittest.TestCase):
+    """main() with the scans and CloudKit patched: state is written after the
+    send, unsent alerts are parked in the state file and retried next run."""
+
+    def setUp(self):
+        import os, tempfile
+        from unittest.mock import patch
+        self.dir = tempfile.mkdtemp()
+        p = patch.object(watcher, "STATE_PATH", os.path.join(self.dir, "state.json"))
+        p.start(); self.addCleanup(p.stop)
+
+    def _main(self, scanned, send_result, argv=("--ucb",)):
+        from unittest.mock import patch
+        sent = []
+
+        def send(alerts):
+            sent.extend(alerts)
+            return send_result(alerts)
+        with patch.object(watcher, "scan_ucb", return_value=scanned), \
+             patch.object(watcher, "send_alerts", side_effect=send), \
+             patch.object(watcher.sys, "argv", ["watcher.py", *argv]):
+            rc = watcher.main()
+        return rc, sent, watcher.load_state()
+
+    def test_unsent_alerts_are_parked_and_exit_is_nonzero(self):
+        watcher.save_state({"ucb_ny": {"ids": ["1"]}, "ucb_la": {"ids": []}, "ucb_online": {"ids": []}})
+        scanned = {"ucb_ny": dict([_ucb("A", ["improv"], "1"), _ucb("B", ["improv"], "2")]),
+                   "ucb_la": {}, "ucb_online": {}}
+        rc, sent, state = self._main(scanned, lambda alerts: [dict(a, envs=["production"]) for a in alerts])
+        self.assertEqual(rc, 1)
+        self.assertEqual([a["classIDs"] for a in sent], ["2"])
+        self.assertEqual(state["ucb_ny"]["ids"], ["1", "2"], "state still advances")
+        self.assertEqual([a["classIDs"] for a in state[watcher.PENDING_KEY]], ["2"])
+        self.assertEqual(state[watcher.PENDING_KEY][0]["envs"], ["production"])
+        self.assertTrue(watcher.others_stale(state, 20), "a parked list is not a school stamp")
+
+        # Next iteration: nothing new, but the parked alert is retried first
+        # and, once accepted, the slot is cleared.
+        rc, sent, state = self._main(scanned, lambda alerts: [])
+        self.assertEqual(rc, 0)
+        self.assertEqual([(a["classIDs"], a.get("envs")) for a in sent], [("2", ["production"])])
+        self.assertNotIn(watcher.PENDING_KEY, state)
+
+    def test_clean_run_exits_zero_and_parks_nothing(self):
+        watcher.save_state({"ucb_ny": {"ids": []}, "ucb_la": {"ids": []}, "ucb_online": {"ids": []}})
+        rc, sent, state = self._main({"ucb_ny": dict([_ucb("A", ["improv"], "1")]), "ucb_la": {}, "ucb_online": {}},
+                                     lambda alerts: [])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(sent), 1)
+        self.assertNotIn(watcher.PENDING_KEY, state)
+
+    def test_pending_slot_tolerates_garbage(self):
+        self.assertEqual(watcher.pending_alerts({watcher.PENDING_KEY: "junk"}), [])
+        self.assertEqual(watcher.pending_alerts({watcher.PENDING_KEY: [{"x": 1}, _alert()]})[0]["school"], "ucb_ny")
+        state = {watcher.PENDING_KEY: []}
+        watcher.pending_alerts(state)
+        self.assertNotIn(watcher.PENDING_KEY, state, "the slot is consumed")
+
+
+class TestModeTests(unittest.TestCase):
+    """--test never touches the production public DB unless --test-prod is passed."""
+
+    def _envs(self, *argv):
+        from unittest.mock import patch
+        seen = []
+        with patch.object(watcher, "ENVIRONMENTS", ["development", "production"]), \
+             patch.object(watcher, "test_cloudkit", side_effect=lambda envs: seen.append(envs) or 0), \
+             patch.object(watcher.sys, "argv", ["watcher.py", *argv]):
+            self.assertEqual(watcher.main(), 0)
+        return seen[0]
+
+    def test_test_skips_production_by_default(self):
+        self.assertEqual(self._envs("--test"), ["development"])
+
+    def test_test_prod_opts_into_production(self):
+        self.assertEqual(self._envs("--test", "--test-prod"), ["development", "production"])
+
+    def test_no_environment_left_to_test_is_a_failure(self):
+        # CLOUDKIT_ENVS=production alone + --test filters everything out; that
+        # must not read as "auth OK".
+        from unittest.mock import patch
+        with patch.object(watcher, "KEY_ID", "key"), patch.object(watcher, "PRIVATE_KEY_PEM", "pem"):
+            self.assertEqual(watcher.test_cloudkit([]), 1)
 
 
 if __name__ == "__main__":

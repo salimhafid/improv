@@ -17,9 +17,11 @@ on:
 
 # One chain at a time. A second dispatch queues rather than cancels, and
 # GitHub collapses extra pending runs to one — so a kicker firing while a
-# chain is alive can never fork it.
+# chain is alive can never fork it. One-shot modes (ucb/all/both/test) get a
+# group of their own: in the chain's group they would be the older pending
+# run and be cancelled when the live chain dispatches its successor.
 concurrency:
-  group: class-watch
+  group: class-watch-${{ (github.event.inputs.mode == 'chain' || github.event.inputs.mode == '') && 'chain' || format('oneshot-{0}', github.run_id) }}
   cancel-in-progress: false
 
 permissions:
@@ -43,6 +45,7 @@ jobs:
       # Known-class state lives on its own branch so 10-minute commits never
       # touch main's history.
       - uses: actions/checkout@v4
+        id: state
         with:
           ref: class-watch-state
           path: state-branch
@@ -53,10 +56,23 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - run: pip install -r requirements.txt cryptography
+      - run: pip install -r requirements.txt
 
       - name: Prepare state branch
         run: |
+          if [ "${{ steps.state.outcome }}" != "success" ]; then
+            # Only a positive "no such branch" (ls-remote exit 2) may start
+            # from scratch. A branch that exists — or a remote we can't reach
+            # — means the checkout failure was transient: an empty state would
+            # baseline every school (swallowing that iteration's new classes)
+            # and then push that over the real state.
+            rc=0
+            git ls-remote --exit-code --heads origin class-watch-state >/dev/null || rc=$?
+            if [ "$rc" != "2" ]; then
+              echo "::error::class-watch-state checkout failed (ls-remote exit $rc); not baselining"
+              exit 1
+            fi
+          fi
           mkdir -p state-branch
           cd state-branch
           if [ ! -d .git ]; then
@@ -67,7 +83,6 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
 
       - name: Run watcher
-        id: run
         env:
           WATCH_STATE: state-branch/class-watch.json
           CLOUDKIT_CONTAINER: iCloud.com.salimhafid.UCBShows
@@ -95,6 +110,8 @@ jobs:
           }
 
           case "$MODE" in
+            chain)
+              ;;
             test)
               python watcher.py --test
               exit $?
@@ -103,25 +120,32 @@ jobs:
               FLAGS=""
               [ "$MODE" = "ucb" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --ucb"
               [ "$MODE" = "all" ] || [ "$MODE" = "both" ] && FLAGS="$FLAGS --all"
-              python watcher.py $FLAGS
-              commit_state
-              exit $?
+              # A non-zero exit means alerts were parked for retry; the state
+              # file is still the newest truth, so commit it either way.
+              rc=0
+              python watcher.py $FLAGS || rc=$?
+              commit_state || rc=1
+              exit $rc
+              ;;
+            *)
+              echo "::error::unknown mode '$MODE' (chain | ucb | all | both | test)"
+              exit 1
               ;;
           esac
 
           # chain: scan every ITERATION_SLEEP_SEC until the budget runs out.
           # One failed iteration must not end the chain — log it and keep going.
+          # State is committed even when the watcher exits non-zero (alerts
+          # parked for retry live in the state file).
           START=$SECONDS
           BUDGET=$(( CHAIN_BUDGET_MIN * 60 ))
           n=0
           while [ $(( SECONDS - START )) -lt "$BUDGET" ]; do
             n=$(( n + 1 ))
             echo "::group::iteration $n ($(date -u +%H:%M:%SZ), $(( (SECONDS - START) / 60 )) min in)"
-            if python watcher.py --ucb --all-if-stale "$ALL_IF_STALE_HOURS"; then
-              commit_state || echo "::warning::state commit failed on iteration $n"
-            else
-              echo "::warning::watcher failed on iteration $n (exit $?)"
-            fi
+            python watcher.py --ucb --all-if-stale "$ALL_IF_STALE_HOURS" \
+              || echo "::warning::watcher failed on iteration $n (exit $?)"
+            commit_state || echo "::warning::state commit failed on iteration $n"
             echo "::endgroup::"
             # Don't sleep into the timeout: stop if the next scan wouldn't fit.
             if [ $(( SECONDS - START + ITERATION_SLEEP_SEC + 120 )) -ge "$BUDGET" ]; then break; fi

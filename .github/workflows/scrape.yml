@@ -2,7 +2,13 @@ name: Scrape feeds
 
 on:
   schedule:
-    - cron: "17 */3 * * *"   # every 3h (offset minute; matches the tightest source cadence)
+    # Hourly at an odd minute. The tightest source cadence is 3 h, but GitHub
+    # starves a 3-hourly cron on a quiet repo (runs land hours late or are
+    # skipped); an hourly tick gets one through often enough. Extra runs are
+    # cheap: the aggregator's own per-source cadence carries every source
+    # that isn't due, so a not-due run finishes in ~1 minute and scrapes
+    # nothing.
+    - cron: "23 * * * *"
   workflow_dispatch:
     inputs:
       probe:
