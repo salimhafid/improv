@@ -16,11 +16,14 @@ enum AppSupport {
         return dir.appendingPathComponent(name)
     }
 
-    /// Park an unreadable file aside (`<name>.bak.json`) instead of losing it,
-    /// so a corrupt cache can't be silently overwritten on the next save.
-    static func moveAside(_ url: URL) {
-        let bak = url.deletingPathExtension().appendingPathExtension("bak.json")
-        try? FileManager.default.removeItem(at: bak)
+    /// Park an unreadable file aside (`<name>.bak-<unix seconds>.json`) instead
+    /// of losing it, so a corrupt cache can't be silently overwritten on the
+    /// next save. Timestamped, so a second corruption doesn't destroy the first
+    /// backup either.
+    static func moveAside(_ url: URL, now: Date = Date()) {
+        let name = url.deletingPathExtension().lastPathComponent
+        let bak = url.deletingLastPathComponent()
+            .appendingPathComponent("\(name).bak-\(Int(now.timeIntervalSince1970)).json")
         try? FileManager.default.moveItem(at: url, to: bak)
     }
 }

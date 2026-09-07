@@ -6,15 +6,17 @@ import UIKit
 import Vision
 @_spi(CMS) import X509
 
-/// Builds a real Apple Wallet `.pkpass` for the UCB Student ID, entirely
-/// on-device (the app has no server):
+/// Builds a real Apple Wallet `.pkpass` for any ticket the app holds — the
+/// UCB Student ID or a reserved show ticket — entirely on-device (the app has
+/// no server):
 ///
-///   1. The QR *payload string* is decoded from our rasterized Student ID QR
-///      with Vision — Wallet re-renders its own barcode from the payload, so
-///      the scanner reads the same code UCB issued.
-///   2. `pass.json` carries `locations` for both UCB theaters, which is what
-///      makes Wallet surface the pass on the lock screen near the venue —
-///      no geofencing, no app involvement, works even if the app is deleted.
+///   1. The QR *payload string* is decoded from our rasterized QR with Vision
+///      — Wallet re-renders its own barcode from the payload, so the scanner
+///      reads the same code UCB issued.
+///   2. `pass.json` carries `locations` (both UCB theaters for the Student ID,
+///      the show's own venue for a ticket), which is what makes Wallet surface
+///      the pass on the lock screen near the venue — no geofencing, no app
+///      involvement, works even if the app is deleted.
 ///   3. The manifest is CMS-signed with a Pass Type ID certificate loaded
 ///      from the app bundle's `PassSigning/` folder (pass_cert.pem +
 ///      pass_key.pem, git-ignored; wwdr_g4.pem is Apple's public intermediate).
@@ -33,7 +35,11 @@ enum WalletPass {
     }
 
     /// The signing identity from the bundle, if the user has provisioned one.
-    static func signingIdentity() -> SigningIdentity? {
+    /// Loaded once: this is three bundle reads and three X.509/PKCS#8 parses,
+    /// and `isAvailable` is consulted on every `AddToWalletButton` body.
+    static let signingIdentity: SigningIdentity? = loadSigningIdentity()
+
+    private static func loadSigningIdentity() -> SigningIdentity? {
         guard
             let certPEM = bundledPEM("pass_cert"),
             let keyPEM = bundledPEM("pass_key"),
@@ -67,7 +73,7 @@ enum WalletPass {
     }
 
     /// True when a signing identity is provisioned — gates the UI.
-    @MainActor static var isAvailable: Bool { signingIdentity() != nil }
+    @MainActor static var isAvailable: Bool { signingIdentity != nil }
 
     // MARK: Build
 
@@ -84,15 +90,39 @@ enum WalletPass {
     }
 
     /// Build the signed .pkpass for any ticket the app holds: the standby
-    /// Student ID (generic pass, near-venue relevance for both theaters) or a
+    /// Student ID (store card, near-venue relevance for both theaters) or a
     /// reserved show ticket (event ticket, relevant at ITS venue and showtime).
+    ///
+    /// Only the main-actor pieces stay here (the cached QR render, the PassKit
+    /// hand-off); the CPU work — Vision decode, a dozen PNG encodes, SHA-1,
+    /// the RSA CMS signature, the zip — runs detached so the button's dimmed
+    /// state isn't a frozen one.
     @MainActor
     static func pass(for ticket: Ticket) async throws -> PKPass {
-        guard let identity = signingIdentity() else { throw BuildError.noSigningIdentity }
-        guard let image = await QRRender.cachedImage(svg: ticket.qrSVG),
-              let payload = decodeQRPayload(image) else { throw BuildError.qrUndecodable }
-
+        guard let identity = signingIdentity else { throw BuildError.noSigningIdentity }
+        guard let image = await QRRender.cachedImage(svg: ticket.qrSVG) else { throw BuildError.qrUndecodable }
         let poster = ticket.kind == .reserved ? await fetchPoster(ticket.posterURL) : nil
+
+        let zipped = try await Task.detached(priority: .userInitiated) {
+            try build(ticket: ticket, identity: identity, qrImage: image, poster: poster)
+        }.value
+        #if DEBUG
+        if DebugFixtures.fakeTickets {
+            // Dump for out-of-process verification (unzip -t / openssl smime).
+            let dump = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("debug_pass.pkpass")
+            try? zipped.write(to: dump)
+        }
+        #endif
+        return try PKPass(data: zipped)
+    }
+
+    /// The whole archive, from the rendered QR to the signed zip. Touches no
+    /// UI (UIGraphicsImageRenderer and string drawing are thread-safe), so it
+    /// is safe off the main actor.
+    nonisolated private static func build(ticket: Ticket, identity: SigningIdentity,
+                                          qrImage: UIImage, poster: UIImage?) throws -> Data {
+        guard let payload = decodeQRPayload(qrImage) else { throw BuildError.qrUndecodable }
         let passJSON = ticket.kind == .studentID
             ? studentIDJSON(identity: identity, ticket: ticket, payload: payload)
             : reservedJSON(identity: identity, ticket: ticket, payload: payload,
@@ -141,16 +171,7 @@ enum WalletPass {
         ) else { throw BuildError.signingFailed }
         files["signature"] = Data(signature)
 
-        let zipped = ZipWriter.archive(files: files)
-        #if DEBUG
-        if DebugFixtures.fakeTickets {
-            // Dump for out-of-process verification (unzip -t / openssl smime).
-            let dump = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("debug_pass.pkpass")
-            try? zipped.write(to: dump)
-        }
-        #endif
-        return try PKPass(data: zipped)
+        return ZipWriter.archive(files: files)
     }
 
     /// Shared card chrome: near-black, white text, UCB-red labels.
@@ -209,7 +230,12 @@ enum WalletPass {
             pass["maxDistance"] = 300
         }
         if let start = ticket.startDate {
+            // Pinned like `DateUtils.make`: Wallet wants ISO 8601, and the
+            // device's own locale can bring non-Latin digits or a Buddhist
+            // calendar (th_TH → year 2569) into a plain `DateFormatter`.
             let iso = DateFormatter()
+            iso.locale = Locale(identifier: "en_US_POSIX")
+            iso.calendar = Calendar(identifier: .gregorian)
             iso.dateFormat = "yyyy-MM-dd'T'HH:mm:ssxxxxx"
             iso.timeZone = ticket.cityTimeZone
             pass["relevantDate"] = iso.string(from: start)

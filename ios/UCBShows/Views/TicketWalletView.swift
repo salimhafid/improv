@@ -16,6 +16,10 @@ struct TicketWalletView: View {
     /// values: Tickets, Shows, and TalentRoutes from a pushed show's cast chips.
     @State private var path = NavigationPath()
     @State private var showSignIn = false
+    /// `signOut()` waits on the engine's serial lock — up to 20 s behind an
+    /// in-flight sync — and `isSignedIn` stays true meanwhile, so without this
+    /// every extra tap queued another sign-out.
+    @State private var signingOut = false
     @Namespace private var zoom
 
     var body: some View {
@@ -45,6 +49,12 @@ struct TicketWalletView: View {
                 // Retry the deep link once the target ticket lands in the store.
                 .onChange(of: tickets.reserved) { _, _ in openDeepLink(app.openTicketID) }
                 .onChange(of: tickets.studentID) { _, _ in openDeepLink(app.openTicketID) }
+                // A heart-reminder tap: open that show from the I'm-Going list.
+                // `onAppear` covers a cold launch where the id was set before
+                // this tab was ever built; the retry covers an iCloud reload.
+                .onAppear { openShowDeepLink(app.openShowID) }
+                .onChange(of: app.openShowID) { _, id in openShowDeepLink(id) }
+                .onChange(of: going.shows) { _, _ in openShowDeepLink(app.openShowID) }
                 // A TabView keeps unselected children alive, so `.task` above
                 // doesn't re-run when the user finally lands here — this is
                 // what makes arriving on the tab the notifiable moment.
@@ -79,11 +89,15 @@ struct TicketWalletView: View {
 
                 if account.isSignedIn {
                     Button("Sign out of UCB", role: .destructive) {
+                        guard !signingOut else { return }
+                        signingOut = true
                         Task {
                             await account.signOut()
-                            tickets.clearLocal()   // disarm geofences + cancel reminders
+                            tickets.clearLocal()   // cancel reminders
+                            signingOut = false
                         }
                     }
+                    .disabled(signingOut)
                     .font(.subheadline)
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, Theme.Space.gutter)
@@ -111,7 +125,7 @@ struct TicketWalletView: View {
             if let sid = tickets.studentID {
                 section("Student ID", busy: account.isRestoring) {
                     NavigationLink(value: sid) { StudentIDCard(ticket: sid, freeRemaining: account.freeRemaining,
-                                                  isRestoring: account.isRestoring) }
+                                                  isConfirmed: account.isConfirmed) }
                         .buttonStyle(.plain)
                 }
             }
@@ -229,8 +243,22 @@ struct TicketWalletView: View {
             if !account.hasSession { app.openTicketID = nil }
             return
         }
-        if path.isEmpty { path.append(ticket) }
+        // The reminder promised the QR, so it opens whatever the stack was
+        // showing — a pushed show from I'm Going, another ticket. Pop to root
+        // and push in one assignment (a no-op if this ticket is already the
+        // whole stack); the id is consumed only once it has actually opened.
+        path = NavigationPath([ticket])
         app.openTicketID = nil
+    }
+
+    /// Same shape as `openDeepLink`, for a heart reminder (`AppState.openShowID`,
+    /// set by the app when the notification is tapped): the hearted show lives
+    /// in `GoingStore`, so resolve it there, pop to root and push it, and
+    /// consume the id only once it has actually opened.
+    private func openShowDeepLink(_ id: String?) {
+        guard let id, let show = going.shows.first(where: { $0.id == id }) else { return }
+        path = NavigationPath([show])
+        app.openShowID = nil
     }
 
     /// Ask for notification permission only while the wallet is genuinely on
@@ -252,7 +280,8 @@ struct TicketWalletView: View {
 private struct StudentIDCard: View {
     let ticket: Ticket
     let freeRemaining: Int
-    var isRestoring = false
+    /// A real signed-in read landed this session (`UCBAccountStore.isConfirmed`).
+    var isConfirmed = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -269,8 +298,10 @@ private struct StudentIDCard: View {
                     }
                     // `freeRemaining` isn't cached, so it reads 0 until the
                     // account lands — and "0 free shows left" is a worse lie
-                    // than saying nothing while we check.
-                    if !isRestoring {
+                    // than saying nothing while we check. Gated on a read that
+                    // actually landed, not on "no longer checking": launch and
+                    // sign-in both force `.signedIn` on an inconclusive read.
+                    if isConfirmed {
                         Text("\(freeRemaining) free show\(freeRemaining == 1 ? "" : "s") left this week")
                             .font(.caption).foregroundStyle(.tertiary)
                     }

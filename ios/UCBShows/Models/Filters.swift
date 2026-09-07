@@ -24,6 +24,25 @@ struct Filters: Equatable, Codable {
     var freeOnly = false
     var dateWindow: DateWindow = .all
 
+    init() {}
+
+    /// Persisted (UserDefaults, mirrored to every device via iCloud KVS), so
+    /// decoding is field-lenient: a key this build doesn't know, or a
+    /// `DateWindow` case it no longer has, resets that field alone rather than
+    /// throwing the whole saved filter set away.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        venue = try? c.decodeIfPresent(String.self, forKey: .venue)
+        comedyTypes = (try? c.decodeIfPresent(Set<String>.self, forKey: .comedyTypes)) ?? []
+        livestreamOnly = (try? c.decodeIfPresent(Bool.self, forKey: .livestreamOnly)) ?? false
+        freeOnly = (try? c.decodeIfPresent(Bool.self, forKey: .freeOnly)) ?? false
+        dateWindow = (try? c.decodeIfPresent(DateWindow.self, forKey: .dateWindow)) ?? .all
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case venue, comedyTypes, livestreamOnly, freeOnly, dateWindow
+    }
+
     var isActive: Bool {
         venue != nil || !comedyTypes.isEmpty
             || livestreamOnly || freeOnly || dateWindow != .all

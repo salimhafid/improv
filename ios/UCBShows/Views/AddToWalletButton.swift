@@ -2,27 +2,39 @@ import PassKit
 import SwiftUI
 
 /// The system "Add to Apple Wallet" button for any held ticket. Renders only
-/// when a pass-signing identity is bundled (see WalletPass); tapping builds
-/// the signed .pkpass on-device and presents Wallet's add sheet. Once added,
-/// Wallet itself surfaces the pass on the lock screen near the theaters —
-/// the app doesn't need to be running (or even installed) for that.
+/// when a pass-signing identity is bundled (see WalletPass), this device can
+/// add passes at all (Wallet is absent on iPad), and the ticket has a QR to
+/// build from — an unsynced ticket would only ever fail with "couldn't read
+/// the QR". Tapping builds the signed .pkpass on-device and presents Wallet's
+/// add sheet. Once added, Wallet itself surfaces the pass on the lock screen
+/// near the theaters — the app doesn't need to be running (or even installed)
+/// for that.
 struct AddToWalletButton: View {
     let ticket: Ticket
 
-    @State private var pass: PKPass?
+    @State private var addSheet: AddSheetItem?
     @State private var building = false
     @State private var error: String?
 
     var body: some View {
-        if WalletPass.isAvailable {
+        if WalletPass.isAvailable, PKAddPassesViewController.canAddPasses(), !ticket.qrSVG.isEmpty {
             VStack(spacing: 8) {
                 PassKitAddButton {
                     guard !building else { return }
                     building = true
                     error = nil
                     Task {
-                        do { pass = try await WalletPass.pass(for: ticket) }
-                        catch { self.error = error.localizedDescription }
+                        do {
+                            let pass = try await WalletPass.pass(for: ticket)
+                            // Failable: PassKit refuses a pass it can't present
+                            // (unsupported device, malformed). Say so rather
+                            // than sliding up an empty sheet.
+                            if let controller = PKAddPassesViewController(pass: pass) {
+                                addSheet = AddSheetItem(controller: controller)
+                            } else {
+                                self.error = "Wallet couldn’t open this pass on this device."
+                            }
+                        } catch { self.error = error.localizedDescription }
                         building = false
                     }
                 }
@@ -45,16 +57,19 @@ struct AddToWalletButton: View {
                         .multilineTextAlignment(.center)
                 }
             }
-            .sheet(item: $pass) { pass in
-                AddPassesSheet(pass: pass)
+            .sheet(item: $addSheet) { item in
+                AddPassesSheet(controller: item.controller)
                     .ignoresSafeArea()
             }
         }
     }
 }
 
-extension PKPass: @retroactive Identifiable {
-    public var id: String { serialNumber }
+/// A built, presentable add-pass controller — one per tap, so `.sheet(item:)`
+/// re-presents even for the same pass.
+private struct AddSheetItem: Identifiable {
+    let id = UUID()
+    let controller: PKAddPassesViewController
 }
 
 /// UIKit's black-pill Wallet button (App Store guidelines require the system
@@ -79,13 +94,11 @@ private struct PassKitAddButton: UIViewRepresentable {
     }
 }
 
-/// Wallet's own add-pass review sheet.
+/// Wallet's own add-pass review sheet, built (and checked) at tap time.
 private struct AddPassesSheet: UIViewControllerRepresentable {
-    let pass: PKPass
+    let controller: PKAddPassesViewController
 
-    func makeUIViewController(context: Context) -> UIViewController {
-        PKAddPassesViewController(pass: pass) ?? UIViewController()
-    }
+    func makeUIViewController(context: Context) -> PKAddPassesViewController { controller }
 
-    func updateUIViewController(_ controller: UIViewController, context: Context) {}
+    func updateUIViewController(_ controller: PKAddPassesViewController, context: Context) {}
 }

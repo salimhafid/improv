@@ -25,8 +25,8 @@ struct ClassesPayload: Decodable {
 }
 
 /// A single class / workshop offering. Decoding is defensive: any field can be
-/// missing or empty in the feed, so all are optional-with-default and never abort
-/// decoding.
+/// missing, empty or wrong-typed in the feed, so all are optional-with-default
+/// and never abort decoding.
 struct ClassItem: Decodable, Identifiable, Hashable {
     let rawID: String
     let title: String
@@ -78,20 +78,22 @@ struct ClassItem: Decodable, Identifiable, Hashable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        rawID = (try c.decodeIfPresent(String.self, forKey: .rawID)) ?? ""
-        title = (try c.decodeIfPresent(String.self, forKey: .title)) ?? "Untitled class"
-        urlString = Self.nonEmpty(try c.decodeIfPresent(String.self, forKey: .urlString))
-        instructor = (try c.decodeIfPresent(String.self, forKey: .instructor)) ?? ""
-        schedule = (try c.decodeIfPresent(String.self, forKey: .schedule)) ?? ""
-        start = Self.nonEmpty(try c.decodeIfPresent(String.self, forKey: .start))
-        price = (try c.decodeIfPresent(String.self, forKey: .price)) ?? ""
-        level = (try c.decodeIfPresent(String.self, forKey: .level)) ?? ""
-        imageString = Self.nonEmpty(try c.decodeIfPresent(String.self, forKey: .imageString))
-        classDescription = (try c.decodeIfPresent(String.self, forKey: .classDescription)) ?? ""
-        isFull = (try c.decodeIfPresent(Bool.self, forKey: .isFull)) ?? false
-        source = (try c.decodeIfPresent(String.self, forKey: .source)) ?? ""
-        org = (try c.decodeIfPresent(String.self, forKey: .org)) ?? ""
-        city = (try c.decodeIfPresent(String.self, forKey: .city)) ?? ""
+        // `try?` throughout: a wrong-typed value drops that field to its
+        // default, never the whole row (the payload's `Lossy` would discard it).
+        rawID = (try? c.decodeIfPresent(String.self, forKey: .rawID)) ?? ""
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? "Untitled class"
+        urlString = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .urlString))
+        instructor = (try? c.decodeIfPresent(String.self, forKey: .instructor)) ?? ""
+        schedule = (try? c.decodeIfPresent(String.self, forKey: .schedule)) ?? ""
+        start = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .start))
+        price = (try? c.decodeIfPresent(String.self, forKey: .price)) ?? ""
+        level = (try? c.decodeIfPresent(String.self, forKey: .level)) ?? ""
+        imageString = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .imageString))
+        classDescription = (try? c.decodeIfPresent(String.self, forKey: .classDescription)) ?? ""
+        isFull = (try? c.decodeIfPresent(Bool.self, forKey: .isFull)) ?? false
+        source = (try? c.decodeIfPresent(String.self, forKey: .source)) ?? ""
+        org = (try? c.decodeIfPresent(String.self, forKey: .org)) ?? ""
+        city = (try? c.decodeIfPresent(String.self, forKey: .city)) ?? ""
 
         let tz = City(rawValue: city)?.timeZone ?? .newYork
         startDate = start.flatMap { DateUtils.parse($0, in: tz) }
@@ -112,21 +114,40 @@ struct ClassItem: Decodable, Identifiable, Hashable {
     ]
 
     static func classifySubject(level: String, title: String) -> String {
-        let hay = (level + " " + title).lowercased()
+        // Whole words only: as a substring test "jam" matched "James" and filed
+        // iO's Level 4/5 core classes under Workshops. Hyphens split like
+        // spaces, so "stand-up" / "stand up" / "drop-in" are one keyword each;
+        // a keyword ending in "*" is a stem ("clowning", "storytellers").
+        let words = (level + " " + title).lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
         let rules: [(String, [String])] = [
             ("Teens & Youth", ["teen", "youth", "kids", "young"]),
             ("Musical Improv", ["musical"]),
             ("Sketch & Writing", ["sketch", "writing", "writer"]),
-            ("Acting & Character", ["character", "acting", "on-camera", "on camera"]),
-            ("Stand-Up", ["stand-up", "standup", "stand up"]),
-            ("Clowning", ["clown"]),
-            ("Storytelling", ["storytell"]),
-            ("Workshops & Drop-Ins", ["workshop", "drop-in", "drop in", "jam", "elective", "intensive"]),
+            ("Acting & Character", ["character", "acting", "on camera"]),
+            ("Stand-Up", ["stand up", "standup"]),
+            ("Clowning", ["clown*"]),
+            ("Storytelling", ["storytell*"]),
+            ("Workshops & Drop-Ins", ["workshop", "drop in", "jam", "elective", "intensive"]),
         ]
-        for (bucket, keywords) in rules where keywords.contains(where: hay.contains) {
+        for (bucket, keywords) in rules where keywords.contains(where: { hasKeyword(words, $0) }) {
             return bucket
         }
         return "Improv"
+    }
+
+    /// Does the word list contain the keyword as consecutive whole words? A
+    /// plural "s" still counts; a trailing "*" matches any word the stem begins.
+    private static func hasKeyword(_ words: [String], _ keyword: String) -> Bool {
+        let parts = keyword.split(separator: " ").map(String.init)
+        guard !parts.isEmpty, words.count >= parts.count else { return false }
+        return (0...(words.count - parts.count)).contains { offset in
+            zip(parts, words[offset...]).allSatisfy { part, word in
+                if part.hasSuffix("*") { return word.hasPrefix(part.dropLast()) }
+                return word == part || word == part + "s"
+            }
+        }
     }
 
     private static func nonEmpty(_ s: String?) -> String? {

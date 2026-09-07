@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Navigation routes for the talent flow, pushed from a UCB NY show's cast
-/// section (and from directory rows).
+/// Navigation routes for the talent flow, pushed from a UCB (NY or LA) show's
+/// cast section (and from directory rows).
 enum TalentRoute: Hashable {
     case person(TalentPerson)
     case directory(initialSearch: String)
@@ -17,7 +17,6 @@ struct TalentBioView: View {
 
     @Environment(ShowsStore.self) private var shows
     @State private var webLink: WebLink?
-    @Namespace private var zoom
 
     var body: some View {
         ScrollView {
@@ -83,18 +82,18 @@ struct TalentBioView: View {
 
     @ViewBuilder
     private var upcomingShows: some View {
-        let upcoming = matchingShows
+        let upcoming = matchingShows.prefix(8)
         if !upcoming.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Label("Upcoming Shows", systemImage: "calendar")
                     .font(.headline)
                     .padding(.bottom, 4)
-                ForEach(upcoming.prefix(8)) { show in
+                ForEach(upcoming) { show in
                     NavigationLink(value: show) {
                         ShowRow(show: show)
                     }
                     .buttonStyle(.plain)
-                    if show.id != upcoming.prefix(8).last?.id {
+                    if show.id != upcoming.last?.id {
                         Divider().padding(.leading, 104)
                     }
                 }
@@ -149,8 +148,8 @@ struct TalentBioView: View {
 
 // MARK: - Directory
 
-/// The searchable UCB talent directory (NY performers, DCM talent, teachers),
-/// reached from a show's cast section.
+/// The searchable UCB talent directory (NY and LA performers, DCM talent,
+/// teachers), reached from a show's cast section.
 struct TalentDirectoryView: View {
     var initialSearch = ""
 
@@ -158,6 +157,7 @@ struct TalentDirectoryView: View {
     @State private var query = ""
     @State private var group: String?
     @State private var appliedInitialSearch = false
+    @State private var retrying = false
 
     private let filters: [(label: String, tag: String?)] = [
         ("All", nil), ("New York", "ny"), ("Los Angeles", "la"),
@@ -167,7 +167,12 @@ struct TalentDirectoryView: View {
         Group {
             let people = talent.people(matching: query, group: group)
             if !talent.loaded {
-                ContentUnavailableView("Loading Talent…", systemImage: "person.3")
+                // Nothing on hand: still loading, or the first fetch failed
+                // with no cached directory to fall back on.
+                switch talent.phase {
+                case .failed(let message): errorState(message)
+                default: ContentUnavailableView("Loading Talent…", systemImage: "person.3")
+                }
             } else if people.isEmpty {
                 ContentUnavailableView.search(text: query)
             } else {
@@ -179,10 +184,11 @@ struct TalentDirectoryView: View {
                 .listStyle(.plain)
             }
         }
+        .refreshable { await talent.refresh() }
         .navigationTitle("UCB Talent")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search performers & teachers")
-        .safeAreaInset(edge: .top) { filterBar }
+        .safeAreaInset(edge: .top) { topBar }
         .onAppear {
             // Apply the pre-seeded search exactly once — re-applying whenever
             // the field is empty would refill a search the user just cleared
@@ -191,6 +197,46 @@ struct TalentDirectoryView: View {
                 appliedInitialSearch = true
                 query = initialSearch
             }
+        }
+    }
+
+    /// The city chips, plus the saved-data hint when a refresh failed with a
+    /// cached directory still on hand.
+    private var topBar: some View {
+        VStack(spacing: 0) {
+            filterBar
+            if talent.phase == .offline {
+                OfflineBanner(updatedLabel: nil, noun: "talent")
+                    .padding(.bottom, 8)
+                    .background(.bar)
+            }
+        }
+    }
+
+    private func errorState(_ message: String) -> some View {
+        ContentUnavailableView {
+            Label("Can’t Load Talent", systemImage: "wifi.exclamationmark")
+        } description: {
+            Text(message)
+        } actions: {
+            // `refresh()` leaves the phase at `.failed` until it resolves, so
+            // the button carries its own in-progress state (as the Shows and
+            // Classes tabs do).
+            Button {
+                retrying = true
+                Task {
+                    await talent.refresh()
+                    retrying = false
+                }
+            } label: {
+                if retrying {
+                    ProgressView().frame(minWidth: 72)
+                } else {
+                    Text("Try Again").frame(minWidth: 72)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(retrying)
         }
     }
 

@@ -77,10 +77,15 @@ final class GoingStore {
         }
         // Quietly drop shows that are long over.
         let cutoff = Date().addingTimeInterval(-Self.expiryGrace)
+        let previous = ids
         shows = saved.filter { ($0.startDate ?? .distantFuture) > cutoff }
         ids = Set(shows.map(\.id))
         sort()
         if shows.count != saved.count { save() }
+        // A show un-hearted on another device arrives here as an absence:
+        // `armReminders` only walks the new list, so its pending reminder
+        // would otherwise still fire on this one.
+        cancelReminders(Array(previous.subtracting(ids)))
         armReminders()
     }
 
@@ -123,7 +128,7 @@ final class GoingStore {
     /// works — there's just no reminder.
     private func scheduleReminder(for show: Show, ask: Bool = false) {
         guard let start = show.startDate,
-              let fireDate = ReminderPlan.fireDate(forStart: start) else { return }
+              ReminderPlan.fireDate(forStart: start) != nil else { return }
         // One reminder per show: when the user holds a ticket to this one,
         // `TicketStore` owns the reminder (tapping it opens the QR at the
         // door). A fresh heart still asks for permission in that case — the
@@ -138,10 +143,9 @@ final class GoingStore {
         if whereAt.isEmpty { whereAt = show.sourceLabel }
         content.body = "Starts at \(show.timeLabel) · \(whereAt)"
         content.sound = .default
-
-        let interval = fireDate.timeIntervalSinceNow
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
-        let request = UNNotificationRequest(identifier: show.id, content: content, trigger: trigger)
+        // Routed by `NotificationRouter`: a tap opens the show in the Tickets
+        // tab's I'm-Going list rather than merely foregrounding the app.
+        content.userInfo = ["showID": show.id]
 
         Task {
             if ask, await NotificationAuth.ensure() == false { return }
@@ -150,12 +154,23 @@ final class GoingStore {
             // ticket to land, and adding this request afterwards would post a
             // second banner for a show `TicketStore` is already reminding about.
             guard !coverage.covers(showID: show.id, title: show.title, start: show.startDate) else { return }
+            // Measure the interval only now, for the same reason: computed
+            // before the permission alert it would be late by however long
+            // the user sat on it. The moment may also have passed meanwhile.
+            guard let fireDate = ReminderPlan.fireDate(forStart: start) else { return }
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: fireDate.timeIntervalSinceNow,
+                                                            repeats: false)
+            let request = UNNotificationRequest(identifier: show.id, content: content, trigger: trigger)
             try? await UNUserNotificationCenter.current().add(request)
         }
     }
 
     private func cancelReminder(for show: Show) {
-        UNUserNotificationCenter.current()
-            .removePendingNotificationRequests(withIdentifiers: [show.id])
+        cancelReminders([show.id])
+    }
+
+    private func cancelReminders(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
     }
 }

@@ -12,6 +12,7 @@ import WebKit
 /// logged-in dashboard and hand back — we never see or handle the password.
 struct UCBSignInView: View {
     let account: UCBAccountStore
+    @Environment(TicketStore.self) private var tickets
     @Environment(\.dismiss) private var dismiss
     @State private var signingIn = false
     @State private var loading = true
@@ -26,8 +27,22 @@ struct UCBSignInView: View {
                     signingIn = true
                     Task {
                         account.session.endLogin()
-                        await account.completeSignIn()
-                        dismiss()
+                        // One read feeds both the account and the wallet, as
+                        // launch does — otherwise the Tickets tab pays for a
+                        // second serialized navigation the moment it appears.
+                        let outcome = await account.completeSignIn()
+                        tickets.adopt(outcome)
+                        if case .signedOut = outcome {
+                            // The dashboard we saw didn't hold up as a login
+                            // (cookie didn't stick, page misread). Dismissing
+                            // here would drop the user on a wallet that says
+                            // "connect", with no idea why — stay, and let the
+                            // next dashboard load try again.
+                            account.session.beginLogin()   // sheet still owns the web view
+                            signingIn = false
+                        } else {
+                            dismiss()
+                        }
                     }
                 })
                 .ignoresSafeArea(edges: .bottom)
@@ -84,18 +99,28 @@ private struct UCBLoginWebView: UIViewRepresentable {
         let onLoaded: () -> Void
         let onSignedIn: () -> Void
         weak var session: UCBSession?
-        private var fired = false
         init(onLoaded: @escaping () -> Void, onSignedIn: @escaping () -> Void) {
             self.onLoaded = onLoaded
             self.onSignedIn = onSignedIn
         }
 
+        /// Signed in = a POSITIVE dashboard marker (the account navigation or
+        /// the Student ID card), the same classifier the engine's
+        /// `readAccountJS` uses. "No login form on a /my-account/ page" is not
+        /// enough: the lost-password page and a Cloudflare interstitial both
+        /// satisfy it, and firing there closed the sheet mid-reset (or marked a
+        /// user who never logged in as signed in). Repeats are deduped by the
+        /// view's `signingIn`, so a load that didn't hold up can fire again.
         func webView(_ web: WKWebView, didFinish navigation: WKNavigation!) {
             onLoaded()
-            let js = "(!document.querySelector('.woocommerce-form-login') && /\\/my-account/.test(location.pathname))"
+            let js = """
+            (!document.querySelector('.woocommerce-form-login')
+             && /\\/my-account/.test(location.pathname)
+             && !!(document.querySelector('.woocommerce-MyAccount-navigation')
+                   || document.querySelector('.ucb-student-id')))
+            """
             web.evaluateJavaScript(js) { [weak self] result, _ in
-                guard let self, !self.fired, (result as? Bool) == true else { return }
-                self.fired = true
+                guard let self, (result as? Bool) == true else { return }
                 self.onSignedIn()
             }
         }

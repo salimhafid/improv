@@ -29,6 +29,10 @@ final class AppState {
     /// Deep-link target: a ticket id to open in the wallet (set by a notification
     /// tap), consumed by the Tickets tab.
     var openTicketID: String?
+    /// Deep-link target: a hearted show's id to open from the I'm-Going list
+    /// (set by a heart-reminder tap), consumed — and cleared — by the Tickets
+    /// tab.
+    var openShowID: String?
 
     private static let theatersKey = "selectedTheaters"
     private static let legacyTheaterKey = "selectedTheater"

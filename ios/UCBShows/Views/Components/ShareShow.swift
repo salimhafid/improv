@@ -16,7 +16,9 @@ final class ShowActivityItem: NSObject, UIActivityItemSource {
         self.image = image
     }
 
-    /// "The Stepfathers — Friday, July 17 @ 7:00 PM · UCB · NYC · Mainstage"
+    /// "The Stepfathers — Friday, July 17, 2026 @ 7:00 PM · UCB · NYC · Mainstage"
+    /// (the feed's raw date string, then `sourceLabel` — the org and city
+    /// abbreviation — and the cleaned venue).
     private var composedTitle: String {
         var parts: [String] = []
         parts.append(show.dateRaw.isEmpty ? show.timeLabel : show.dateRaw)

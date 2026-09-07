@@ -24,9 +24,7 @@ struct ShowDetailView: View {
     @AppStorage("calendarProvider") private var calendarProvider = ""
 
     /// The talent directory covers UCB's own theaters (NY + LA rosters).
-    private var hasTalentDirectory: Bool {
-        show.source == "ucb_ny" || show.source == "ucb_la"
-    }
+    private var hasTalentDirectory: Bool { SourceCatalog.isUCB(show.source) }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -220,7 +218,7 @@ struct ShowDetailView: View {
 
     // MARK: Cast
 
-    /// Cast section. For UCB New York, each name is tappable: matched names
+    /// Cast section. For UCB theaters, each name is tappable: matched names
     /// push the performer's bio; unmatched ones open the directory pre-searched.
     /// Other theaters keep the plain text line.
     private var castSection: some View {

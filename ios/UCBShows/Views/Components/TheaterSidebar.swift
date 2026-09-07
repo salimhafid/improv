@@ -10,7 +10,6 @@ struct TheaterSidebar: View {
     @Environment(AppState.self) private var app
 
     var body: some View {
-        @Bindable var app = app
         ZStack(alignment: .leading) {
             if app.sidebarOpen {
                 Color.black.opacity(0.35)

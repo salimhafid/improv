@@ -36,11 +36,16 @@ struct ClassAlertsView: View {
                             }
                             .font(.footnote)
                         }
-                        if !alerts.registrationIssue.isEmpty {
-                            Text(alerts.registrationIssue).foregroundStyle(.red)
-                        }
-                        if !alerts.syncIssue.isEmpty {
-                            Text(alerts.syncIssue).foregroundStyle(.red)
+                        // Only while alerts are on: a failed switch-off
+                        // retries on its own, and a red line under an Off
+                        // switch reads as a problem the user can't act on.
+                        if alerts.prefs.master {
+                            if !alerts.registrationIssue.isEmpty {
+                                Text(alerts.registrationIssue).foregroundStyle(.red)
+                            }
+                            if !alerts.syncIssue.isEmpty {
+                                Text(alerts.syncIssue).foregroundStyle(.red)
+                            }
                         }
                     }
                 }
@@ -58,8 +63,9 @@ struct ClassAlertsView: View {
                                 }
                                 Spacer()
                                 // Bell means "actually pushing", so an on-with-
-                                // nothing school doesn't get one.
-                                if !(alerts.prefs.ucb[school.id] ?? []).isEmpty {
+                                // nothing school doesn't get one — nor any
+                                // school while the master switch is Off.
+                                if alerts.prefs.master, !(alerts.prefs.ucb[school.id] ?? []).isEmpty {
                                     Image(systemName: "bell.fill")
                                         .font(.caption).foregroundStyle(Theme.accent)
                                 }
@@ -99,32 +105,36 @@ struct ClassAlertsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            // Opening this screen with alerts already on is the notifiable
-            // moment for anyone whose prefs came from iCloud — they never touch
-            // the toggle, so nothing else would ever ask. Silent when alerts
-            // are off or permission is already settled.
-            .task { await alerts.armIfNeeded() }
-            .deniedNotificationsAlert(alerts)
         }
+        // Opening this screen with alerts already on is the notifiable
+        // moment for anyone whose prefs came from iCloud — they never touch
+        // the toggle, so nothing else would ever ask. Silent when alerts
+        // are off or permission is already settled. On the stack, not the
+        // root list: the list disappears under every push, and re-arming
+        // on each pop back is an APNs + CloudKit round trip for nothing.
+        .task { await alerts.armIfNeeded() }
+        .deniedNotificationsAlert(alerts)
     }
 
     private func ucbSubtitle(_ id: String) -> String {
-        guard let set = alerts.prefs.ucb[id] else { return "Off" }
+        // Reads Off with the master switch Off, like the toolbar badge.
+        guard alerts.prefs.master, let set = alerts.prefs.ucb[id] else { return "Off" }
         if set.isEmpty { return "On — no categories picked" }
-        if set.count == ClassAlertsStore.ucbCategories.count { return "All categories" }
+        if ClassAlertsStore.ucbCategoryKeys.isSubset(of: set) { return "All categories" }
         return "\(set.count) categor\(set.count == 1 ? "y" : "ies")"
     }
 }
 
 /// Per-city UCB alert customization: on/off plus one toggle per class category.
-/// Switching a school on starts at Improv only, so the header carries an
-/// explicit Select all — the school toggle is no longer a bulk-select in disguise.
+/// Switching a school on starts at the three-category seed (see
+/// `defaultUCBCategories`), so the header carries an explicit Select all — the
+/// school toggle is no longer a bulk-select in disguise.
 struct UCBAlertDetailView: View {
     let school: ClassAlertsStore.School
     @Environment(ClassAlertsStore.self) private var alerts
 
     private var selected: Set<String> { alerts.prefs.ucb[school.id] ?? [] }
-    private var allSelected: Bool { selected.count == ClassAlertsStore.ucbCategories.count }
+    private var allSelected: Bool { ClassAlertsStore.ucbCategoryKeys.isSubset(of: selected) }
 
     var body: some View {
         List {
@@ -163,14 +173,15 @@ struct UCBAlertDetailView: View {
         }
         .navigationTitle(school.name)
         .navigationBarTitleDisplayMode(.inline)
-        .deniedNotificationsAlert(alerts)
     }
 }
 
-/// The "you switched this on but notifications are off" alert. Lives as a
-/// modifier because it has to sit on BOTH screens — the per-school and
-/// per-category toggles are in `UCBAlertDetailView`, where the sheet's footer
-/// isn't, so that screen would otherwise flip a switch green and say nothing.
+/// The "you switched this on but notifications are off" alert. Attached once,
+/// to the sheet's `NavigationStack`, so it covers BOTH screens — the per-school
+/// and per-category toggles are in `UCBAlertDetailView`, where the sheet's
+/// footer isn't, so that screen would otherwise flip a switch green and say
+/// nothing. Once, because two `alert(isPresented:)` on one binding is two
+/// presenters fighting over a single flag.
 private struct DeniedNotificationsAlert: ViewModifier {
     @Bindable var alerts: ClassAlertsStore
 

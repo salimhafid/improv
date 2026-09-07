@@ -39,12 +39,14 @@ struct TalentPerson: Decodable, Identifiable, Hashable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        name = (try c.decodeIfPresent(String.self, forKey: .name)) ?? ""
-        slug = (try c.decodeIfPresent(String.self, forKey: .slug)) ?? ""
-        urlString = try c.decodeIfPresent(String.self, forKey: .urlString)
-        imageString = try c.decodeIfPresent(String.self, forKey: .imageString)
-        groups = (try c.decodeIfPresent([String].self, forKey: .groups)) ?? []
-        bio = (try c.decodeIfPresent(String.self, forKey: .bio)) ?? ""
+        // `try?` + `Lossy`: a wrong-typed value or one bad group drops that
+        // field, never the whole person.
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        slug = (try? c.decodeIfPresent(String.self, forKey: .slug)) ?? ""
+        urlString = try? c.decodeIfPresent(String.self, forKey: .urlString)
+        imageString = try? c.decodeIfPresent(String.self, forKey: .imageString)
+        groups = (try? c.decodeIfPresent(Lossy<String>.self, forKey: .groups))?.elements ?? []
+        bio = (try? c.decodeIfPresent(String.self, forKey: .bio)) ?? ""
     }
 
     var id: String { slug }
@@ -68,11 +70,21 @@ struct TalentPerson: Decodable, Identifiable, Hashable {
         groups.contains("la") ? "LA" : "New York"
     }
 
+    /// Latin letters `diacriticInsensitive` folding leaves alone (they carry
+    /// no combining mark). Without this the `[^a-z0-9 ]` strip below would
+    /// turn "Søren" into "sren", and a cast line typed as "Soren" would miss.
+    private static let latinFolds: [Character: String] = [
+        "ø": "o", "ł": "l", "ß": "ss", "æ": "ae", "œ": "oe", "đ": "d", "ð": "d", "þ": "th",
+    ]
+
     /// Normalized key for matching cast-line names to directory entries:
     /// lowercased, diacritic-folded, parentheticals ("(AB)") and punctuation
     /// dropped, whitespace collapsed.
     static func nameKey(_ raw: String) -> String {
         var t = raw.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+        if t.contains(where: { latinFolds[$0] != nil }) {
+            t = t.map { latinFolds[$0] ?? String($0) }.joined()
+        }
         t = t.replacingOccurrences(of: #"\s*\([^)]*\)"#, with: "", options: .regularExpression)
         t = t.replacingOccurrences(of: #"[^a-z0-9 ]"#, with: "", options: .regularExpression)
         return t.split(separator: " ").joined(separator: " ")

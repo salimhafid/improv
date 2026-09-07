@@ -23,7 +23,7 @@ struct StudentReserveButton: View {
     @State private var phase: Phase = .hidden
     @State private var failureMessage: String?
 
-    private var isUCB: Bool { show.source == "ucb_ny" || show.source == "ucb_la" }
+    private var isUCB: Bool { SourceCatalog.isUCB(show.source) }
     private var excluded: Bool {
         (show.isLivestream && show.venue.caseInsensitiveCompare("Livestream") == .orderedSame)
             || show.title.localizedCaseInsensitiveContains("asssscat")
@@ -110,7 +110,12 @@ struct StudentReserveButton: View {
         Binding(get: { failureMessage != nil }, set: { if !$0 { failureMessage = nil } })
     }
 
-    private var taskKey: String { "\(show.id)|\(account.phase)" }
+    /// Re-evaluate on the account phase AND on the wallet's contents, so a
+    /// ticket released from the Tickets tab un-greens a show page that's
+    /// still alive underneath.
+    private var taskKey: String {
+        "\(show.id)|\(account.phase)|\(tickets.reserved.map(\.id).sorted().joined(separator: ","))"
+    }
 
     private func evaluate() async {
         guard isUCB, !excluded, let url = show.url else { phase = .hidden; return }
@@ -119,7 +124,14 @@ struct StudentReserveButton: View {
         // interpolates `account.phase`, so this re-runs the moment it resolves.
         guard !account.isRestoring else { phase = .hidden; return }
         guard account.isSignedIn else { phase = .signInPrompt; return }
-        if case .reserved = phase { return }
+        // A reserve from this very button is in flight: the ticket landing in
+        // the wallet (which re-keys the task) is its result, not a reason to
+        // spend another show-page load — `reserve()` sets the final phase.
+        if case .reserving = phase { return }
+        // Already reserved and the wallet still holds it: nothing to re-check
+        // (and no navigation to spend). Reserved but the wallet no longer has
+        // a ticket for this show — released elsewhere — falls through.
+        if case .reserved = phase, tickets.reserved.contains(where: { $0.showID == show.id }) { return }
         phase = .checking
         let a = await account.session.claimAvailability(showURL: url)
         if Task.isCancelled { return }
@@ -129,6 +141,9 @@ struct StudentReserveButton: View {
     private func reserve() async {
         phase = .reserving
         let result = await tickets.reserve(show: show)
-        phase = result.success ? .reserved : .failed(result.message)
+        // "Already reserved" is the green state, not a failure: the ticket
+        // exists (reserved on the website), and the store has just synced it
+        // into the wallet.
+        phase = result.success || result.alreadyClaimed ? .reserved : .failed(result.message)
     }
 }

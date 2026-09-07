@@ -27,6 +27,13 @@ extension Venue {
 
     /// The venue a show plays, by its source id. Only UCB shows have a mapped
     /// venue today (they're the only theater with student ticketing).
+    ///
+    /// Known limitation: the mapping is per SOURCE, not per stage. UCB LA also
+    /// plays the Annex (a block from Franklin), and an Annex ticket's Wallet
+    /// pass therefore geo-surfaces at Franklin. The feed and the account page
+    /// only carry a venue *string* ("LA - ANNEX"), and no verified Annex
+    /// coordinates are baked in here — don't invent them; add a per-label map
+    /// once they're confirmed.
     static func forSource(_ source: String) -> Venue? {
         all.first { $0.id == source }
     }

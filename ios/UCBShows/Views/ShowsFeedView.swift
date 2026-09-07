@@ -11,6 +11,7 @@ struct ShowsFeedView: View {
     @State private var showFilters = false
     @State private var query = ""
     @State private var path = NavigationPath()
+    @State private var retrying = false
     @Namespace private var zoom
 
     private var theaters: Set<String> { app.selectedTheaters }
@@ -34,6 +35,15 @@ struct ShowsFeedView: View {
                     }
                 } else if sections.isEmpty {
                     emptyState
+                        .safeAreaInset(edge: .top) {
+                            // The feed shows this banner inline; an empty
+                            // filtered/searched list still deserves to know
+                            // it's looking at saved data.
+                            if store.phase == .offline {
+                                OfflineBanner(updatedLabel: store.updatedLabel)
+                                    .padding(.top, Theme.Space.gutter)
+                            }
+                        }
                 } else {
                     feed(sections)
                 }
@@ -100,10 +110,12 @@ struct ShowsFeedView: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        if !query.isEmpty {
-            ContentUnavailableView.search(text: query)
-        } else if store.filters.isActive {
+        // Filters win over the search copy: with both set, the filters may be
+        // what emptied the list, and the way out must stay on screen.
+        if store.filters.isActive {
             noMatchesState
+        } else if !query.isEmpty {
+            ContentUnavailableView.search(text: query)
         } else {
             noShowsForTheater
         }
@@ -113,7 +125,9 @@ struct ShowsFeedView: View {
         ContentUnavailableView {
             Label("No Shows Match", systemImage: "line.3.horizontal.decrease.circle")
         } description: {
-            Text("Try removing a filter to see more shows.")
+            Text(query.isEmpty
+                 ? "Try removing a filter to see more shows."
+                 : "No results for “\(query)” with these filters. Try removing a filter.")
         } actions: {
             Button("Clear Filters") { store.filters.clear() }
                 .buttonStyle(.borderedProminent)
@@ -150,8 +164,23 @@ struct ShowsFeedView: View {
         } description: {
             Text(message)
         } actions: {
-            Button("Try Again") { Task { await store.refresh() } }
-                .buttonStyle(.borderedProminent)
+            // `refresh()` leaves the phase at `.failed` until it resolves, so
+            // the button carries its own in-progress state.
+            Button {
+                retrying = true
+                Task {
+                    await store.refresh()
+                    retrying = false
+                }
+            } label: {
+                if retrying {
+                    ProgressView().frame(minWidth: 72)
+                } else {
+                    Text("Try Again").frame(minWidth: 72)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(retrying)
         }
     }
 

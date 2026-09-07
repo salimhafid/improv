@@ -4,11 +4,18 @@ import SwiftUI
 /// so a scanner reads it in any light. Works offline — the QR is cached SVG.
 struct TicketDetailView: View {
     let ticket: Ticket
-    var onRelease: ((Ticket) async -> Bool)?
+    var onRelease: ((Ticket) async -> UCBSession.ActionResult)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var priorBrightness: CGFloat?
+    /// On screen right now. A `TabView` keeps this view alive (and its
+    /// `scenePhase` observer firing) after the user has switched tabs, and
+    /// cranking brightness for a QR nobody can see is the wrong call.
+    @State private var isVisible = false
+    /// Re-sampled on appear and foreground so the Release button honours the
+    /// one-hour cutoff while the view stays open, not just at first render.
+    @State private var now = Date()
     @State private var releasing = false
     @State private var releaseError: String?
     @State private var confirmingRelease = false
@@ -60,7 +67,7 @@ struct TicketDetailView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if ticket.kind == .reserved, ticket.isReleasable, onRelease != nil {
+            if ticket.kind == .reserved, ticket.isReleasable(now: now), onRelease != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         confirmingRelease = true
@@ -79,12 +86,25 @@ struct TicketDetailView: View {
         } message: {
             Text("Your seat goes back on sale and your weekly student allowance is restored. This can’t be undone.")
         }
-        .onAppear(perform: brighten)
-        .onDisappear(perform: restoreBrightness)
+        .onAppear {
+            isVisible = true
+            now = Date()
+            brighten()
+        }
+        .onDisappear {
+            isVisible = false
+            restoreBrightness()
+        }
         // Also restore when the app is backgrounded (onDisappear doesn't fire
-        // on scene changes), and re-brighten on return.
+        // on scene changes), and re-brighten on return — but only if this
+        // view is the one on screen.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { brighten() } else { restoreBrightness() }
+            if phase == .active {
+                now = Date()
+                if isVisible { brighten() }
+            } else {
+                restoreBrightness()
+            }
         }
     }
 
@@ -93,16 +113,25 @@ struct TicketDetailView: View {
         releasing = true
         releaseError = nil
         Task {
-            let ok = await onRelease(ticket)
+            let result = await onRelease(ticket)
             releasing = false
             // Only leave on success — a failed release means the ticket is
             // still claimed, and silently popping would read as "released".
-            if ok { dismiss() }
-            else { releaseError = "Couldn’t release the ticket. Check your connection and try again." }
+            // UCB's own reason (inside the hour, stale nonce) is shown when it
+            // gave one; "check your connection" only when nothing came back.
+            if result.success { dismiss() }
+            else {
+                releaseError = result.message.isEmpty
+                    ? "Couldn’t release the ticket. Check your connection and try again."
+                    : result.message
+            }
         }
     }
 
+    /// Max brightness so a scanner reads the QR in any light. Nothing to
+    /// scan yet (QR not synced) → leave the user's brightness alone.
     private func brighten() {
+        guard !ticket.qrSVG.isEmpty else { return }
         if priorBrightness == nil { priorBrightness = UIScreen.main.brightness }
         UIScreen.main.brightness = 1.0
     }
@@ -133,11 +162,5 @@ struct TicketDetailView: View {
             }
         }
         .padding(.horizontal, Theme.Space.gutter)
-    }
-}
-
-extension Ticket {
-    static func cleanVenue(_ s: String) -> String {
-        s.replacingOccurrences(of: "NY – ", with: "").replacingOccurrences(of: "NY - ", with: "")
     }
 }

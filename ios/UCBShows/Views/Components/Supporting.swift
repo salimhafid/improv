@@ -61,8 +61,10 @@ struct FilterToolbarIcon: View {
 }
 
 /// Unobtrusive banner shown when displaying cached data after a failed refresh.
+/// `noun` names what's saved — "shows" on the feed, "classes" on the Classes tab.
 struct OfflineBanner: View {
     let updatedLabel: String?
+    var noun = "shows"
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "wifi.slash")
@@ -79,7 +81,7 @@ struct OfflineBanner: View {
     }
 
     private var bannerText: String {
-        if let updatedLabel { return "Showing saved shows · \(updatedLabel.lowercased())" }
-        return "Showing saved shows"
+        if let updatedLabel { return "Showing saved \(noun) · \(updatedLabel.lowercased())" }
+        return "Showing saved \(noun)"
     }
 }

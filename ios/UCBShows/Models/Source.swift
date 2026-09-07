@@ -2,11 +2,14 @@ import Foundation
 
 /// The cities the app spans — a grouping label for theaters (sidebar sections)
 /// and the unit the Classes tab browses in. Never picked directly: it's always
-/// inferred from the selected theaters. Case order is the display order.
+/// inferred from the selected theaters. Case order is the display order, which
+/// is why `online` — a pseudo-city for UCB's video classes, never a sidebar
+/// section — comes last.
 enum City: String, CaseIterable, Identifiable, Codable {
     case newYork = "New York"
     case chicago = "Chicago"
     case losAngeles = "Los Angeles"
+    case online = "Online"
 
     var id: String { rawValue }
 
@@ -15,6 +18,7 @@ enum City: String, CaseIterable, Identifiable, Codable {
         case .newYork:    return "building.2.fill"
         case .losAngeles: return "sun.max.fill"
         case .chicago:    return "wind"
+        case .online:     return "wifi"
         }
     }
 
@@ -23,17 +27,20 @@ enum City: String, CaseIterable, Identifiable, Codable {
         case .newYork:    return "NYC"
         case .losAngeles: return "LA"
         case .chicago:    return "CHI"
+        case .online:     return "Online"
         }
     }
 
     /// The city's local timezone. The feed's start values are timezone-naive
     /// venue-local times, so each show is parsed and day-bucketed in its own
     /// city's zone (and "Today"/date windows compare against that zone's now).
+    /// Online classes are scheduled by UCB's New York office, so they read in
+    /// Eastern time.
     var timeZone: TimeZone {
         switch self {
-        case .newYork:    return TimeZone(identifier: "America/New_York") ?? .current
-        case .losAngeles: return TimeZone(identifier: "America/Los_Angeles") ?? .current
-        case .chicago:    return TimeZone(identifier: "America/Chicago") ?? .current
+        case .newYork, .online: return TimeZone(identifier: "America/New_York") ?? .current
+        case .losAngeles:       return TimeZone(identifier: "America/Los_Angeles") ?? .current
+        case .chicago:          return TimeZone(identifier: "America/Chicago") ?? .current
         }
     }
 }
@@ -45,8 +52,8 @@ struct SourceCatalogEntry: Identifiable, Hashable {
     let name: String      // display name, e.g. "Brooklyn Comedy Collective"
     let blurb: String     // neighborhood / subtitle
     let city: City
-    /// False for class-only schools (no shows feed) — they're hidden from the
-    /// theater sidebar, but their classes still show up under their city.
+    /// False for class-only schools — they're hidden from the theater sidebar,
+    /// but their classes still show up under their city.
     var hasShows = true
 }
 
@@ -96,14 +103,15 @@ struct Lossy<Element: Decodable>: Decodable {
     }
 }
 
-/// The supported sources (the 4 wired venues + iO, which is currently unavailable).
+/// Every source the feeds publish, in sidebar order (grouped by city). Mirrors
+/// the Python registries in `sources/__init__.py`.
 enum SourceCatalog {
     static let all: [SourceCatalogEntry] = [
         .init(id: "ucb_ny", name: "UCB New York", blurb: "Upright Citizens Brigade", city: .newYork),
         .init(id: "brooklyn_cc", name: "Brooklyn Comedy Collective", blurb: "Williamsburg, Brooklyn", city: .newYork),
         .init(id: "magnet", name: "Magnet Theater", blurb: "Chelsea, Manhattan", city: .newYork),
         .init(id: "wgis_ny", name: "WGIS New York", blurb: "World’s Greatest Improv School", city: .newYork,
-              hasShows: false),   // classes only — no shows feed
+              hasShows: false),   // classes only — its shows scrape has never yielded a row
         .init(id: "ucb_la", name: "UCB Los Angeles", blurb: "Upright Citizens Brigade", city: .losAngeles),
         .init(id: "wgis_la", name: "WGIS Los Angeles", blurb: "World’s Greatest Improv School", city: .losAngeles),
         .init(id: "annoyance", name: "The Annoyance", blurb: "Lakeview, Chicago", city: .chicago),
@@ -111,6 +119,8 @@ enum SourceCatalog {
         .init(id: "second_city", name: "The Second City", blurb: "Old Town, Chicago", city: .chicago),
         .init(id: "logan_square", name: "Logan Square Improv", blurb: "Logan Square, Chicago", city: .chicago),
         .init(id: "playground", name: "The Playground Theater", blurb: "Lakeview, Chicago", city: .chicago),
+        .init(id: "ucb_online", name: "UCB Online", blurb: "Live classes over video", city: .online,
+              hasShows: false),   // classes only — rides along with either UCB campus (see classScope)
     ]
 
     /// Theaters selectable in the sidebar (shows feed exists).
@@ -136,9 +146,20 @@ enum SourceCatalog {
     /// The empty set keeps its "no scoping" meaning, and unknown ids stay in
     /// the scope alone: without the union an unrecognized id would yield ∅,
     /// which downstream reads as *every* class in every city.
+    ///
+    /// UCB Online has no city of its own to be browsed under, so it joins the
+    /// scope whenever a UCB campus is picked.
     static func classScope(for theaters: Set<String>) -> Set<String> {
         guard !theaters.isEmpty else { return [] }
         let cities = Set(theaters.compactMap { entry($0)?.city })
-        return Set(all.filter { cities.contains($0.city) }.map(\.id)).union(theaters)
+        var scope = Set(all.filter { cities.contains($0.city) }.map(\.id)).union(theaters)
+        if theaters.contains("ucb_ny") || theaters.contains("ucb_la") { scope.insert("ucb_online") }
+        return scope
+    }
+
+    /// Is this source one of UCB's schools (NY, LA, or Online)? The talent
+    /// directory, class alerts and the student reserve flow are UCB-only.
+    static func isUCB(_ id: String) -> Bool {
+        id == "ucb_ny" || id == "ucb_la" || id == "ucb_online"
     }
 }

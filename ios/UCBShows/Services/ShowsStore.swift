@@ -85,14 +85,27 @@ final class ShowsStore {
 
     /// Start-of-today in every city the app covers. Unlike the classes layout,
     /// this pipeline reads the clock: `inDateWindow` measures from the show's
-    /// own city midnight, and `DaySection.group` labels sections "Today" /
-    /// "Tomorrow". Without this the cache would happily serve yesterday's
-    /// "Today" to a feed left on screen across midnight. Cheap — the calendars
-    /// are pre-cached, so it's a few `startOfDay` calls and no formatting.
-    private static func dayStamp() -> [Date] {
-        let now = Date()
+    /// own city midnight, past shows are pruned against it, and
+    /// `DaySection.group` labels sections "Today" / "Tomorrow". Without this
+    /// the cache would happily serve yesterday's "Today" to a feed left on
+    /// screen across midnight. Necessary, not sufficient: it makes the memo
+    /// miss on the next body evaluation after midnight, but something else
+    /// (a scene-phase change, a feed apply) still has to trigger that
+    /// evaluation. Cheap — the calendars are pre-cached, so it's a few
+    /// `startOfDay` calls and no formatting.
+    private func dayStamp() -> [Date] {
+        let now = self.now()
         return City.allCases.map { DateUtils.calendar(in: $0.timeZone).startOfDay(for: now) }
     }
+
+    /// The clock. Injectable so the offline logic harness can pin "today"
+    /// (fixtures don't age out, and the section memo can't flake at midnight).
+    @ObservationIgnored var now: () -> Date = { Date() }
+
+    /// Keep a show listed until well after it has started — the same grace
+    /// `GoingStore` gives a hearted show, so a late show doesn't vanish from
+    /// the feed while still on the I'm-Going list.
+    static let expiryGrace: TimeInterval = 6 * 3600
 
     init(service: FeedService<ShowsPayload> = .shows) {
         self.service = service
@@ -114,10 +127,19 @@ final class ShowsStore {
     /// (venues are theater-specific; comedy types vary by theater) so a stale
     /// selection can't silently empty the feed. Driven by the view when the scope
     /// changes and after each successful load.
+    ///
+    /// A scope with no shows at all (a source whose scrape failed and was
+    /// carried over empty) offers nothing to reconcile against, so it is left
+    /// alone rather than wiping filters that are still valid once it's back —
+    /// the wipe would persist, and reach every device via iCloud.
     func reconcileFilters(theaters: Set<String>) {
-        guard !allShows.isEmpty else { return }
-        if let v = filters.venue, !availableVenues(theaters: theaters).contains(v) {
-            filters.venue = nil
+        guard !scoped(theaters: theaters).isEmpty else { return }
+        if let v = filters.venue {
+            // The venue picker is hidden with a single venue unless a filter is
+            // already set (`FilterSheet`), so a lone venue must not survive here
+            // as a filter hiding every venue-less show.
+            let venues = availableVenues(theaters: theaters)
+            if venues.count < 2 || !venues.contains(v) { filters.venue = nil }
         }
         if !filters.comedyTypes.isEmpty {
             let kept = filters.comedyTypes.intersection(Set(availableTypes(theaters: theaters)))
@@ -137,12 +159,18 @@ final class ShowsStore {
                 phase = .loaded
             }
         }
-        await refresh()
+        await refresh(force: false)
     }
 
-    func refresh() async {
+    /// Refresh from the network. `force` — the default, since every caller
+    /// outside the store is the user pulling or tapping "Try Again" — makes
+    /// the request revalidate with the origin even inside the CDN's max-age,
+    /// so an explicit refresh can't "succeed" out of `URLCache` while offline.
+    /// The launch path passes false and lets the protocol cache answer.
+    func refresh(force: Bool = true) async {
         do {
-            let payload = try await service.fetchRemote()
+            let payload = try await service.fetchRemote(
+                policy: force ? .reloadRevalidatingCacheData : .useProtocolCachePolicy)
             apply(payload)
             phase = .loaded
         } catch {
@@ -200,7 +228,26 @@ final class ShowsStore {
 
     private func filtered(theaters: Set<String>, normalized query: String) -> [Show] {
         let needle = Array(query.utf8)   // once, not once per show
-        return allShows.filter { matches($0, needle: needle, theaters: theaters) }
+        let cutoffs = pastCutoffs()      // likewise — a `startOfDay` per city, not per show
+        return allShows.filter { !isPast($0, cutoffs: cutoffs) && matches($0, needle: needle, theaters: theaters) }
+    }
+
+    /// Per-zone instant before which a show has come and gone: the venue's
+    /// start of today, or `expiryGrace` ago if that is earlier — so a late
+    /// show still lists just past midnight while nothing from yesterday
+    /// lingers into the afternoon. The backend prunes the feed daily; this
+    /// covers the cache a device serves while offline for days.
+    private func pastCutoffs() -> [TimeZone: Date] {
+        let now = self.now()
+        let grace = now.addingTimeInterval(-Self.expiryGrace)
+        return Dictionary(City.allCases.map { city in
+            (city.timeZone, min(DateUtils.calendar(in: city.timeZone).startOfDay(for: now), grace))
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private func isPast(_ show: Show, cutoffs: [TimeZone: Date]) -> Bool {
+        guard let date = show.startDate, let cutoff = cutoffs[show.cityTimeZone] else { return false }
+        return date < cutoff
     }
 
     private func matches(_ show: Show, needle: [UInt8], theaters: Set<String>) -> Bool {
@@ -219,7 +266,7 @@ final class ShowsStore {
         guard let date = show.startDate else { return false }
         // Reckon "today"/windows in the show's own city timezone.
         let cal = DateUtils.calendar(in: show.cityTimeZone)
-        let now = Date()
+        let now = self.now()
         let startOfToday = cal.startOfDay(for: now)
         switch filters.dateWindow {
         case .all:
@@ -238,7 +285,7 @@ final class ShowsStore {
 
     /// Bounds of the upcoming weekend: from Friday 00:00 up to Monday 00:00
     /// (Fri–Sun — comedy audiences count Friday night as the weekend). Mid-weekend
-    /// the window starts in the past, but passed shows aren't in the feed anyway.
+    /// the window starts in the past, but `filtered` prunes passed shows first.
     private func upcomingWeekend(now: Date, calendar cal: Calendar) -> (start: Date, end: Date)? {
         let today = cal.startOfDay(for: now)
         let weekday = cal.component(.weekday, from: today) // 1 = Sun ... 7 = Sat
@@ -265,7 +312,7 @@ final class ShowsStore {
                              query: SearchText.normalized(searchText),
                              filters: filters,
                              version: feedVersion,
-                             days: Self.dayStamp())
+                             days: dayStamp())
         if let cached = sectionCache, cached.key == key { return cached.sections }
         sectionBuildCount &+= 1
         let sections = DaySection.group(filtered(theaters: theaters, normalized: key.query))

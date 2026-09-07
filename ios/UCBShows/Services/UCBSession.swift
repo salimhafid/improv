@@ -118,6 +118,11 @@ final class UCBSession {
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var loginActive = false
 
+    /// Not cancellation-aware while queued (a waiter's continuation has to be
+    /// resumed by `unlock` exactly once), so every op checks `Task.isCancelled`
+    /// right after acquiring: a `StudentReserveButton` evaluation that was
+    /// cancelled by the next push would otherwise still spend a 1–20 s
+    /// navigation of its own before the lock moved on.
     private func lock() async {
         if busy { await withCheckedContinuation { waiters.append($0) } } else { busy = true }
     }
@@ -141,7 +146,11 @@ final class UCBSession {
     private func load(_ url: URL) async throws {
         let g = NavGate()
         web.navigationDelegate = g
-        web.load(URLRequest(url: url))
+        // Bind the gate to THIS navigation: a stopped load (timeout, or the
+        // sign-in sheet claiming the web view) reports its cancellation
+        // asynchronously, and without the binding that late callback could
+        // land on the next op's gate and fail a load that never started.
+        g.navigation = web.load(URLRequest(url: url))
         let timeout = Task { try? await Task.sleep(for: Self.loadTimeout); g.cancel() }
         defer { timeout.cancel() }
         do { try await g.wait() }
@@ -160,7 +169,7 @@ final class UCBSession {
     func refresh() async -> RefreshOutcome {
         if loginActive { return .unknown }
         await lock(); defer { unlock() }
-        if loginActive { return .unknown }
+        if loginActive || Task.isCancelled { return .unknown }
         // Account state may have changed (quota spent, ticket released on the
         // website) — cached per-show claim reads are no longer trustworthy.
         availabilityCache.removeAll()
@@ -178,7 +187,7 @@ final class UCBSession {
            Date().timeIntervalSince(hit.at) < Self.availabilityTTL { return hit.value }
         if loginActive { return .none }
         await lock(); defer { unlock() }
-        if loginActive { return .none }
+        if loginActive || Task.isCancelled { return .none }
         guard (try? await load(showURL)) != nil, let d = await evalDict(Self.readClaimJS) else { return .none }
         let a = ClaimAvailability(
             available: (d["available"] as? Bool) ?? false,
@@ -198,6 +207,12 @@ final class UCBSession {
     func reserve(showURL: URL) async -> ActionResult {
         if loginActive { return ActionResult(success: false, message: "Try again in a moment.") }
         await lock(); defer { unlock() }
+        // Re-checked after the lock: the sheet may have claimed the web view
+        // while this op was queued, and a claim POST mid-login is the last
+        // thing the user expects.
+        if loginActive || Task.isCancelled {
+            return ActionResult(success: false, message: "Try again in a moment.")
+        }
         availabilityCache.removeValue(forKey: showURL.absoluteString)
         guard (try? await load(showURL)) != nil, let d = await evalDict(Self.readClaimJS) else {
             return ActionResult(success: false, message: "Couldn’t reach UCB. Try again.")
@@ -215,6 +230,9 @@ final class UCBSession {
     func release(order: String, nonce: String) async -> ActionResult {
         if loginActive { return ActionResult(success: false, message: "Try again in a moment.") }
         await lock(); defer { unlock() }
+        if loginActive || Task.isCancelled {
+            return ActionResult(success: false, message: "Try again in a moment.")
+        }
         availabilityCache.removeAll()
         if !onUCBOrigin { _ = try? await load(Self.studentTicketsURL) }
         return await post(action: "ucb_student_release", params: ["order": order, "nonce": nonce])
@@ -259,13 +277,18 @@ final class UCBSession {
 
     // MARK: Parsing
 
+    /// The title a reserved card gets when the page didn't yield one (also
+    /// the literal in `readAccountJS`). `TicketStore` treats it as "unknown"
+    /// and keeps the title it already had, since reminder joins key on title.
+    static let fallbackTitle = "UCB show"
+
     private static func parseSnapshot(_ d: [String: Any]) -> AccountSnapshot {
         var tickets: [Ticket] = []
         for t in (d["tickets"] as? [[String: Any]]) ?? [] {
             tickets.append(Ticket(
                 kind: .reserved, showID: nil, orderID: t["order"] as? String,
                 eventID: t["event"] as? String,
-                title: (t["title"] as? String) ?? "UCB show",
+                title: (t["title"] as? String) ?? fallbackTitle,
                 venueLabel: (t["venue"] as? String) ?? "",
                 source: (t["source"] as? String) ?? "ucb_ny",
                 start: t["start"] as? String,
@@ -365,10 +388,18 @@ final class UCBSession {
 
 /// One-shot navigation gate: resolves when the current load finishes, fails, or
 /// the caller cancels it (timeout). Every terminal path resumes the continuation
-/// exactly once, so `load()` can never hang.
+/// exactly once, so `load()` can never hang. Bound to the `WKNavigation` the
+/// caller started (when WebKit handed one back): callbacks for any other
+/// navigation — a previous op's stopped load reporting in late — are ignored.
 private final class NavGate: NSObject, WKNavigationDelegate {
+    var navigation: WKNavigation?
     private var cont: CheckedContinuation<Void, Error>?
     private var done = false
+
+    private func owns(_ n: WKNavigation?) -> Bool {
+        guard let navigation, let n else { return true }
+        return n === navigation
+    }
 
     func wait() async throws {
         try await withCheckedThrowingContinuation { c in
@@ -388,8 +419,14 @@ private final class NavGate: NSObject, WKNavigationDelegate {
     /// Called by the caller's timeout task.
     func cancel() { finish(.failure(CancellationError())) }
 
-    func webView(_ w: WKWebView, didFinish n: WKNavigation!) { finish(.success(())) }
-    func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: Error) { finish(.failure(e)) }
-    func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) { finish(.failure(e)) }
+    func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
+        if owns(n) { finish(.success(())) }
+    }
+    func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: Error) {
+        if owns(n) { finish(.failure(e)) }
+    }
+    func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) {
+        if owns(n) { finish(.failure(e)) }
+    }
     func webViewWebContentProcessDidTerminate(_ w: WKWebView) { finish(.failure(CancellationError())) }
 }

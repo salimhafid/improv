@@ -11,22 +11,42 @@ import WebKit
 /// is reclaimed while the app is suspended.
 enum QRRender {
 
-    /// One canonical render size for the cache: 1280px keeps the QR crisp at
-    /// full screen width on the largest phones (~430pt @3x) and covers
-    /// notification attachments alike.
-    private static let renderSide: CGFloat = 1280
+    /// One canonical render size for the cache, in POINTS — this sizes the
+    /// off-screen web view and the snapshot rect, and `takeSnapshot` renders
+    /// at the device's scale on top of it. 430pt is the widest phone's full
+    /// screen width, so the bitmap is ~1290px @3x (≈6.5 MB decoded): crisp
+    /// everywhere the app shows it, and plenty for Vision to decode the
+    /// payload for the Wallet pass. (It was 1280 *points* — ~59 MB a piece.)
+    private static let renderSide: CGFloat = 430
 
-    @MainActor private static var cache: [Int: UIImage] = [:]
+    /// Keyed by the SVG markup itself (`NSString` equality, not a hash that
+    /// could collide), bounded so drifting markup between reads can't pile up
+    /// bitmaps for the life of the process.
+    @MainActor private static let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 16
+        c.totalCostLimit = 96 * 1024 * 1024
+        return c
+    }()
 
-    /// The rasterized QR for this SVG, rendered on first request and cached
-    /// for the life of the process.
+    /// Renders in progress, so the wallet row and the pushed detail asking
+    /// for the same SVG within a beat share one web view instead of two.
+    @MainActor private static var inFlight: [String: Task<UIImage?, Never>] = [:]
+
+    /// The rasterized QR for this SVG, rendered on first request and cached.
     @MainActor
     static func cachedImage(svg: String) async -> UIImage? {
         guard !svg.isEmpty else { return nil }
-        let key = svg.hashValue
-        if let hit = cache[key] { return hit }
-        guard let image = await rasterizeImage(svg: svg, side: renderSide) else { return nil }
-        cache[key] = image
+        let key = svg as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        if let pending = inFlight[svg] { return await pending.value }
+        let task = Task { await rasterizeImage(svg: svg, side: renderSide) }
+        inFlight[svg] = task
+        let image = await task.value
+        inFlight[svg] = nil
+        if let image, let cg = image.cgImage {
+            cache.setObject(image, forKey: key, cost: cg.bytesPerRow * cg.height)
+        }
         return image
     }
 
@@ -123,6 +143,9 @@ struct QRCodeView: View {
     let svg: String
 
     @State private var image: UIImage?
+    /// The render came back empty for a non-empty SVG (timeout, WebKit process
+    /// gone): show the glyph rather than a blank white card.
+    @State private var failed = false
 
     var body: some View {
         ZStack {
@@ -132,13 +155,18 @@ struct QRCodeView: View {
                     .resizable()
                     .interpolation(.none)
                     .scaledToFit()
-            } else if svg.isEmpty {
-                // QR not synced yet — show a placeholder, never a blank card.
+            } else if svg.isEmpty || failed {
+                // QR not synced yet (or didn't render) — a placeholder, never
+                // a blank card.
                 Image(systemName: "qrcode")
                     .font(.system(size: 44))
                     .foregroundStyle(.tertiary)
             }
         }
-        .task(id: svg) { image = await QRRender.cachedImage(svg: svg) }
+        .task(id: svg) {
+            failed = false
+            image = await QRRender.cachedImage(svg: svg)
+            failed = image == nil && !svg.isEmpty
+        }
     }
 }

@@ -7,7 +7,17 @@ import Observation
 @MainActor
 @Observable
 final class TalentStore {
+    enum Phase: Equatable {
+        case loading        // first load, nothing to show yet
+        case loaded         // showing fresh data
+        case offline        // showing cached data, refresh failed
+        case failed(String) // nothing to show and refresh failed
+    }
+
+    private(set) var phase: Phase = .loading
     private(set) var allPeople: [TalentPerson] = []
+    /// A non-empty directory is on hand (cached or fresh) — what the cast
+    /// chips and the directory view key on.
     private(set) var loaded = false
 
     /// Normalized full name → person.
@@ -24,19 +34,38 @@ final class TalentStore {
         self.service = service
     }
 
+    /// Show cached data instantly (if any), then refresh from the network —
+    /// the same shape as the shows and classes stores.
     func loadInitial() async {
         if allPeople.isEmpty {
             let service = self.service
             if let cached = await Task.detached(priority: .utility, operation: { service.cachedPayload() }).value {
                 apply(cached)
+                phase = .loaded
             }
         }
-        if let payload = try? await service.fetchRemote() {
+        await refresh(force: false)
+    }
+
+    /// Refresh from the network; the directory's retry and pull-to-refresh.
+    /// `force` — the default, since every caller outside the store is the
+    /// user — revalidates with the origin even inside the CDN's max-age, so
+    /// an explicit refresh can't "succeed" out of `URLCache` while offline.
+    func refresh(force: Bool = true) async {
+        do {
+            let payload = try await service.fetchRemote(
+                policy: force ? .reloadRevalidatingCacheData : .useProtocolCachePolicy)
             apply(payload)
+            phase = .loaded
+        } catch {
+            phase = allPeople.isEmpty ? .failed(error.localizedDescription) : .offline
         }
     }
 
-    private func apply(_ payload: TalentPayload) {
+    /// The single write path for directory data — both loaders above go
+    /// through it, as does the offline logic harness (which has no network
+    /// and no bundle cache to load from).
+    func apply(_ payload: TalentPayload) {
         allPeople = payload.people.filter { !$0.slug.isEmpty && !$0.name.isEmpty }
         keyedPeople = allPeople.map { (TalentPerson.nameKey($0.name), $0) }
         byName = Dictionary(keyedPeople,
@@ -64,8 +93,9 @@ final class TalentStore {
 
     /// Directory filtered by search text and an optional city tag. The city
     /// filters are mutually exclusive: LA membership wins, so bicoastal
-    /// performers appear only under Los Angeles. DCM talent counts as New York
-    /// (the marathon is a NY institution) unless they're also on the LA roster.
+    /// performers appear only under Los Angeles. DCM talent and teachers count
+    /// as New York (the marathon is a NY institution, and that is the city
+    /// `cityLabel` tags them with) unless they're also on the LA roster.
     func people(matching query: String, group: String? = nil) -> [TalentPerson] {
         // Filter on the name keys precomputed at apply() time — nameKey runs
         // two regex replacements, and recomputing it for ~1,700 people per
@@ -73,10 +103,7 @@ final class TalentStore {
         var out = keyedPeople
         if let group {
             out = out.filter { _, person in
-                group == "ny"
-                    ? ((person.groups.contains("ny") || person.groups.contains("dcm"))
-                        && !person.groups.contains("la"))
-                    : person.groups.contains(group)
+                group == "ny" ? person.cityLabel == "New York" : person.groups.contains(group)
             }
         }
         let q = TalentPerson.nameKey(query)

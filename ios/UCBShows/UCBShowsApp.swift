@@ -87,6 +87,10 @@ struct UCBShowsApp: App {
                         app.openTicketID = id
                         app.activeTab = 1
                     }
+                    notifications.onOpenShow = { id in
+                        app.openShowID = id
+                        app.activeTab = 1
+                    }
                     notifications.onClassAlert = {
                         app.activeTab = 2
                     }

@@ -8,10 +8,29 @@ import SwiftUI
 /// still come through URLSession.shared → the app's generous URLCache.
 enum PosterPipeline {
     private static let decoded = NSCache<NSString, UIImage>()
+    /// Fetch + decode currently running per cache key. Posters repeat heavily
+    /// across the feed (one Second City image sits on 170+ rows), so a screen
+    /// of identical thumbs would otherwise fetch and decode the same bitmap
+    /// once per row before the first landed; later rows await the first
+    /// row's task instead. Main-actor isolated so the map is never raced.
+    @MainActor private static var inFlight: [NSString: Task<UIImage?, Never>] = [:]
 
+    @MainActor
     static func image(for url: URL, maxPixel: Int) async -> UIImage? {
         let key = "\(url.absoluteString)#\(maxPixel)" as NSString
         if let hit = decoded.object(forKey: key) { return hit }
+        if let running = inFlight[key] { return await running.value }
+        // Detached so the shared load survives any one row scrolling off and
+        // cancelling its own `.task`; only the creator clears the entry.
+        let task = Task.detached(priority: .userInitiated) {
+            await Self.load(url: url, maxPixel: maxPixel, key: key)
+        }
+        inFlight[key] = task
+        defer { inFlight[key] = nil }
+        return await task.value
+    }
+
+    private static func load(url: URL, maxPixel: Int, key: NSString) async -> UIImage? {
         guard let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true
         else { return nil }
@@ -41,6 +60,9 @@ struct PosterImage: View {
 
     @State private var image: UIImage?
     @State private var failed = false
+    /// The URL `image`/`failed` describe, so a changed poster URL on a stable
+    /// show reloads instead of tripping the "already loaded" guard below.
+    @State private var loadedURL: URL?
 
     var body: some View {
         ZStack {
@@ -55,8 +77,18 @@ struct PosterImage: View {
             }
         }
         .task(id: show.imageURL) {
+            if loadedURL != show.imageURL {
+                loadedURL = show.imageURL
+                image = nil
+                failed = false
+            }
             guard image == nil, let url = show.imageURL else { return }
-            if let loaded = await PosterPipeline.image(for: url, maxPixel: maxPixel) {
+            let loaded = await PosterPipeline.image(for: url, maxPixel: maxPixel)
+            // A row scrolling off cancels this task; a nil result then means
+            // "cancelled", not "missing" — don't pin the fallback cover on a
+            // row whose re-run will load the poster when it scrolls back.
+            guard !Task.isCancelled else { return }
+            if let loaded {
                 withAnimation(.easeInOut(duration: 0.25)) { image = loaded }
             } else {
                 failed = true

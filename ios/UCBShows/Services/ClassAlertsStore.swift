@@ -66,6 +66,11 @@ final class ClassAlertsStore {
         ("other", "Everything Else"),
     ]
 
+    /// The keys alone, for "is everything picked" checks — a subset test
+    /// against this, never a count, so a key a newer build added (arriving
+    /// via iCloud) still reads as picked instead of never adding up.
+    static let ucbCategoryKeys: Set<String> = Set(ucbCategories.map(\.key))
+
     /// Categories switched on when a UCB school is first enabled: the core
     /// improv track, its electives, and the marquee Featured Programs — the
     /// last two are where one-off workshops with visiting names land, and
@@ -83,15 +88,37 @@ final class ClassAlertsStore {
         /// set means "on, but no categories" (sends nothing).
         var ucb: [String: Set<String>] = [:]
         /// Schema version, so a one-time migration can run without re-running
-        /// on every launch. Absent (0) = written before key-presence semantics.
-        var version = 0
+        /// on every launch. A fresh `Prefs()` is already current — there is
+        /// nothing to migrate — while a saved blob with no `version` key
+        /// decodes as 0: written before key-presence semantics.
+        var version = ClassAlertsStore.prefsVersion
+
+        enum CodingKeys: String, CodingKey { case master, schools, ucb, version }
+
+        init() {}
+
+        /// Field-by-field with defaults, never the synthesized decoder: that
+        /// one throws on a missing key, and `try?` at the call site turned a
+        /// blob from a build that predates `version` (or any field added
+        /// later) into a silent reset — picks gone, master Off, and the
+        /// device's live subscriptions never reconciled away.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            master = (try c.decodeIfPresent(Bool.self, forKey: .master)) ?? false
+            schools = (try c.decodeIfPresent(Set<String>.self, forKey: .schools)) ?? []
+            ucb = (try c.decodeIfPresent([String: Set<String>].self, forKey: .ucb)) ?? [:]
+            version = (try c.decodeIfPresent(Int.self, forKey: .version)) ?? 0
+        }
     }
 
     /// Current `Prefs` schema version. v1 introduced key-presence semantics for
-    /// `ucb` (see `isUCBEnabled`).
-    private static let prefsVersion = 1
+    /// `ucb` (see `isUCBEnabled`). Nonisolated so `Prefs` can default to it.
+    private nonisolated static let prefsVersion = 1
 
     private(set) var prefs = Prefs()
+    /// The `classAlertPrefs` blob as we last read or wrote it. Anything else
+    /// under that key was put there by iCloud — see `adoptExternalPrefs`.
+    @ObservationIgnored private var persistedData: Data?
     /// Human-readable status of the last subscription sync ("" = fine).
     private(set) var syncIssue = ""
     /// In-flight reconcile, so overlapping callers coalesce onto one run.
@@ -111,6 +138,11 @@ final class ClassAlertsStore {
     private(set) var registrationIssue = ""
 
     private static let prefsKey = "classAlertPrefs"
+    /// True while a reconcile is owed: set on every pref change, cleared when
+    /// one completes cleanly. Local only (not in `CloudSync.defaultsKeys`) —
+    /// it is this device's debt — and it is what lets a switch-off that
+    /// failed offline retry on a later launch even though master is now Off.
+    private static let syncPendingKey = "classAlertSyncPending"
 
     /// Lazy on purpose: `CKContainer(identifier:)` traps when the build lacks
     /// the iCloud entitlement, and as a stored property that took the whole app
@@ -119,19 +151,33 @@ final class ClassAlertsStore {
     private lazy var database = CKContainer(identifier: "iCloud.com.salimhafid.UCBShows").publicCloudDatabase
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: Self.prefsKey),
-           let saved = try? JSONDecoder().decode(Prefs.self, from: data) {
-            prefs = saved
-            migrateIfNeeded()
+        if let data = UserDefaults.standard.data(forKey: Self.prefsKey) {
+            persistedData = data
+            if let saved = try? JSONDecoder().decode(Prefs.self, from: data) {
+                prefs = saved
+                migrateIfNeeded()
+            }
+        }
+        // `CloudSync.applyExternal` writes another device's prefs straight
+        // into UserDefaults, live. Adopt them, or the next local toggle
+        // persists this device's stale copy over them and pushes that back
+        // up, reverting the other device. Our own `persist` fires this too;
+        // the data compare makes that a no-op.
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.adoptExternalPrefs() }
         }
         // Whichever feature obtained the grant, ours has to re-arm — matching
         // TicketStore and GoingStore. Without this, a user who granted via a
-        // heart or a ticket left class alerts unregistered forever.
+        // heart or a ticket left class alerts unregistered forever. With the
+        // master switch Off there is nothing to arm, and the reconcile only
+        // ever put an iCloud sign-in nag under an Off switch.
         NotificationCenter.default.addObserver(
             forName: NotificationAuth.didGrant, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
+                guard let self, self.prefs.master else { return }
                 self.authorizationDenied = false
                 UIApplication.shared.registerForRemoteNotifications()
                 Task { await self.syncSubscriptions() }
@@ -162,6 +208,19 @@ final class ClassAlertsStore {
         prefs.ucb = prefs.ucb.filter { !$0.value.isEmpty }
         prefs.version = Self.prefsVersion
         persist()
+    }
+
+    /// Re-read prefs when the stored blob is not the one we last read or
+    /// wrote — the only writer besides `persist` is iCloud, via `CloudSync`.
+    private func adoptExternalPrefs() {
+        let data = UserDefaults.standard.data(forKey: Self.prefsKey)
+        guard data != persistedData else { return }
+        persistedData = data
+        guard let data, let saved = try? JSONDecoder().decode(Prefs.self, from: data),
+              saved != prefs else { return }
+        prefs = saved
+        migrateIfNeeded()
+        queueSync()
     }
 
     /// Count of schools currently alerting — drives the bell badge. Deliberately
@@ -220,8 +279,10 @@ final class ClassAlertsStore {
 
     /// Switch every category on, or clear them all while leaving the school on.
     func setAllUCBCategories(_ id: String, enabled: Bool) {
-        guard prefs.ucb[id] != nil else { return }
-        prefs.ucb[id] = enabled ? Set(Self.ucbCategories.map(\.key)) : []
+        guard let set = prefs.ucb[id] else { return }
+        // Union, not replace: a key this build doesn't know (iCloud, from a
+        // newer build) survives "Select all". "Clear all" means clear.
+        prefs.ucb[id] = enabled ? set.union(Self.ucbCategoryKeys) : []
         if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
     }
@@ -234,12 +295,22 @@ final class ClassAlertsStore {
 
     private func persist() {
         if let data = try? JSONEncoder().encode(prefs) {
+            // Recorded first: the write posts `didChangeNotification`, and
+            // `adoptExternalPrefs` must see this blob as our own.
+            persistedData = data
             UserDefaults.standard.set(data, forKey: Self.prefsKey)
         }
     }
 
     private func persistAndSync() {
         persist()
+        queueSync()
+    }
+
+    /// A pref change owes a reconcile. Noted before the attempt, because the
+    /// attempt can fail offline and the retry has to know it's owed.
+    private func queueSync() {
+        UserDefaults.standard.set(true, forKey: Self.syncPendingKey)
         Task { await syncSubscriptions() }
     }
 
@@ -278,7 +349,15 @@ final class ClassAlertsStore {
     /// and nothing here used to run. Apple also documents registering on every
     /// launch, because the device token rotates.
     func armOnLaunch() async {
-        guard prefs.master else { return }
+        guard prefs.master else {
+            // Off can still owe a reconcile: a switch-off that failed offline
+            // left every subscription live, and with master Off nothing else
+            // retries. `desired` is empty, so this is only the delete.
+            if UserDefaults.standard.bool(forKey: Self.syncPendingKey) {
+                await syncSubscriptions()
+            }
+            return
+        }
         switch await NotificationAuth.status() {
         case .denied:
             authorizationDenied = true
@@ -300,7 +379,10 @@ final class ClassAlertsStore {
     /// only one a user whose prefs arrived from iCloud will ever reach — they
     /// never touch the toggle, so `setMaster` never fires.
     func armIfNeeded() async {
-        guard prefs.master else { return }
+        guard prefs.master else {
+            await armOnLaunch()   // the master-Off retry, nothing to prompt for
+            return
+        }
         guard await NotificationAuth.status() == .notDetermined else {
             await armOnLaunch()
             return
@@ -337,7 +419,9 @@ final class ClassAlertsStore {
     /// into. Two overlapping runs diff against the same stale snapshot and race
     /// identical CloudKit writes and unordered `syncIssue` updates. `didGrant`
     /// fanning out alongside a `setMaster`/`armIfNeeded` call makes that a
-    /// deterministic collision, not a rare one.
+    /// deterministic collision, not a rare one. A caller that coalesces gets
+    /// its change reconciled all the same: `performSync` goes round again
+    /// when `desired` moved under it.
     func syncSubscriptions() async {
         if let inFlight = syncTask { await inFlight.value; return }
         let task = Task { await performSync() }
@@ -348,31 +432,45 @@ final class ClassAlertsStore {
 
     private func performSync() async {
         do {
-            let existing = try await database.allSubscriptions()
-            let ours = existing.filter { $0.subscriptionID.hasPrefix("alert/") }
-            let want = desired
+            while true {
+                let want = desired
+                let existing = try await database.allSubscriptions()
+                let ours = existing.filter { $0.subscriptionID.hasPrefix("alert/") }
 
-            let stale = ours.map(\.subscriptionID).filter { want[$0] == nil }
-            let missing = want.filter { id, _ in !ours.contains { $0.subscriptionID == id } }
+                let stale = ours.map(\.subscriptionID).filter { want[$0] == nil }
+                let missing = want.filter { id, _ in !ours.contains { $0.subscriptionID == id } }
 
-            var new: [CKSubscription] = []
-            for (id, predicate) in missing {
-                let sub = CKQuerySubscription(recordType: "ClassAlert", predicate: predicate,
-                                              subscriptionID: id, options: .firesOnRecordCreation)
-                let info = CKSubscription.NotificationInfo()
-                // Title/body come straight from the watcher-composed record.
-                info.titleLocalizationKey = "CA_TITLE"
-                info.titleLocalizationArgs = ["pushTitle"]
-                info.alertLocalizationKey = "CA_BODY"
-                info.alertLocalizationArgs = ["pushBody"]
-                info.soundName = "default"
-                sub.notificationInfo = info
-                new.append(sub)
-            }
-            if !new.isEmpty || !stale.isEmpty {
-                _ = try await database.modifySubscriptions(saving: new, deleting: stale)
+                var new: [CKSubscription] = []
+                for (id, predicate) in missing {
+                    let sub = CKQuerySubscription(recordType: "ClassAlert", predicate: predicate,
+                                                  subscriptionID: id, options: .firesOnRecordCreation)
+                    let info = CKSubscription.NotificationInfo()
+                    // Title/body come straight from the watcher-composed record.
+                    info.titleLocalizationKey = "CA_TITLE"
+                    info.titleLocalizationArgs = ["pushTitle"]
+                    info.alertLocalizationKey = "CA_BODY"
+                    info.alertLocalizationArgs = ["pushBody"]
+                    info.soundName = "default"
+                    sub.notificationInfo = info
+                    new.append(sub)
+                }
+                if !new.isEmpty || !stale.isEmpty {
+                    let (saved, deleted) = try await database.modifySubscriptions(saving: new, deleting: stale)
+                    // The call throws only for the operation as a whole. An
+                    // item CloudKit rejected on its own (a predicate on a
+                    // field the schema hasn't indexed, say) comes back per
+                    // item, and swallowing it read as "healthy" over a
+                    // subscription that never existed.
+                    for case .failure(let error) in saved.values { throw error }
+                    for case .failure(let error) in deleted.values { throw error }
+                }
+                // A toggle that landed during the awaits above only coalesced
+                // onto this run; reconcile it now rather than at the next
+                // foreground. IDs are deterministic, so keys are the diff.
+                if Set(desired.keys) == Set(want.keys) { break }
             }
             syncIssue = ""
+            UserDefaults.standard.set(false, forKey: Self.syncPendingKey)
         } catch let error as CKError where error.code == .notAuthenticated {
             syncIssue = "Sign in to iCloud (Settings) to receive class alerts."
         } catch {

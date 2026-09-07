@@ -10,7 +10,9 @@ import Foundation
 /// - Local change → push to the cloud (last writer wins).
 /// - External cloud change → adopt the reported keys. File-backed stores
 ///   (I'm Going, tickets) reload live via `fileDidChange`; `@AppStorage` keys
-///   update live on their own; store-held settings apply on next launch.
+///   update live on their own; class-alert prefs apply live too (that store
+///   observes `UserDefaults` changes); the remaining store-held settings
+///   (theater selection, filters) apply on next launch.
 @MainActor
 enum CloudSync {
     /// UserDefaults keys mirrored to iCloud. Feed caches stay local.
@@ -26,6 +28,14 @@ enum CloudSync {
     static let fileDidChange = Notification.Name("CloudSync.fileDidChange")
 
     private static let kv = NSUbiquitousKeyValueStore.default
+
+    /// The store discards writes made before its initial iCloud download has
+    /// landed (that download arrives asynchronously, as an external change
+    /// with reason `InitialSyncChange`), so local defaults changes made in the
+    /// first seconds after launch are held back until then and pushed once.
+    /// Flipped by the first external-change notification, or by a short
+    /// fallback delay for a device with no iCloud account to hear from.
+    private static var initialSyncDone = false
 
     /// Call once at launch, BEFORE the stores read their persisted state, so a
     /// fresh install starts from the cloud copy.
@@ -48,16 +58,22 @@ enum CloudSync {
             object: kv, queue: .main
         ) { note in
             let changed = note.userInfo?[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String] ?? []
-            MainActor.assumeIsolated { applyExternal(changedKeys: changed) }
+            let reason = (note.userInfo?[NSUbiquitousKeyValueStoreChangeReasonKey] as? Int) ?? -1
+            MainActor.assumeIsolated { applyExternal(changedKeys: changed, reason: reason) }
         }
         // Push on every defaults change — cheap (only differing keys write),
-        // and covers @AppStorage writes without per-site hooks.
+        // and covers @AppStorage writes without per-site hooks. Held back
+        // until the initial sync, when `markInitialSyncDone` flushes once.
         NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification, object: nil, queue: .main
         ) { _ in
-            MainActor.assumeIsolated { pushDefaults() }
+            MainActor.assumeIsolated { if initialSyncDone { pushDefaults() } }
         }
         kv.synchronize()
+        Task {
+            try? await Task.sleep(for: .seconds(5))
+            markInitialSyncDone()
+        }
     }
 
     /// Mirror a file-backed store's save. Called from the store's own save().
@@ -66,6 +82,12 @@ enum CloudSync {
     }
 
     // MARK: - Internals
+
+    private static func markInitialSyncDone() {
+        guard !initialSyncDone else { return }
+        initialSyncDone = true
+        pushDefaults()
+    }
 
     private static func pushDefaults() {
         for key in defaultsKeys {
@@ -86,7 +108,35 @@ enum CloudSync {
         }
     }
 
-    private static func applyExternal(changedKeys: [String]) {
+    private static func applyExternal(changedKeys: [String], reason: Int) {
+        // Any external change means the store has heard from iCloud. Flush the
+        // held-back defaults only once the adopted keys are in place, so the
+        // flush pushes what this device adds — not values the cloud just
+        // replaced (which would bounce straight back).
+        defer { markInitialSyncDone() }
+        switch reason {
+        case NSUbiquitousKeyValueStoreAccountChange:
+            // A different iCloud account signed in on this device. Its hearts
+            // and tickets aren't this user's to adopt blindly — and its
+            // `tickets.json` would arm reminders for shows they never
+            // reserved — so leave local state alone; the flush in the `defer`
+            // and every later local save push ours under the new account
+            // (last writer wins, as ever).
+            #if DEBUG
+            print("CloudSync: iCloud account changed — not adopting \(changedKeys)")
+            #endif
+            return
+        case NSUbiquitousKeyValueStoreQuotaViolationChange:
+            // The 1 MB store is full (tickets.json carries inline QR SVG per
+            // ticket). Nothing arrived; the listed keys are ours that failed
+            // to write. Surfaced here so it isn't a silent stall.
+            #if DEBUG
+            print("CloudSync: iCloud key-value quota exceeded — failed to push \(changedKeys)")
+            #endif
+            return
+        default:
+            break
+        }
         for key in changedKeys {
             if defaultsKeys.contains(key) {
                 if let value = kv.object(forKey: key) {

@@ -17,9 +17,9 @@ struct Ticket: Codable, Identifiable, Hashable {
     /// The show's event id (`ST-<eventID>` product).
     let eventID: String?
     let title: String
-    /// Venue label from UCB, e.g. "NY – 14th St. Mainstage".
+    /// Venue label from UCB as the account page prints it, e.g. "NY - 14TH ST. MAINSTAGE".
     let venueLabel: String
-    /// Source id, "ucb_ny" / "ucb_la" — drives timezone + geofence venue.
+    /// Source id, "ucb_ny" / "ucb_la" — drives timezone + the Wallet pass venue.
     let source: String
     /// Naive venue-local start (ISO), reserved tickets only.
     let start: String?
@@ -93,16 +93,30 @@ extension Ticket {
         return startDate.addingTimeInterval(3 * 3600) < now
     }
 
-    /// UCB forbids releasing within an hour of showtime.
-    var isReleasable: Bool {
-        guard kind == .reserved, releaseNonce != nil else { return false }
-        guard let startDate else { return true }
-        return startDate.timeIntervalSinceNow > 3600
+    /// UCB forbids releasing within an hour of showtime. Without a parsed
+    /// start we can't tell which side of that line we're on, so don't offer
+    /// it — the website still can. `now` is injected (like `isPast`) so a view
+    /// that stays open can re-check the cutoff instead of freezing the answer
+    /// at first render.
+    func isReleasable(now: Date = Date()) -> Bool {
+        guard kind == .reserved, releaseNonce != nil, let startDate else { return false }
+        return startDate.timeIntervalSince(now) > 3600
     }
 
+    /// "Jun 26 · 7:00 PM", or empty when the start didn't parse — callers
+    /// join this with the venue, so falling back to the venue here printed
+    /// it twice.
     var whenLabel: String {
-        guard let startDate else { return venueLabel }
+        guard let startDate else { return "" }
         return DateUtils.compactDate(startDate, in: cityTimeZone)
             + " · " + DateUtils.timeString(startDate, in: cityTimeZone)
+    }
+
+    /// Strip UCB's city/building boilerplate from a venue label:
+    /// "NY - 14TH ST. MAINSTAGE" → "MAINSTAGE", "LA - FRANKLIN" → "FRANKLIN".
+    /// Delegates to the show list's helper so wallet rows, the ticket detail,
+    /// the Wallet pass and show rows all strip the same prefixes.
+    static func cleanVenue(_ s: String) -> String {
+        Show.cleanVenueName(s)
     }
 }

@@ -4,8 +4,9 @@ import UserNotifications
 
 /// The user's UCB tickets: reserved student tickets + the persistent standby
 /// "UCB Student ID". Reads them from the account, persists full value objects
-/// to Application Support (so QR renders offline), and keeps the near-venue
-/// notifications + showtime reminders in sync — mirroring `GoingStore`.
+/// to Application Support (so QR renders offline), and keeps the showtime
+/// reminders in sync — mirroring `GoingStore`. (Near-venue surfacing lives in
+/// the Wallet pass, not here.)
 @MainActor
 @Observable
 final class TicketStore {
@@ -102,19 +103,26 @@ final class TicketStore {
         // or poster art — and its meta line occasionally fails to parse, which
         // would drop the `start` that drives reminders, expiry, and the release
         // gate. Carry whatever we learned at reserve time forward, by order id.
+        // The same goes for a partially-rendered page (the QR is client-drawn
+        // after load; the title/venue come from the card's header): an empty
+        // QR or the fallback title is "didn't read", not "changed", and taking
+        // it would blank the code the user needs at the door — and push that
+        // blank to iCloud — exactly as the Student ID guard below prevents.
         let prior = Dictionary(reserved.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         reserved = snap.tickets.map { t in
-            guard let old = prior[t.id],
-                  t.showID == nil || t.start == nil || t.posterURL == nil else { return t }
+            guard let old = prior[t.id] else { return t }
             // `start` is naive venue-local, so it only means anything alongside
             // the source it was read in — those two always travel together.
             let keepOldStart = t.start == nil && old.start != nil
+            let partialTitle = t.title.isEmpty || t.title == UCBSession.fallbackTitle
             return Ticket(kind: .reserved, showID: t.showID ?? old.showID, orderID: t.orderID,
-                          eventID: t.eventID ?? old.eventID, title: t.title,
-                          venueLabel: t.venueLabel,
+                          eventID: t.eventID ?? old.eventID,
+                          title: partialTitle ? old.title : t.title,
+                          venueLabel: t.venueLabel.isEmpty ? old.venueLabel : t.venueLabel,
                           source: keepOldStart ? old.source : t.source,
                           start: keepOldStart ? old.start : t.start,
-                          qrSVG: t.qrSVG, releaseNonce: t.releaseNonce,
+                          qrSVG: t.qrSVG.isEmpty ? old.qrSVG : t.qrSVG,
+                          releaseNonce: t.releaseNonce,
                           posterURL: t.posterURL ?? old.posterURL)
         }.filter { !$0.isPast() }
         // Same carry-forward as `reserved` above, for the same reason: a
@@ -237,7 +245,9 @@ final class TicketStore {
             await NotificationAuth.ensure()
         }
         let result = await account.session.reserve(showURL: url)
-        guard result.success else { return result }
+        // "Already reserved" (on ucbtheatre.com, typically) is a reserve as far
+        // as the wallet is concerned: the ticket exists and should land here.
+        guard result.success || result.alreadyClaimed else { return result }
         // Park the join intent before syncing: it carries the show identity the
         // reminder dedupe needs, and the account page never carries it. A read
         // that comes back `unknown` then loses nothing — one retry here, and
@@ -247,12 +257,24 @@ final class TicketStore {
         return result
     }
 
+    /// Release a reservation. The result's `message` is UCB's own reason when
+    /// it refused (inside the hour, stale nonce), not a generic one. On
+    /// success the wallet is refreshed; if that read doesn't land, the ticket
+    /// is dropped locally anyway — the nonce is spent and the seat is gone, so
+    /// leaving it in the wallet (with a Release button) would be a lie.
     @discardableResult
-    func release(_ ticket: Ticket) async -> Bool {
-        guard let account, let order = ticket.orderID, let nonce = ticket.releaseNonce else { return false }
+    func release(_ ticket: Ticket) async -> UCBSession.ActionResult {
+        guard let account, let order = ticket.orderID, let nonce = ticket.releaseNonce else {
+            return .init(success: false, message: "This ticket can’t be released from the app.")
+        }
         let result = await account.session.release(order: order, nonce: nonce)
-        if result.success { await sync() }
-        return result.success
+        guard result.success else { return result }
+        if await sync() == false, await sync() == false {
+            reserved.removeAll { $0.id == ticket.id }
+            save()
+            reconcileReminders()
+        }
+        return result
     }
 
     // MARK: Reminders (near-venue surfacing lives in the Wallet pass now)
@@ -347,7 +369,7 @@ final class TicketStore {
 
     #if DEBUG
     /// Screenshot-verification hook (see DebugFixtures): in-memory only, never
-    /// saved, no reminders/geofences armed.
+    /// saved, no reminders armed.
     func debugSeed(studentID: Ticket, reserved: [Ticket]) {
         self.studentID = studentID
         self.reserved = reserved
@@ -380,10 +402,17 @@ final class TicketStore {
     /// while we hold anything; the local session's own `clearLocal()` is what
     /// clears this device. Payloads that add or update tickets are adopted
     /// normally.
+    ///
+    /// Ignoring it has to be more than a no-op: `CloudSync` had already written
+    /// the empty payload over tickets.json before telling us, and `load()` on
+    /// the next cold launch adopts disk unconditionally — an offline launch at
+    /// the theater would then come up with no Student ID and no reminders. So
+    /// re-save what's in memory, which puts disk (and the cloud copy) back to
+    /// what this device still holds.
     private func reloadFromCloud() {
         guard let saved = decodeSaved() else { return }
         let remoteIsEmpty = saved.studentID == nil && !saved.reserved.contains { !$0.isPast() }
-        guard !(remoteIsEmpty && hasAnything) else { return }
+        guard !(remoteIsEmpty && hasAnything) else { save(); return }
         adoptSaved(saved)
     }
 

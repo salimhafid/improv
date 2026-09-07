@@ -15,6 +15,13 @@ final class UCBAccountStore {
     private(set) var eligible = false
     private(set) var freeRemaining = 0
 
+    /// A real `.signedIn` read landed this session, so `name` / `eligible` /
+    /// `freeRemaining` describe the account rather than their defaults.
+    /// `phase == .signedIn` is NOT that: launch restore and sign-in both force
+    /// `.signedIn` on an inconclusive read, and "0 free shows left" off a
+    /// default is a lie the wallet must not print.
+    private(set) var isConfirmed = false
+
     let session = UCBSession()
     private static let marker = "session-valid"
 
@@ -73,10 +80,12 @@ final class UCBAccountStore {
         switch outcome {
         case .signedIn(let snap):
             phase = .signedIn
+            isConfirmed = true
             name = snap.name; eligible = snap.eligible; freeRemaining = snap.freeRemaining
         case .signedOut:
             Keychain.delete(Self.marker)
             phase = .signedOut
+            isConfirmed = false
             name = ""; eligible = false; freeRemaining = 0
         case .unknown:
             break
@@ -85,19 +94,26 @@ final class UCBAccountStore {
     }
 
     /// Called by the sign-in web view once it lands on the logged-in dashboard.
-    func completeSignIn() async {
+    /// Returns the read's outcome so the caller can hand it to
+    /// `TicketStore.adopt` — the same one-read-shared-with-the-wallet shape as
+    /// launch, instead of the Tickets tab immediately paying for a second
+    /// serialized 1–20 s navigation.
+    @discardableResult
+    func completeSignIn() async -> UCBSession.RefreshOutcome {
         Keychain.set("1", for: Self.marker)
         let outcome = await refresh()
         // The user just watched the dashboard load, so an ambiguous first read
         // (challenge interstitial, slow network) must not leave the app looking
         // signed out — trust the login; the next refresh confirms.
         if case .unknown = outcome { phase = .signedIn }
+        return outcome
     }
 
     func signOut() async {
         await session.signOut()
         Keychain.delete(Self.marker)
         phase = .signedOut
+        isConfirmed = false
         name = ""; eligible = false; freeRemaining = 0
     }
 
@@ -105,6 +121,7 @@ final class UCBAccountStore {
     /// Screenshot-verification hook (see DebugFixtures) — no session behind it.
     func debugForceSignedIn(name: String) {
         phase = .signedIn
+        isConfirmed = true
         self.name = name; eligible = true; freeRemaining = 2
     }
 

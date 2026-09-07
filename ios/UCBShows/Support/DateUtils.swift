@@ -21,13 +21,16 @@ enum DateUtils {
     /// Parses `yyyy-MM-dd'T'HH:mm:ss` (timed), `yyyy-MM-dd'T'HH:mm`
     /// (minute-precision, e.g. from the UCB account-page scrape), or
     /// `yyyy-MM-dd` (date-only), interpreting the value in the venue's timezone.
+    /// Anything else — an offset, fractional seconds — is nil: guessing
+    /// midnight from the date prefix would silently mask a scraper regression
+    /// as a "Time TBA" show at the wrong instant.
     static func parse(_ value: String, in tz: TimeZone) -> Date? {
-        if value.count == 10 {
-            return formatter(.dateOnly, in: tz).date(from: value)
+        switch value.count {
+        case 10: return formatter(.dateOnly, in: tz).date(from: value)
+        case 16: return formatter(.dateTime, in: tz).date(from: value + ":00")
+        case 19: return formatter(.dateTime, in: tz).date(from: value)
+        default: return nil
         }
-        return formatter(.dateTime, in: tz).date(from: value)
-            ?? formatter(.dateTime, in: tz).date(from: value + ":00")
-            ?? formatter(.dateOnly, in: tz).date(from: String(value.prefix(10)))
     }
 
     /// `yyyy-MM-dd` bucket key in the venue's local day.

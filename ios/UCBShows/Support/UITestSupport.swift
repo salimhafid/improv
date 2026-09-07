@@ -32,14 +32,16 @@ struct UITestTabSelection: ViewModifier {
 }
 
 /// DEBUG-only: opens the theater sidebar on launch when UITEST_SIDEBAR=1, for
-/// verification screenshots. No-op in release.
+/// verification screenshots. No-op in release, and on regular width, where the
+/// theater list is a persistent column rather than a drawer.
 struct UITestSidebar: ViewModifier {
     @Environment(AppState.self) private var app
+    @Environment(\.horizontalSizeClass) private var hSize
 
     func body(content: Content) -> some View {
         #if DEBUG
         content.onAppear {
-            if ProcessInfo.processInfo.environment["UITEST_SIDEBAR"] == "1" {
+            if ProcessInfo.processInfo.environment["UITEST_SIDEBAR"] == "1", hSize != .regular {
                 app.sidebarOpen = true
             }
         }

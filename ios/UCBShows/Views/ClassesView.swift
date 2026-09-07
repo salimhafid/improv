@@ -13,8 +13,14 @@ struct ClassesView: View {
     @State private var query = ""
     @State private var expandedSchool: String?
     @State private var expandedSubjects: Set<String> = []
+    @State private var retrying = false
 
     private var theaters: Set<String> { app.selectedTheaters }
+    /// During a search every folder and subject is held open: the layout only
+    /// keeps folders with hits, and hits two collapsed levels deep are as good
+    /// as hidden. The user's own expand state is left alone for when the
+    /// query clears.
+    private var searching: Bool { !query.isEmpty }
     private var title: String { app.scopeCityName ?? "Classes" }
     private var searchPrompt: String {
         app.scopeCityName.map { "Search \($0) classes" } ?? "Search classes"
@@ -81,7 +87,7 @@ struct ClassesView: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 if store.phase == .offline {
-                    OfflineBanner(updatedLabel: store.updatedLabel)
+                    OfflineBanner(updatedLabel: store.updatedLabel, noun: "classes")
                         .padding(.bottom, 8)
                 }
 
@@ -114,7 +120,7 @@ struct ClassesView: View {
 
     @ViewBuilder
     private func schoolCard(_ folder: SchoolFolder) -> some View {
-        let isOpen = expandedSchool == folder.id
+        let isOpen = searching || expandedSchool == folder.id
         VStack(spacing: 0) {
             if folder.subjects.isEmpty {
                 // A picked theater with nothing in the class feed. Present but
@@ -123,6 +129,9 @@ struct ClassesView: View {
                 cardHeader(folder, isOpen: false, trailing: "No classes listed", chevron: false)
             } else {
                 Button {
+                    // Held open by the search: a tap has nothing to show and
+                    // must not silently change the remembered pick.
+                    guard !searching else { return }
                     withAnimation(.snappy(duration: 0.25)) {
                         expandedSchool = isOpen ? nil : folder.id
                     }
@@ -130,7 +139,10 @@ struct ClassesView: View {
                     cardHeader(folder, isOpen: isOpen, trailing: "\(folder.count)", chevron: true)
                 }
                 .buttonStyle(.plain)
-                .sensoryFeedback(.selection, trigger: isOpen)
+                .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
+                // Keyed on the user's own pick, not `isOpen`: a search
+                // holding every card open must not fire a haptic per card.
+                .sensoryFeedback(.selection, trigger: expandedSchool == folder.id)
 
                 if isOpen {
                     ForEach(folder.subjects) { group in
@@ -171,10 +183,11 @@ struct ClassesView: View {
     // MARK: Subject Sub-section
 
     private func subjectSection(_ group: SubjectGroup) -> some View {
-        let isOpen = expandedSubjects.contains(group.id)
+        let isOpen = searching || expandedSubjects.contains(group.id)
         return VStack(spacing: 0) {
             Divider().padding(.leading, 14)
             Button {
+                guard !searching else { return }   // same as the card header above
                 withAnimation(.snappy(duration: 0.2)) {
                     if isOpen {
                         expandedSubjects.remove(group.id)
@@ -201,6 +214,7 @@ struct ClassesView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
 
             if isOpen {
                 // Iterating the array directly, not `Array(enumerated())`: that
@@ -224,29 +238,12 @@ struct ClassesView: View {
 
     // MARK: States
 
-    @ViewBuilder
+    /// Only reachable during a search: with an empty query every picked
+    /// theater keeps its folder (see `ClassesStore.buildSchoolFolders`) and
+    /// the selection is never empty, so an empty layout always means "no
+    /// matches".
     private var emptyState: some View {
-        if !query.isEmpty {
-            ContentUnavailableView.search(text: query)
-        } else {
-            noClassesForCity
-        }
-    }
-
-    private var noClassesForCity: some View {
-        ContentUnavailableView {
-            Label("No Classes", systemImage: "graduationcap")
-        } description: {
-            // The list is city-wide, so an empty one is the city's fault, not
-            // the picked theater's.
-            Text(app.scopeCityName.map { "No classes listed in \($0) right now." }
-                ?? "No classes listed in the selected cities right now.")
-        } actions: {
-            if hSize == .compact {
-                Button("Choose Theater") { app.sidebarOpen = true }
-                    .buttonStyle(.borderedProminent)
-            }
-        }
+        ContentUnavailableView.search(text: query)
     }
 
     private var emptyDataState: some View {
@@ -263,8 +260,23 @@ struct ClassesView: View {
         } description: {
             Text(message)
         } actions: {
-            Button("Try Again") { Task { await store.refresh() } }
-                .buttonStyle(.borderedProminent)
+            // `refresh()` leaves the phase at `.failed` until it resolves, so
+            // the button carries its own in-progress state.
+            Button {
+                retrying = true
+                Task {
+                    await store.refresh()
+                    retrying = false
+                }
+            } label: {
+                if retrying {
+                    ProgressView().frame(minWidth: 72)
+                } else {
+                    Text("Try Again").frame(minWidth: 72)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(retrying)
         }
     }
 

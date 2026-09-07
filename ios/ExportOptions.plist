@@ -12,5 +12,10 @@
 	<true/>
 	<key>destination</key>
 	<string>upload</string>
+	<!-- Keep CFBundleVersion exactly as built: the build number is bumped by
+	     hand in the pbxproj, and letting Xcode rewrite it at upload would put
+	     App Store Connect out of step with the source. -->
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
 </dict>
 </plist>

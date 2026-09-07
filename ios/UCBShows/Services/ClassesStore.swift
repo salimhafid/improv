@@ -89,12 +89,18 @@ final class ClassesStore {
                 phase = .loaded
             }
         }
-        await refresh()
+        await refresh(force: false)
     }
 
-    func refresh() async {
+    /// Refresh from the network. `force` — the default, since every caller
+    /// outside the store is the user pulling or tapping "Try Again" — makes
+    /// the request revalidate with the origin even inside the CDN's max-age,
+    /// so an explicit refresh can't "succeed" out of `URLCache` while offline.
+    /// The launch path passes false and lets the protocol cache answer.
+    func refresh(force: Bool = true) async {
         do {
-            let payload = try await service.fetchRemote()
+            let payload = try await service.fetchRemote(
+                policy: force ? .reloadRevalidatingCacheData : .useProtocolCachePolicy)
             apply(payload)
             phase = .loaded
         } catch {
@@ -155,9 +161,10 @@ final class ClassesStore {
     /// Rank in UCB's core improv sequence: 101 → 0 … 401 → 3, nil for
     /// everything else. Matched on title or level prefix so a renamed feed
     /// subtitle ("Improv 101: Improv Basics") still qualifies; "Musical
-    /// Improv 101" etc. don't (prefix is anchored at the start).
+    /// Improv 101" etc. don't (prefix is anchored at the start). UCB Online
+    /// teaches the same sequence, so it ranks too.
     static func coreRank(_ item: ClassItem) -> Int? {
-        guard item.source == "ucb_ny" || item.source == "ucb_la" else { return nil }
+        guard SourceCatalog.isUCB(item.source) else { return nil }
         for (rank, number) in ["101", "201", "301", "401"].enumerated() {
             let prefix = "Improv \(number)"
             if item.title.hasPrefix(prefix) || item.level.hasPrefix(prefix) { return rank }

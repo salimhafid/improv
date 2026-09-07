@@ -44,9 +44,10 @@ struct CastMember: Codable, Hashable {
     }
 }
 
-/// A single upcoming UCB show. Decoding is defensive: the scraper can emit
-/// `null`/empty for `start`, `end`, `image`, or `post_id`, so those are optional
-/// and never abort decoding.
+/// A single upcoming show. Decoding is defensive: the scrapers can emit
+/// `null`/empty for `start`, `end`, `image`, or `post_id`, and a regression can
+/// mistype any field, so every field is optional-with-default and never aborts
+/// decoding.
 struct Show: Codable, Identifiable, Hashable {
     let postID: Int?
     let title: String
@@ -118,28 +119,33 @@ struct Show: Codable, Identifiable, Hashable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        postID = try c.decodeIfPresent(Int.self, forKey: .postID)
-        title = (try c.decodeIfPresent(String.self, forKey: .title)) ?? "Untitled show"
-        urlString = Self.nonEmpty(try c.decodeIfPresent(String.self, forKey: .urlString))
-        slug = Self.nonEmpty(try c.decodeIfPresent(String.self, forKey: .slug))
-        dateRaw = (try c.decodeIfPresent(String.self, forKey: .dateRaw)) ?? ""
-        start = Self.nonEmpty(try c.decodeIfPresent(String.self, forKey: .start))
-        end = Self.nonEmpty(try c.decodeIfPresent(String.self, forKey: .end))
-        hasTime = (try c.decodeIfPresent(Bool.self, forKey: .hasTime)) ?? false
-        venue = (try c.decodeIfPresent(String.self, forKey: .venue)) ?? ""
-        venues = (try c.decodeIfPresent([String].self, forKey: .venues)) ?? []
-        isLivestream = (try c.decodeIfPresent(Bool.self, forKey: .isLivestream)) ?? false
-        comedyTypes = (try c.decodeIfPresent([String].self, forKey: .comedyTypes)) ?? []
-        imageString = Self.nonEmpty(try c.decodeIfPresent(String.self, forKey: .imageString))
-        excerpt = (try c.decodeIfPresent(String.self, forKey: .excerpt)) ?? ""
-        fullDescription = (try c.decodeIfPresent(String.self, forKey: .fullDescription)) ?? ""
-        cast = (try c.decodeIfPresent(String.self, forKey: .cast)) ?? ""
-        castList = ((try c.decodeIfPresent([CastMember].self, forKey: .castList)) ?? [])
+        // `try?` throughout, and `Lossy` for the inner arrays: a wrong-typed
+        // value or one bad element drops that field to its default, never the
+        // whole row (the payload's `Lossy<Show>` would silently discard it).
+        postID = try? c.decodeIfPresent(Int.self, forKey: .postID)
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? "Untitled show"
+        urlString = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .urlString))
+        slug = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .slug))
+        dateRaw = (try? c.decodeIfPresent(String.self, forKey: .dateRaw)) ?? ""
+        start = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .start))
+        end = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .end))
+        hasTime = (try? c.decodeIfPresent(Bool.self, forKey: .hasTime)) ?? false
+        venue = (try? c.decodeIfPresent(String.self, forKey: .venue)) ?? ""
+        venues = (try? c.decodeIfPresent(Lossy<String>.self, forKey: .venues))?.elements ?? []
+        isLivestream = (try? c.decodeIfPresent(Bool.self, forKey: .isLivestream)) ?? false
+        comedyTypes = (try? c.decodeIfPresent(Lossy<String>.self, forKey: .comedyTypes))?.elements ?? []
+        imageString = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .imageString))
+        excerpt = (try? c.decodeIfPresent(String.self, forKey: .excerpt)) ?? ""
+        fullDescription = (try? c.decodeIfPresent(String.self, forKey: .fullDescription)) ?? ""
+        cast = (try? c.decodeIfPresent(String.self, forKey: .cast)) ?? ""
+        castList = ((try? c.decodeIfPresent(Lossy<CastMember>.self, forKey: .castList))?.elements ?? [])
             .filter { !$0.name.isEmpty }
-        isFree = (try c.decodeIfPresent(Bool.self, forKey: .isFree)) ?? false
-        source = (try c.decodeIfPresent(String.self, forKey: .source)) ?? "ucb_ny"
-        org = (try c.decodeIfPresent(String.self, forKey: .org)) ?? "UCB"
-        city = (try c.decodeIfPresent(String.self, forKey: .city)) ?? "New York"
+        isFree = (try? c.decodeIfPresent(Bool.self, forKey: .isFree)) ?? false
+        // An empty string is the scrapers' own "unset" (`make_show` starts
+        // from ""), so it takes the same fallback as an absent key.
+        source = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .source)) ?? "ucb_ny"
+        org = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .org)) ?? "UCB"
+        city = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .city)) ?? "New York"
 
         let tz = City(rawValue: city)?.timeZone ?? .newYork
         startDate = start.flatMap { DateUtils.parse($0, in: tz) }
@@ -228,7 +234,8 @@ extension Show {
     }
 
     private static func extractTime(from raw: String) -> String? {
-        guard let range = raw.range(of: #"\d{1,2}:\d{2}\s*[AaPp][Mm]"#, options: .regularExpression)
+        // Trailing word boundary: "10:00 amazing" is not "10:00 AM".
+        guard let range = raw.range(of: #"\d{1,2}:\d{2}\s*[AaPp][Mm]\b"#, options: .regularExpression)
         else { return nil }
         return raw[range].uppercased().replacingOccurrences(of: "  ", with: " ")
     }
@@ -236,8 +243,9 @@ extension Show {
     var primaryType: String? { comedyTypes.first }
 
     /// A "Featuring:/Cast:/Lineup:" label, used to pull the lineup out of the
-    /// description into its own section.
-    private static let castLabel = #"(?:featuring|cast|line\s*-?up)\s*:\s*"#
+    /// description into its own section. Word-anchored so "podcast:" doesn't
+    /// split a description.
+    private static let castLabel = #"\b(?:featuring|cast|line\s*-?up)\s*:\s*"#
 
     /// Splits the detail copy into the body blurb and the cast list, pulling a
     /// trailing "Featuring: …" clause out of the description so the lineup renders
@@ -314,10 +322,19 @@ extension Show {
         return cityShort.isEmpty ? org : "\(org) · \(cityShort)"
     }
 
-    /// Strips scraper boilerplate from a raw venue name (single place for these
-    /// source-specific prefixes; ideally the scraper drops them upstream).
+    /// UCB's city/building tag: "NY - 14TH ST. " / "NY – 14th St. " / "LA - ",
+    /// either dash, any case. Anchored at the start so a venue that merely
+    /// contains one of the tags is left alone.
+    private static let venuePrefix = #"^\s*(?:NY|LA)\s*[-–]\s*(?:14TH ST\.?\s*)?"#
+
+    /// Strips scraper boilerplate from a raw venue name for feed rows and the
+    /// venue picker (ideally the scraper drops it upstream). The same rule as
+    /// `Ticket.cleanVenue`, which covers tickets and passes, so a feed row and
+    /// its ticket print one name.
     static func cleanVenueName(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "NY - 14TH ST. ", with: "")
+        raw.replacingOccurrences(of: venuePrefix, with: "",
+                                 options: [.regularExpression, .caseInsensitive])
+            .trimmingCharacters(in: .whitespaces)
     }
 
     /// Compact venue label for rows, e.g. "Mainstage" / "Upstairs", or

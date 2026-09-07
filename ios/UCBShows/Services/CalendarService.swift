@@ -69,14 +69,20 @@ enum CalendarService {
         }
 
         var components = URLComponents(string: "https://calendar.google.com/calendar/render")!
-        components.queryItems = [
-            .init(name: "action", value: "TEMPLATE"),
-            .init(name: "text", value: show.title),
-            .init(name: "dates", value: "\(stamp.string(from: start))/\(stamp.string(from: end))"),
-            .init(name: "ctz", value: show.cityTimeZone.identifier),
-            .init(name: "location", value: location),
-            .init(name: "details", value: details),
+        let items: [(String, String)] = [
+            ("action", "TEMPLATE"),
+            ("text", show.title),
+            ("dates", "\(stamp.string(from: start))/\(stamp.string(from: end))"),
+            ("ctz", show.cityTimeZone.identifier),
+            ("location", location),
+            ("details", details),
         ]
+        // Encode the values ourselves: `queryItems` leaves "+" literal, which
+        // Google decodes as a space ("Stand-Up + Improv" → "Stand-Up   Improv").
+        let allowed = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "+&="))
+        components.percentEncodedQueryItems = items.map { name, value in
+            URLQueryItem(name: name, value: value.addingPercentEncoding(withAllowedCharacters: allowed))
+        }
         return components.url
     }
 }

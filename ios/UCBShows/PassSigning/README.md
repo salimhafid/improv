@@ -1,7 +1,10 @@
 # Wallet pass signing
 
-Drop two PEM files here to enable the "Add to Apple Wallet" button for the
-UCB Student ID (they are git-ignored — never commit them):
+Drop two PEM files here to enable the "Add to Apple Wallet" button. One
+identity signs every pass the app builds — the UCB Student ID (store card,
+relevant near both theaters) and each reserved show ticket (event ticket,
+relevant at its venue around showtime). The files are git-ignored — never
+commit them:
 
     pass_cert.pem   the Pass Type ID certificate
     pass_key.pem    its private key (PKCS#8)
@@ -17,6 +20,13 @@ UCB Student ID (they are git-ignored — never commit them):
 
        openssl pkcs12 -in pass.p12 -clcerts -nokeys -legacy | openssl x509 -out pass_cert.pem
        openssl pkcs12 -in pass.p12 -nocerts -nodes -legacy | openssl pkcs8 -topk8 -nocrypt -out pass_key.pem
+
+   `-legacy` is an OpenSSL 3 flag (it enables the RC2 cipher older Keychain
+   exports use). The `openssl` that ships with macOS is LibreSSL, which
+   rejects it with "unknown option" — install OpenSSL 3 (`brew install
+   openssl@3`) and run that binary, or drop the flag if your `.p12` was
+   exported with AES (recent macOS versions) and the commands succeed
+   without it.
 
 4. Put both files in this folder and rebuild. The pass type identifier and
    team id are read from the certificate itself — no other config.

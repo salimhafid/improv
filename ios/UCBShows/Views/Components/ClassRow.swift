@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A single class row: a level-tinted glyph, title + instructor/schedule, theater
+/// A single class row: an accent-tinted glyph, title + instructor/schedule, theater
 /// label, and a trailing price with an optional "Full" badge. When the current
 /// theater selection spans cities, a trailing city tag disambiguates each row.
 struct ClassRow: View {
@@ -54,7 +54,8 @@ struct ClassRow: View {
                         .padding(.vertical, 2)
                         .background(.quaternary, in: Capsule())
                 } else {
-                    // Every row pushes the native class detail page.
+                    // Every row pushes the native class detail page; a full
+                    // class swaps the chevron for the badge but still navigates.
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)

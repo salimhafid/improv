@@ -5,9 +5,10 @@ import Security
 /// session validity marker (and any small session metadata) on-device only.
 ///
 /// Accessibility is `AfterFirstUnlockThisDeviceOnly`: readable in the
-/// background after the first unlock (so a geofence wake can check sign-in
-/// state), never synced to iCloud Keychain — a third-party session stays on
-/// this device, which is also what App Review expects.
+/// background after the first unlock (so a background wake can check sign-in
+/// state without the device being unlocked), never synced to iCloud Keychain —
+/// a third-party session stays on this device, which is also what App Review
+/// expects.
 enum Keychain {
     private static let service = "com.salimhafid.UCBShows.ucb"
 

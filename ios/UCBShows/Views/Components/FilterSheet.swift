@@ -15,7 +15,11 @@ struct FilterSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                if venues.count > 1 {
+                // Also shown when a venue filter is set with only one venue
+                // available: an active filter must never be invisible (a
+                // theater with one named stage still has venue-less shows
+                // that the filter drops).
+                if venues.count > 1 || store.filters.venue != nil {
                     Section("Venue") {
                         Picker("Venue", selection: $store.filters.venue) {
                             Text("All venues").tag(String?.none)
@@ -30,6 +34,7 @@ struct FilterSheet: View {
                 if !types.isEmpty {
                     Section("Comedy type") {
                         ForEach(types, id: \.self) { type in
+                            let selected = store.filters.comedyTypes.contains(type)
                             Button {
                                 toggle(type)
                             } label: {
@@ -39,13 +44,14 @@ struct FilterSheet: View {
                                         .frame(width: 26)
                                     Text(type).foregroundStyle(.primary)
                                     Spacer()
-                                    if store.filters.comedyTypes.contains(type) {
+                                    if selected {
                                         Image(systemName: "checkmark")
                                             .foregroundStyle(Theme.accent)
                                             .fontWeight(.semibold)
                                     }
                                 }
                             }
+                            .accessibilityAddTraits(selected ? [.isSelected] : [])
                         }
                     }
                 }

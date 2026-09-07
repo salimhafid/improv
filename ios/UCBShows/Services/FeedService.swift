@@ -26,11 +26,15 @@ struct FeedService<Payload: Decodable> {
         self.session = session
     }
 
-    /// Fetch fresh data and refresh the on-disk cache. Protocol cache policy, so
-    /// URLSession honors the feed's ETag/max-age — an unchanged feed costs a
-    /// ~0-byte 304 revalidation instead of a re-download.
-    func fetchRemote() async throws -> Payload {
+    /// Fetch fresh data and refresh the on-disk cache. The default protocol
+    /// cache policy lets URLSession honor the feed's ETag/max-age — an
+    /// unchanged feed costs a ~0-byte 304 revalidation instead of a
+    /// re-download — but inside the CDN's max-age window it also answers
+    /// straight out of `URLCache`, offline included. Explicit refreshes pass
+    /// `.reloadRevalidatingCacheData` so they always reach the origin.
+    func fetchRemote(policy: URLRequest.CachePolicy = .useProtocolCachePolicy) async throws -> Payload {
         var request = URLRequest(url: feedURL)
+        request.cachePolicy = policy
         request.timeoutInterval = 20
         let (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
@@ -49,7 +53,7 @@ struct FeedService<Payload: Decodable> {
 }
 
 // The three live feeds, committed to the repo by the scheduled scraper workflow
-// (UCB every 3h, other sources every 24h) and served from GitHub's raw CDN.
+// (UCB NY every 3h, every other source every 24h) and served from GitHub's raw CDN.
 private func liveFeed(_ file: String) -> URL {
     URL(string: "https://raw.githubusercontent.com/salimhafid/improv/main/docs/\(file)")!
 }

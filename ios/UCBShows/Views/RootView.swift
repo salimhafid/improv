@@ -17,22 +17,32 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var app = app
-        Group {
-            if hSize == .regular {
+        let regular = hSize == .regular
+        // One `tabs` instance with the chrome arranged around it. Putting it in
+        // either branch of an `if` made a compact↔regular flip (iPad Split
+        // View, Slide Over) recreate the TabView and drop every tab's
+        // navigation path, search text and expanded folders.
+        HStack(spacing: 0) {
+            if regular {
                 // iPad: persistent theater column, no drawer.
-                HStack(spacing: 0) {
-                    TheaterListPanel()
-                        .frame(width: 320)
-                        .background(.regularMaterial)
-                    Divider().ignoresSafeArea()
-                    tabs
-                }
-            } else {
-                ZStack {
-                    tabs
-                    TheaterSidebar()
-                }
+                TheaterListPanel()
+                    .frame(width: 320)
+                    .background(.regularMaterial)
+                Divider().ignoresSafeArea()
             }
+            tabs
+                // The open drawer covers the tabs; keep VoiceOver from
+                // wandering into the content behind the scrim. (Applied before
+                // the overlay so the drawer itself stays reachable.)
+                .accessibilityHidden(!regular && app.sidebarOpen)
+                .overlay {
+                    if !regular { TheaterSidebar() }
+                }
+        }
+        .onChange(of: hSize) { _, size in
+            // No drawer at regular width — a drawer left open before the flip
+            // must not pop back open on the way back to compact.
+            if size == .regular { app.sidebarOpen = false }
         }
         .task { await store.loadInitial() }
         .task { await classesStore.loadInitial() }
