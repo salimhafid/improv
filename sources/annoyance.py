@@ -33,6 +33,16 @@ _WORKERS = 3         # ThunderTix rate-limits aggressively (429s at ~8 concurren
 
 # Classes live on Crowdwork (the ThunderTix calendar is shows-only).
 CLASSES_SLUG = "annoyancetrial"
+# Matches the JSON-LD location name, so a production whose meta fetch failed
+# doesn't publish under a second venue label.
+DEFAULT_VENUE = "Annoyance Theatre"
+
+
+def _excerpt(text: str, limit: int = 240) -> str:
+    """First `limit` chars of the description, cut at a word boundary."""
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0]
 
 
 def fetch_classes() -> list[dict]:
@@ -46,7 +56,12 @@ def _event_ld(html: str) -> dict | None:
             data = json.loads(block)
         except json.JSONDecodeError:
             continue
-        if isinstance(data, dict) and data.get("@type") == "Event":
+        if not isinstance(data, dict):
+            continue
+        # @type may be a subtype ("TheaterEvent", "ComedyEvent") or a list.
+        types = data.get("@type")
+        types = types if isinstance(types, list) else [types]
+        if any(isinstance(t, str) and "Event" in t for t in types):
             return data
     return None
 
@@ -99,7 +114,7 @@ def fetch(today: date | None = None) -> list[dict]:
         raise RuntimeError("annoyance: calendar endpoint returned no public performances")
 
     # One metadata fetch per production (not per performance), politely.
-    event_ids = sorted({p["event_id"] for p in performances})
+    event_ids = sorted({p["event_id"] for p in performances}, key=str)  # ids may mix int/str
     with ThreadPoolExecutor(max_workers=_WORKERS) as ex:
         metas = dict(zip(event_ids, ex.map(_event_meta, event_ids)))
 
@@ -121,9 +136,10 @@ def fetch(today: date | None = None) -> list[dict]:
         if not title:
             continue
         meta = metas.get(eid) or {}
-        image = meta.get("image") or safe_url(p.get("picture"))
+        picture = p.get("picture")
+        image = meta.get("image") or (safe_url(picture) if isinstance(picture, str) else "") or None
         description = meta.get("description", "")
-        venue = meta.get("venue") or "The Annoyance Theatre"
+        venue = meta.get("venue") or DEFAULT_VENUE
         shows.append(make_show(
             title=title,
             url=f"{TT}/events/{eid}",
@@ -136,7 +152,7 @@ def fetch(today: date | None = None) -> list[dict]:
             comedy_types=[],
             image=image,
             description=description,
-            excerpt=description[:240],
+            excerpt=_excerpt(description),
             is_free=bool(meta.get("is_free")),
             source="annoyance",
             org="The Annoyance",

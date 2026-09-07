@@ -5,8 +5,10 @@ only, so instead we crawl the /shows/chicago index (~90 show pages) and read
 each page's embedded `__NEXT_DATA__`. Every show page carries a base64
 "patronticketData" blob from their Salesforce/PatronTicket box office with the
 show's full run: one instance per ticketed showtime, with an ISO8601 UTC
-timestamp, sold-out flag, and per-instance city (Chicago pages can host
-Toronto instances of touring shows — those are filtered out).
+timestamp and sold-out flag. Instances used to carry a per-instance city
+(Chicago pages hosted Toronto dates of touring shows); the field is gone
+today, so it is only honoured when present. The show's stage, tags and copy
+come from the page's own show record (`showAttributes` / `showTags`).
 
 Times convert UTC → America/Chicago and are emitted timezone-naive
 venue-local, matching the feed convention. The run horizon is capped so a
@@ -37,6 +39,12 @@ _NEXT_DATA = re.compile(
     r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
 _OG_IMAGE = re.compile(r'property="og:image" content="([^"]+)"')
 _NEXT_IMG_URL = re.compile(r"[?&]url=([^&]+)")
+# showTags mixes genres with rating/policy labels ("Rated R", "21+ Only",
+# "Age Requirement 13+", "No Drink Minimum", "Guest Performance"); only the
+# genres belong in comedy_types (the app turns every value into a filter chip).
+_NON_GENRE_TAG = re.compile(
+    r"^(?:rated\b|pg(?:-13)?$|nc-?17|\d{2}\+|age requirement|(?:no |two |2 )?drink minimum"
+    r"|guest performance)", re.I)
 
 
 def _stage(slug: str, title: str) -> str:
@@ -48,6 +56,36 @@ def _stage(slug: str, title: str) -> str:
         return "e.t.c. Theater"
     if "skybox" in hay:
         return "Donny's Skybox"
+    return ""
+
+
+def _show_node(obj) -> dict | None:
+    """The page's own show record: the dict carrying the patronticketData blob
+    next to showAttributes/showTags. Sibling queries hold *other* shows'
+    attributes (the what's-playing rail) and the site-wide accessibility copy,
+    so a whole-tree walk for `description`/`venue` is not safe."""
+    if isinstance(obj, dict):
+        if "patronticketData" in obj and ("showAttributes" in obj or "showTags" in obj):
+            return obj
+        for v in obj.values():
+            found = _show_node(v)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _show_node(v)
+            if found:
+                return found
+    return None
+
+
+def _page_venue(attrs: dict) -> str:
+    """Stage from showAttributes.venue[].name ('Chicago Mainstage',
+    'de Maat Studio Theatre - Chicago'); the city suffix is redundant with `city`."""
+    for v in attrs.get("venue") or []:
+        name = clean(v.get("name")) if isinstance(v, dict) else ""
+        if name:
+            return re.sub(r"\s*-\s*Chicago$", "", name)
     return ""
 
 
@@ -110,29 +148,41 @@ def _parse_show_page(path: str, today: date) -> list[dict]:
     if not title:
         return []
 
+    node = _show_node(data) or {}
+    attrs = node.get("showAttributes") or {}
+
     tags = []
-    for nodes in _walk(data, "showTags"):
-        for node in (nodes or {}).get("nodes", []):
-            name = clean(node.get("name", ""))
-            if name:
-                tags.append("Sketch" if name.lower() == "sketch comedy" else name)
+    tag_sets = [node["showTags"]] if node.get("showTags") else _walk(data, "showTags")
+    for nodes in tag_sets:
+        for tag in (nodes or {}).get("nodes", []):
+            name = clean(tag.get("name", ""))
+            if not name or _NON_GENRE_TAG.match(name):
+                continue
+            tags.append("Sketch" if name.lower() == "sketch comedy" else name)
         if tags:
             break
 
+    # The show's own copy: the blob's description/detail, else the page's
+    # showAttributes.description. Never the first `description` anywhere in
+    # __NEXT_DATA__ — that is the site-wide parking/accessibility paragraph.
     description = ""
-    for desc in _walk(data, "description"):
-        if isinstance(desc, str) and "<p" in desc:
-            description = clean(re.sub(r"<[^>]+>", " ", desc))
+    for raw_desc in (blob.get("description"), blob.get("detail"), attrs.get("description")):
+        description = strip_html(raw_desc)
+        if description:
             break
 
     image = _image_from_page(html)
     slug_base = path.rstrip("/").split("/")[-1]
-    venue = _stage(slug_base, title)
+    venue = _page_venue(attrs) or _stage(slug_base, title)
     horizon = today + timedelta(days=_HORIZON_DAYS)
 
     shows: list[dict] = []
-    for inst in blob.get("instances", []):
-        if inst.get("custom", {}).get("Event_City__c") != "Chicago":
+    for inst in blob.get("instances") or []:
+        # PatronTicket no longer stamps instances with Event_City__c; skip only
+        # when the key is present and names another city (the Toronto case).
+        custom = inst.get("custom") if isinstance(inst.get("custom"), dict) else {}
+        inst_city = custom.get("Event_City__c")
+        if inst_city and inst_city != "Chicago":
             continue
         iso = (inst.get("formattedDates") or {}).get("ISO8601")
         if not iso:
@@ -216,12 +266,23 @@ def _section_schedule(row: dict) -> str:
     try:
         b = date.fromisoformat(row.get("default_beginning_date") or "")
         e = date.fromisoformat(row.get("default_ending_date") or "")
-        rng = f"{b.strftime('%b %-d')} – {e.strftime('%b %-d')}"
+        rng = b.strftime('%b %-d') if b == e else f"{b.strftime('%b %-d')} – {e.strftime('%b %-d')}"
     except ValueError:
         pass
     bits = " · ".join(x for x in (pattern, rng) if x)
     sessions = row.get("NUMBEROFSESSIONS")
-    return f"{bits} · {sessions} sessions" if bits and sessions else bits
+    if not (bits and sessions):
+        return bits
+    return f"{bits} · {sessions} {'session' if str(sessions).strip() == '1' else 'sessions'}"
+
+
+def _no_open_seats(row: dict) -> bool:
+    """NUMBER_OPEN is a count that Activenet happens to serialize as a string
+    ("0"); compare numerically so an int 0 reads as full too."""
+    try:
+        return float(row.get("NUMBER_OPEN")) <= 0
+    except (TypeError, ValueError):
+        return False
 
 
 def fetch_classes(today: date | None = None) -> list[dict]:
@@ -250,8 +311,8 @@ def fetch_classes(today: date | None = None) -> list[dict]:
         level = clean(cats[0].get("name")) if cats else ""
         image = safe_url((hero.get("imageDesktop") or {}).get("mediaItemUrl") or "") or None
         price = clean(hero.get("price"))
-        if price and not price.startswith("$"):
-            price = f"${price}"
+        if price and not price.startswith("$") and price[0].isdigit():
+            price = f"${price}"   # "395" / "395-675" → "$…"; "Free" stays as is
         description = strip_html(hero.get("description"))
         uri = node.get("uri") or ""
         url = f"{BASE}{uri}" if uri.startswith("/") else safe_url(uri)
@@ -273,7 +334,7 @@ def fetch_classes(today: date | None = None) -> list[dict]:
                 level=level,
                 image=image,
                 description=description[:2000],
-                is_full=(row.get("NUMBER_OPEN") == "0"),
+                is_full=_no_open_seats(row),
                 source="second_city", org="The Second City", city="Chicago",
             ))
     return out
@@ -282,7 +343,8 @@ def fetch_classes(today: date | None = None) -> list[dict]:
 def fetch(today: date | None = None) -> list[dict]:
     today = today or local_today("Chicago")
     index_html = fetch_html(INDEX)
-    paths = sorted(set(re.findall(r'href="(/shows/chicago/[^"#?]+)"', index_html)))
+    # rstrip so /foo and /foo/ are one page (they'd emit duplicate slugs).
+    paths = sorted({p.rstrip("/") for p in re.findall(r'href="(/shows/chicago/[^"#?]+)"', index_html)})
     if not paths:
         raise RuntimeError("second_city: no show links on the index page")
 

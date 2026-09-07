@@ -18,20 +18,33 @@ ARLO_BASE = "https://ucbcomedy.arlo.co/api/2012-02-01/pub/resources/"
 # the arlo.co hosted pages 404. UCB's only working deep link is its own course
 # catalog (a JS widget) filtered by a search term — lands on the class.
 CATALOG_SEARCH = "https://ucbcomedy.com/training-center/course/#1-search=%s"
-_FIELDS = ("EventID,Name,StartDateTime,Summary,ViewUri,IsFull,"
-           "Location,Categories,Tags,Presenters,AdvertisedOffers")
-_EXPAND = "Categories,Presenters,AdvertisedOffers,Location"
+_FIELDS = ("EventID,Name,StartDateTime,Summary,IsFull,"
+           "Categories,Tags,Presenters,AdvertisedOffers")
+_EXPAND = "Categories,Presenters,AdvertisedOffers"
 
-# Memo the (paged) event list so the NY and LA passes in one aggregate don't
-# each re-page the whole catalog.
-_memo: tuple[float, list] | None = None
+# Memo the (paged) event list so the NY, LA and Online passes in one aggregate
+# don't each re-page the whole catalog. A failed walk is memoised too (as the
+# error) so a mid-walk outage is not re-walked three times per run.
+_memo: tuple[float, list | Exception] | None = None
 _MEMO_TTL = 120.0
 
 
 def _events() -> list[dict]:
     global _memo
     if _memo and (time.monotonic() - _memo[0]) < _MEMO_TTL:
+        if isinstance(_memo[1], Exception):
+            raise RuntimeError(f"ucb_classes: Arlo walk failed earlier this run: {_memo[1]}")
         return _memo[1]
+    try:
+        items = _walk()
+    except Exception as e:
+        _memo = (time.monotonic(), e)
+        raise
+    _memo = (time.monotonic(), items)
+    return items
+
+
+def _walk() -> list[dict]:
     items: list[dict] = []
     skip = 0
     while skip <= 5000:
@@ -45,7 +58,6 @@ def _events() -> list[dict]:
         # Advance by what Arlo actually returned — if it ever pages at <100,
         # a fixed +100 stride would silently skip records.
         skip += len(batch)
-    _memo = (time.monotonic(), items)
     return items
 
 
@@ -76,6 +88,10 @@ def _build(loc_tag: str, source: str, org: str, city: str) -> list[dict]:
         level = re.sub(r"^\d+\.\s*", "", clean((cats[0] or {}).get("Name"))) if cats else ""
         instructor = ", ".join(clean(p.get("Name")) for p in (ev.get("Presenters") or []) if p.get("Name"))
         term = title.split(":")[0].strip() or title  # course name, e.g. "Improv 101"
+        # Arlo's Summary is usually just "Category: Improv & Musical Improv" —
+        # a duplicate of `level`, not a description; publish only real copy.
+        summary = strip_html(ev.get("Summary"))
+        description = "" if summary.lower().startswith("category:") else summary
         out.append(make_class(
             id=f"{source}/{ev.get('EventID')}",
             title=title,
@@ -85,7 +101,7 @@ def _build(loc_tag: str, source: str, org: str, city: str) -> list[dict]:
             start=start,
             price=_price(ev.get("AdvertisedOffers")),
             level=level,
-            description=strip_html(ev.get("Summary")),
+            description=description,
             is_full=bool(ev.get("IsFull")),
             source=source, org=org, city=city,
         ))

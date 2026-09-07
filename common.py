@@ -10,6 +10,7 @@ import logging
 import re
 import time
 from datetime import date, datetime, timezone
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
@@ -31,6 +32,8 @@ CITY_TZ = {
     "New York": ZoneInfo("America/New_York"),
     "Los Angeles": ZoneInfo("America/Los_Angeles"),
     "Chicago": ZoneInfo("America/Chicago"),
+    # UCB schedules its online classes in Eastern time.
+    "Online": ZoneInfo("America/New_York"),
 }
 
 
@@ -44,38 +47,83 @@ def local_today(city: str, now: datetime | None = None) -> date:
     return now.astimezone(CITY_TZ.get(city, CITY_TZ["New York"])).date()
 
 
-def fetch_html(url: str, retries: int = 3) -> str:
-    """Fetch a page past Cloudflare. Raises RuntimeError on failure."""
+# Statuses that will not change on a retry with a different fingerprint. 403
+# is deliberately absent: Cloudflare answers a rejected TLS fingerprint with a
+# 403 (ucbcomedy.com does so for chrome120 while chrome/safari get 200), so it
+# is exactly the case the rotation exists for.
+_NO_RETRY_STATUSES = {404, 410}
+# (host, status) pairs whose body has already been logged this process, so a
+# blocked host (e.g. ucbcomedy.com's bare 202 to the Actions runner) is
+# captured once for diagnosis instead of on every URL.
+_logged_bodies: set[tuple[str, int]] = set()
+
+
+def _looks_challenged(body: str) -> bool:
+    low = body.lower()
+    return "just a moment" in low or "cf_chl" in low
+
+
+def _log_bad_response(url: str, resp, target: str) -> None:
+    key = (urlsplit(url).netloc, resp.status_code)
+    if key in _logged_bodies:
+        return
+    _logged_bodies.add(key)
+    log.warning("%s answered status=%d (impersonate=%s); body starts: %r",
+                url, resp.status_code, target, resp.text[:200])
+
+
+def _request(method: str, url: str, *, data=None, as_json: bool = False, retries: int = 3):
+    """One request with impersonation rotation and backoff. Returns the body
+    text, or the decoded JSON when as_json. Raises RuntimeError on failure.
+    A 202 is treated as a challenge: ucbcomedy.com answers the runner with it
+    instead of a 'just a moment' page. Non-retryable statuses short-circuit."""
     last_err = None
+    attempts = 0
     for attempt in range(retries):
+        attempts = attempt + 1
         target = IMPERSONATE_TARGETS[attempt % len(IMPERSONATE_TARGETS)]
         try:
-            resp = cffi_requests.get(url, impersonate=target, timeout=30)
-            challenged = "just a moment" in resp.text.lower() or "cf_chl" in resp.text.lower()
-            if resp.status_code == 200 and not challenged:
+            resp = cffi_requests.request(method, url, data=data, impersonate=target, timeout=30)
+            challenged = resp.status_code == 202 or _looks_challenged(resp.text)
+            payload = None
+            if resp.status_code == 200 and as_json:
+                # A JSON body is never a challenge page if it decodes; a
+                # non-JSON 200 (HTML interstitial) is retried like one.
+                try:
+                    payload = resp.json()
+                except ValueError as e:
+                    last_err = f"non-JSON body challenged={challenged} impersonate={target}: {e}"
+            elif resp.status_code == 200 and not challenged:
+                payload = resp.text
+            else:
+                last_err = f"status={resp.status_code} challenged={challenged} impersonate={target}"
+            if payload is not None:
                 log.info("fetched %s (%d bytes, impersonate=%s)", url, len(resp.text), target)
-                return resp.text
-            last_err = f"status={resp.status_code} challenged={challenged} impersonate={target}"
+                return payload
+            _log_bad_response(url, resp, target)
+            if resp.status_code in _NO_RETRY_STATUSES:
+                break
         except Exception as e:  # noqa: BLE001
             last_err = repr(e)
-        time.sleep(2 ** attempt)
-    raise RuntimeError(f"failed to fetch {url} after {retries} attempts: {last_err}")
+        if attempt < retries - 1:
+            time.sleep(2 ** attempt)
+    raise RuntimeError(f"failed to fetch {url} after {attempts} attempts: {last_err}")
+
+
+def fetch_html(url: str, retries: int = 3) -> str:
+    """Fetch a page past Cloudflare. Raises RuntimeError on failure."""
+    return _request("GET", url, retries=retries)
 
 
 def fetch_json(url: str, retries: int = 3):
     """Fetch + JSON-decode a URL with the same impersonation/retries."""
-    last_err = None
-    for attempt in range(retries):
-        target = IMPERSONATE_TARGETS[attempt % len(IMPERSONATE_TARGETS)]
-        try:
-            resp = cffi_requests.get(url, impersonate=target, timeout=30)
-            if resp.status_code == 200:
-                return resp.json()
-            last_err = f"status={resp.status_code}"
-        except Exception as e:  # noqa: BLE001
-            last_err = repr(e)
-        time.sleep(2 ** attempt)
-    raise RuntimeError(f"failed to fetch json {url} after {retries} attempts: {last_err}")
+    return _request("GET", url, as_json=True, retries=retries)
+
+
+def post_json(url: str, data: dict, retries: int = 3):
+    """POST a form body and JSON-decode the answer, with the same hardening
+    (status check, impersonation rotation, challenge check, retries)."""
+    return _request("POST", url, data=data, as_json=True, retries=retries)
 
 
 _BLOCK_TAGS = {"p", "div", "section", "article", "blockquote",
@@ -122,8 +170,12 @@ def clean(text) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def safe_url(url: str | None) -> str:
-    """Allow only http(s) URLs; block javascript:/data: etc. from third-party data."""
+def safe_url(url) -> str:
+    """Allow only http(s) URLs; block javascript:/data: etc. from third-party data.
+    Non-string CMS values (ints, dicts) yield "" rather than crashing a source."""
+    if not isinstance(url, str):
+        return ""
+    url = url.strip()
     if url and re.match(r"https?://", url, re.I):
         return url
     return ""
@@ -139,15 +191,24 @@ def strip_html(s) -> str:
     return clean(BeautifulSoup(s, "lxml").get_text(" "))
 
 
+# A trailing end time ("7:00 PM - 9:00 PM"): the range trigger below would
+# otherwise send the whole string to a fuzzy parse that fails, or reads an
+# un-spaced "-9:00" as a UTC offset.
+_TRAILING_END_TIME = re.compile(
+    r"(\d{1,2}(?::\d{2})?\s*[AaPp]\.?[Mm]\.?)\s*[–—-]\s*\d{1,2}(?::\d{2})?\s*[AaPp]\.?[Mm]\.?\s*$")
+
+
 def parse_datetime(date_raw: str):
     """Parse a date string into (start_iso, end_iso, has_time).
 
-    Handles "Friday, June 19, 2026 @ 7:00 PM" and ranges
-    "Friday, June 12 - Sunday, June 14, 2026". Unparseable -> (None, None, False).
+    Handles "Friday, June 19, 2026 @ 7:00 PM" (optionally "- 9:00 PM") and
+    ranges "Friday, June 12 - Sunday, June 14, 2026". The start is always a
+    naive venue-local ISO string. Unparseable -> (None, None, False).
     """
     if not date_raw:
         return None, None, False
     text = date_raw.replace("\xa0", " ").strip()
+    text = _TRAILING_END_TIME.sub(r"\1", text)
 
     if re.search(r"\d\s*[–—-]\s*[A-Za-z0-9]", text):
         # The optional day-name eater must not swallow a month name, or
@@ -163,12 +224,20 @@ def parse_datetime(date_raw: str):
             try:
                 start = dateparser.parse(f"{m1} {d1}, {year}").date()
                 end = dateparser.parse(f"{m2} {d2}, {year}").date()
+                if start > end:
+                    # The single trailing year belongs to the end date:
+                    # "December 30 - January 2, 2027" starts in 2026.
+                    start = start.replace(year=start.year - 1)
                 return start.isoformat(), end.isoformat(), False
             except (ValueError, OverflowError):
                 pass
 
     try:
         dt = dateparser.parse(text.replace("@", " "), fuzzy=True)
+        if dt.tzinfo is not None:
+            # A stray "-9:00" reads as a UTC offset; the feed is venue-local
+            # naive and the app cannot parse an offset.
+            dt = dt.replace(tzinfo=None)
         has_time = bool(re.search(r"\d{1,2}:\d{2}", text))
         return dt.isoformat(), None, has_time
     except (ValueError, OverflowError):

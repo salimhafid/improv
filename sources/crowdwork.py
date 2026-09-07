@@ -6,8 +6,9 @@ where kind is "shows" or "classes". Each item carries a full description
 """
 from __future__ import annotations
 
+import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 from common import clean, fetch_json, local_today, make_class, make_show, safe_url, strip_html
 
@@ -43,11 +44,38 @@ def _naive_local(iso) -> str | None:
     return iso[:19]
 
 
+def _parse_local(iso) -> datetime | None:
+    """`_naive_local` as a datetime, or None for anything malformed — a
+    well-shaped but impossible '2026-13-45T99:00:00' must not reach the feed."""
+    start = _naive_local(iso)
+    if not start:
+        return None
+    try:
+        return datetime.strptime(start, "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return None
+
+
 def _full_description(it: dict) -> str:
     desc = it.get("description")
     if isinstance(desc, dict) and desc.get("body"):
         return strip_html(desc["body"])
     return strip_html(it.get("description_short"))
+
+
+# The API's `timezone` is a Rails zone name ("Pacific Time (US & Canada)");
+# it is unambiguous where a bare offset is not (-05:00 is EST *and* CDT).
+_TZ_NAME_CITY = (("eastern", "New York"), ("pacific", "Los Angeles"), ("central", "Chicago"))
+
+
+def _city_from_tz(it: dict, iso) -> str | None:
+    name = it.get("timezone")
+    if isinstance(name, str):
+        low = name.lower()
+        for word, city in _TZ_NAME_CITY:
+            if word in low:
+                return city
+    return _city_from_offset(iso)
 
 
 def _city_from_offset(iso) -> str | None:
@@ -62,32 +90,61 @@ def _city_from_offset(iso) -> str | None:
 
 
 def _image(it: dict) -> str | None:
-    img = it.get("img") or {}
+    img = it.get("img")
+    if not isinstance(img, dict):
+        return None
     return safe_url(img.get("large") or img.get("url")) or None
+
+
+_FULL_RE = re.compile(r"sold[ -]?out|wait[ -]?list|\bfull\b")
 
 
 def _is_full(it: dict) -> bool:
     """Best-effort sold-out detection from the item's availability badge.
     Crowdwork has no boolean flag; it surfaces a human string like
-    'Only 2 spots left' / 'Sold out' under badges.spots."""
+    'Only 2 spots left' / 'Sold out' under badges.spots. "full" is matched
+    as a word so "Fully refundable" does not count."""
     badges = it.get("badges")
     spots = badges.get("spots") if isinstance(badges, dict) else None
-    text = f"{spots or ''}".lower()
-    return any(w in text for w in ("sold out", "sold-out", "wait list", "waitlist", "full"))
+    return bool(_FULL_RE.search(f"{spots or ''}".lower()))
+
+
+# Crowdwork tags are mostly visibility/marketing flags ("All Featured Shows",
+# "front", "iO Classics"); only genre-like ones may become comedy_types, which
+# the app turns into filter chips.
+_GENRE_TAGS = {
+    "improv", "sketch", "sketch comedy", "stand-up", "standup", "stand up", "musical",
+    "musical improv", "character", "clown", "clowning", "storytelling", "variety",
+    "podcast", "game show", "jam", "open mic", "comedy",
+}
+
+
+def _genre_tags(tags: list[str]) -> list[str]:
+    return [t for t in tags if t.lower() in _GENRE_TAGS]
 
 
 def _common(it: dict):
-    url = it.get("url") or ""
+    """Fields shared by shows and classes. Every CMS value is type-checked so
+    one odd item skips its field instead of failing the whole source."""
+    url = it.get("url")
+    url = url if isinstance(url, str) else ""
+    tags = it.get("tags")
+    public = tags.get("public") if isinstance(tags, dict) else None
+    cost = it.get("cost")
+    status = it.get("status")
+    # The slug keys ids; fall back to Crowdwork's numeric id when the URL is
+    # missing so url-less items do not all collide on "".
+    slug = url.rstrip("/").split("/")[-1] if url else clean(it.get("id"))
     return {
         "title": clean(it.get("name")),
         "url": safe_url(url),
-        "slug": url.rstrip("/").split("/")[-1] if url else "",
+        "slug": slug,
         "image": _image(it),
-        "tags": [clean(t) for t in ((it.get("tags") or {}).get("public") or [])][:3],
-        "cost": (it.get("cost") or {}).get("formatted", ""),
+        "tags": [clean(t) for t in (public if isinstance(public, list) else [])],
+        "cost": cost.get("formatted", "") if isinstance(cost, dict) else "",
         "venue": clean(it.get("venue")),
         "next_date": it.get("next_date"),
-        "active": (it.get("status") or "").lower() == "active",
+        "active": isinstance(status, str) and status.lower() == "active",
     }
 
 
@@ -101,23 +158,27 @@ def fetch_shows(slug: str, source: str, org: str, city: str, *, city_from_tz: bo
             continue
         # One item per future performance: `dates` carries the show's full run
         # (next_date unioned in for shows that publish no array), so a weekly
-        # show yields every upcoming date instead of only its next one.
-        occurrences = {d for d in (it.get("dates") or []) if isinstance(d, str)}
+        # show yields every upcoming date instead of only its next one. Keyed
+        # by wall-clock time so a formatting difference between next_date and
+        # its dates[] twin cannot produce a duplicate.
+        dates = it.get("dates")
+        raw = [d for d in (dates if isinstance(dates, list) else []) if isinstance(d, str)]
         if isinstance(c["next_date"], str):
-            occurrences.add(c["next_date"])
-        for iso in sorted(occurrences):
+            raw.append(c["next_date"])
+        occurrences: dict[str, str] = {}
+        for iso in raw:
             start = _naive_local(iso)
-            if not start:
-                continue
-            try:
-                dt = datetime.strptime(start, "%Y-%m-%dT%H:%M:%S")
-            except ValueError:
+            if start:
+                occurrences.setdefault(start, iso)
+        for start, iso in sorted(occurrences.items()):
+            dt = _parse_local(iso)
+            if not dt:
                 continue
             if not (today <= dt.date() <= horizon):
                 continue
-            item_city = (_city_from_offset(iso) if city_from_tz else city)
+            item_city = (_city_from_tz(it, iso) if city_from_tz else city)
             if city_from_tz:
-                # Unrecognized/absent offset → city is unknown. Drop it rather
+                # Unrecognized/absent zone → city is unknown. Drop it rather
                 # than fall back to this source's city, which would otherwise
                 # place the same event in BOTH the NY and LA feeds (both runs
                 # share one feed).
@@ -128,7 +189,7 @@ def fetch_shows(slug: str, source: str, org: str, city: str, *, city_from_tz: bo
                 slug=f"{c['slug']}/{dt.strftime('%Y%m%d%H%M')}",
                 date_raw=dt.strftime("%A, %B %-d @ %-I:%M %p"),
                 start=start, has_time=True, venue=c["venue"] or org, venues=[c["venue"] or org],
-                comedy_types=c["tags"], image=c["image"],
+                comedy_types=_genre_tags(c["tags"])[:3], image=c["image"],
                 excerpt=strip_html(it.get("description_short")), description=_full_description(it),
                 is_free="free" in f"{c['title']} {c['cost']}".lower(),
                 source=source, org=org, city=item_city,
@@ -137,33 +198,28 @@ def fetch_shows(slug: str, source: str, org: str, city: str, *, city_from_tz: bo
 
 
 def fetch_classes(slug: str, source: str, org: str, city: str) -> list[dict]:
-    today = local_today(city).isoformat()
+    today = local_today(city)
     classes: list[dict] = []
     for it in _fetch(slug, "classes"):
         c = _common(it)
         if not c["active"] or not c["title"]:
             continue
-        # Date handling: prefer next_date; else use the `dates` array. When a
-        # class has explicit dates but they're all in the past (e.g. an intensive
-        # whose run ended, with next_date null), drop it — only keep it as an
-        # always-show "undated" class when there's no date info at all.
-        next_d = _naive_local(c["next_date"])
-        run_dates = sorted(p for p in (_naive_local(x) for x in (it.get("dates") or [])) if p)
-        if next_d:
-            start = next_d
-        elif run_dates:
-            future = [d for d in run_dates if d[:10] >= today]
+        # Date handling: the first upcoming session of next_date + `dates`
+        # (a stale past next_date must not hide future run dates). When a
+        # class has explicit dates but they're all in the past (e.g. an
+        # intensive whose run ended), drop it — only keep it as an always-show
+        # "undated" class when there's no date info at all.
+        dates = it.get("dates")
+        candidates = [c["next_date"]] + (dates if isinstance(dates, list) else [])
+        run = sorted({d for d in (_parse_local(x) for x in candidates) if d})
+        if run:
+            future = [d for d in run if d.date() >= today]
             if not future:
                 continue
-            start = future[0]
+            start = future[0].isoformat()
+            schedule = future[0].strftime("%A, %B %-d @ %-I:%M %p")
         else:
-            start = None
-        schedule = ""
-        if start:
-            try:
-                schedule = datetime.strptime(start, "%Y-%m-%dT%H:%M:%S").strftime("%A, %B %-d @ %-I:%M %p")
-            except ValueError:
-                schedule = start
+            start, schedule = None, ""
         classes.append(make_class(
             id=f"{source}/{c['slug']}", title=c["title"], url=c["url"],
             schedule=schedule, start=start, price=c["cost"],

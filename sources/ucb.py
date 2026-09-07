@@ -61,7 +61,7 @@ def _parse_cards(html: str, source: str, org: str, city: str) -> list[dict]:
         if url:
             ms = re.search(r"/show/([^/]+)/?", url)
             slug = ms.group(1) if ms else ""
-        is_free = "free" in f"{slug.lower()} {title.lower()}"
+        is_free = bool(_FREE_WORD.search(f"{slug} {title}"))
 
         start_iso, end_iso, has_time = parse_datetime(date_raw)
 
@@ -107,36 +107,52 @@ def fetch(region: str) -> list[dict]:
     return shows
 
 
-_CAST_LABEL = re.compile(r"(?:Featuring|Cast|Line\s*-?up)\s*:\s*", re.I)
+# The label must start a word: "Podcast:" / "Broadcast:" contain "cast:".
+_CAST_LABEL = re.compile(r"(?<![A-Za-z])(?:Featuring|Cast|Line\s*-?up)\s*:\s*", re.I)
 _CAST_SEPARATOR = re.compile(r"^\s*[—–-]+\s*$")
 _CAST_STOP_WORDS = ("ticket", "$", "http", "livestream", "doors", "advance",
                     "in-person", "buyers")
 _WP_SIZE_SUFFIX = re.compile(r"-\d+x\d+(?=\.(?:jpe?g|png|webp|gif)$)", re.I)
+_FREE_WORD = re.compile(r"\bfree\b", re.I)   # not "Freestyle" / "Carefree"
+_CAST_MAX = 400
+_DESCRIPTION_MAX = 2000
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Cap at a word boundary with an ellipsis instead of mid-word."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit - 1].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return f"{cut or text[:limit - 1]}\u2026"
 
 
 def _extract_cast(text: str) -> str:
     """Cast list after a Featuring:/Cast:/Lineup: label. UCB pages usually put
     one performer per line, ending at an em-dash separator or the ticket-info
-    block, so we walk lines instead of capturing a single one."""
+    block, so we walk lines instead of capturing a single one. A comma-
+    separated list of short name-like parts on the label's own line is taken
+    whole, however long."""
     m = _CAST_LABEL.search(text)
     if not m:
         return ""
     names: list[str] = []
-    for raw in text[m.end():].split("\n")[:14]:
+    for i, raw in enumerate(text[m.end():].split("\n")[:14]):
         line = clean(raw)
         if not line or _CAST_SEPARATOR.match(line):
             if names:
                 break
             continue    # blank right after the label — keep looking
         low = line.lower()
-        if len(line) > 80 or any(w in low for w in _CAST_STOP_WORDS):
+        label_line_list = (i == 0 and "," in line
+                           and all(len(part.split()) <= 4 for part in line.split(",")))
+        if (len(line) > 80 and not label_line_list) or any(w in low for w in _CAST_STOP_WORDS):
             break
         if line[-1] in ".!?" and len(line.split()) > 5:
             break       # reads like a sentence, not a name
         names.append(line)
         if len(names) >= 12:
             break
-    return clean(", ".join(names))[:400]
+    return _truncate(clean(", ".join(names)), _CAST_MAX)
 
 
 def og_image(soup: BeautifulSoup) -> str | None:
@@ -151,8 +167,11 @@ _PEOPLE_SLUG = re.compile(r"/people/([^/]+)/?")
 def _linked_cast(soup: BeautifulSoup) -> list[dict]:
     """Structured cast from the show page's /people/ profile links (inside
     #main so the site nav's team links don't leak in). Preserves page order
-    (billed teams first, then members), dedupes by slug."""
-    main = soup.select_one("#main") or soup
+    (billed teams first, then members), dedupes by slug. No #main → [] —
+    never scan the whole page."""
+    main = soup.select_one("#main")
+    if main is None:
+        return []
     members: list[dict] = []
     seen: set[str] = set()
     for a in main.select("a[href*='/people/']"):
@@ -175,11 +194,16 @@ def detail(url: str) -> tuple[str, str, str | None, list[dict]] | None:
         soup = BeautifulSoup(fetch_html(url), "lxml")
     except RuntimeError:
         return None
+    if soup.select_one("#main") is None:
+        # The content container moved (theme change or an interstitial that
+        # passed the challenge check): nothing below can be trusted, so do
+        # not cache emptiness — None makes the enrichment retry next run.
+        return None
     el = soup.select_one(".ucb-event-description")
     description = block_text(el) if el else ""
     members = _linked_cast(soup)
     if members:
-        cast = ", ".join(m["name"] for m in members)[:400]
+        cast = _truncate(", ".join(m["name"] for m in members), _CAST_MAX)
     else:
         cast = _extract_cast(soup.get_text("\n"))
-    return description[:2000], cast, og_image(soup), members
+    return _truncate(description, _DESCRIPTION_MAX), cast, og_image(soup), members

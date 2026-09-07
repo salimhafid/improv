@@ -1,8 +1,9 @@
 """World's Greatest Improv School (WGIS) — New York & Los Angeles.
 
 Shows come from the shared Crowdwork feed (slug "wgis"), split into NY/LA by the
-event's timezone offset. Classes are scraped from the static /nycclasses and
-/laclasses pages (rows of div.row.mb-1 linking to /workshop/view/<id>).
+event's `timezone` name (UTC offset as fallback). Classes are scraped from the
+static /nycclasses and /laclasses pages (rows of div.row.mb-1 linking to
+/workshop/view/<id>).
 """
 from __future__ import annotations
 
@@ -33,21 +34,45 @@ def fetch_shows_la() -> list[dict]:
 
 # ---- Classes (static HTML) -------------------------------------------------
 
+# A calendar date needs a month token and a day number ("Thu Jul 9 7pm");
+# "Mondays 7pm" / "Sat 7pm" carry no date and must stay undated rather than
+# parse to dateutil's January default.
+_MONTH_DAY_RE = re.compile(
+    r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|"
+    r"Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b\.?\s+\d{1,2}(?:st|nd|rd|th)?\b", re.I)
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+# Section headings whose rows are already underway ("Currently Running" on
+# both class pages): their dates are past starts, kept undated like Magnet's
+# in-session sections instead of being rolled into next year.
+_IN_SESSION_RE = re.compile(r"currently running|in session", re.I)
+# Never roll a date this far forward: a start that lands more than ~9 months
+# out is an in-session course whose section heading we failed to recognise.
+_MAX_ROLL_AHEAD_DAYS = 270
+
+
 def _parse_when_start(when: str, today: date | None = None):
     """Start datetime from 'Thu Jul 9 7pm (2 hrs)'. The strings carry no year,
     so around New Year a January workshop must not land 11 months in the past:
-    anything more than ~45 days behind today rolls into next year (the site
-    lists 'currently running' classes a few weeks back, never further)."""
+    anything more than ~45 days behind today rolls into next year, unless the
+    rolled date would sit more than ~9 months out (then it is an in-session
+    course, published undated). Strings with an explicit year are taken as
+    written; strings without a month + day are undated."""
     today = today or local_today("New York")
     head = when.split("(")[0].strip()
+    if not _MONTH_DAY_RE.search(head):
+        return None
     try:
         dt = dateparser.parse(head, fuzzy=True, default=datetime(today.year, 1, 1))
     except (ValueError, OverflowError, TypeError):
         return None
+    if _YEAR_RE.search(head):
+        return dt.isoformat()
     if (today - dt.date()).days > 45:
         try:
             dt = dt.replace(year=dt.year + 1)
         except ValueError:  # Feb 29 in a non-leap year
+            return None
+        if (dt.date() - today).days > _MAX_ROLL_AHEAD_DAYS:
             return None
     elif (dt.date() - today).days > 200:
         # Mirror case: a December class viewed in January parses ~11 months in
@@ -60,7 +85,8 @@ def _parse_when_start(when: str, today: date | None = None):
     return dt.isoformat()
 
 
-def _parse_classes(html: str, source: str, city: str) -> list[dict]:
+def _parse_classes(html: str, source: str, city: str, today: date | None = None) -> list[dict]:
+    today = today or local_today(city)
     soup = BeautifulSoup(html, "html.parser")
     out: list[dict] = []
     for row in soup.select("div.row.mb-1"):
@@ -76,18 +102,19 @@ def _parse_classes(html: str, source: str, city: str) -> list[dict]:
         if not title:
             continue
         cell_text = title_cell.get_text(" ", strip=True).lower()
-        is_full = "sold out" in cell_text or "wait list" in cell_text
+        is_full = any(w in cell_text for w in ("sold out", "sold-out", "wait list", "waitlist"))
         when = clean(date_cell.get_text(" "))
         h4 = row.find_previous("h4")
+        level = clean(h4.get_text(" ")) if h4 else "Classes"
         out.append(make_class(
             id=f"{source}/{wid}",
             title=title,
             url=f"{BASE}/workshop/view/{wid}",
             instructor=clean(instr_cell.get_text(" ")),
             schedule=when,
-            start=_parse_when_start(when),
+            start=None if _IN_SESSION_RE.search(level) else _parse_when_start(when, today),
             price=clean(price_cell.get_text(" ")),
-            level=clean(h4.get_text(" ")) if h4 else "Classes",
+            level=level,
             is_full=is_full,
             source=source, org=ORG, city=city,
         ))

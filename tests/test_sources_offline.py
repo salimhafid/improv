@@ -10,7 +10,7 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import patch
 
-from sources import crowdwork, magnet, playground, second_city, ucb, wgis
+from sources import crowdwork, magnet, playground, second_city, ucb, ucb_classes, ucb_talent, wgis
 
 
 def _iso(day: date, hh: int = 20, offset: str = "-05:00") -> str:
@@ -80,6 +80,13 @@ class UcbPaginationTests(unittest.TestCase):
         # -WxH thumbnail suffix stripped to the full-size original
         self.assertEqual(s["image"], "https://u.test/img.jpg")
         self.assertEqual(s["post_id"], 7)
+        self.assertFalse(s["is_free"])
+
+    def test_is_free_is_a_whole_word(self):
+        page = _ucb_page([_ucb_card("Freestyle Love Supreme", "June 19, 2026", 1),
+                          _ucb_card("*FREE* ASSSSCAT NY", "June 19, 2026", 2)])
+        free = {s["title"]: s["is_free"] for s in ucb._parse_cards(page, "ucb_ny", "UCB", "New York")}
+        self.assertEqual(free, {"Freestyle Love Supreme": False, "*FREE* ASSSSCAT NY": True})
 
 
 class UcbCastTests(unittest.TestCase):
@@ -93,6 +100,147 @@ class UcbCastTests(unittest.TestCase):
 
     def test_no_label(self):
         self.assertEqual(ucb._extract_cast("just a description"), "")
+
+    def test_long_comma_list_on_label_line_is_kept(self):
+        names = ", ".join(f"Performer Number {i}" for i in range(8))   # > 80 chars
+        self.assertEqual(ucb._extract_cast(f"Featuring: {names}\n—\nTickets"), names)
+        # …but a long sentence that merely contains commas is not a lineup.
+        blurb = "the funniest people in town, plus surprise guests and more improvisers than you can count"
+        self.assertEqual(ucb._extract_cast(f"Featuring: {blurb}\nTickets $10"), "")
+
+    def test_label_must_start_a_word(self):
+        # "Podcast:" / "Broadcast:" contain "cast:" but are not a lineup.
+        self.assertEqual(ucb._extract_cast("Our Podcast: The Weekly\nJohn Doe\nJane Roe"), "")
+        self.assertEqual(ucb._extract_cast("Live Broadcast: tonight\nJohn Doe"), "")
+        self.assertEqual(ucb._extract_cast("Cast: Ava One, Bo Two"), "Ava One, Bo Two")
+
+    def test_caps_cut_at_a_word_boundary_with_ellipsis(self):
+        text = " ".join(["word"] * 200)
+        cut = ucb._truncate(text, 50)
+        self.assertLessEqual(len(cut), 50)
+        self.assertTrue(cut.endswith("\u2026"))
+        self.assertFalse(cut[:-1].endswith("wor"))   # no mid-word cut
+        self.assertEqual(ucb._truncate("short", 50), "short")
+
+
+def _ucb_show_page(*, with_main: bool = True, description: str = "About the show.") -> str:
+    people = ('<a href="https://ucbcomedy.com/people/ava-one/">Ava One</a>'
+              '<a href="https://ucbcomedy.com/people/bo-two/">Bo Two</a>')
+    body = (f'<div id="main"><div class="ucb-event-description"><p>{description}</p></div>{people}</div>'
+            if with_main else f'<div class="ucb-event-description"><p>{description}</p></div>{people}')
+    return (f'<html><head><meta property="og:image" content="https://u.test/hero.jpg"></head>'
+            f'<body><nav><a href="https://ucbcomedy.com/people/nav-team/">Nav Team</a></nav>{body}</body></html>')
+
+
+class UcbDetailTests(unittest.TestCase):
+    def test_linked_cast_scans_only_main(self):
+        from bs4 import BeautifulSoup
+        members = ucb._linked_cast(BeautifulSoup(_ucb_show_page(), "lxml"))
+        self.assertEqual([m["slug"] for m in members], ["ava-one", "bo-two"])   # nav link excluded
+
+    def test_missing_main_yields_no_cast_and_no_cache(self):
+        from bs4 import BeautifulSoup
+        # No #main: never fall back to the whole page (the nav's team links would
+        # become every show's cast), and don't cache the result.
+        self.assertEqual(ucb._linked_cast(BeautifulSoup(_ucb_show_page(with_main=False), "lxml")), [])
+        with patch.object(ucb, "fetch_html", return_value=_ucb_show_page(with_main=False)):
+            self.assertIsNone(ucb.detail("https://ucbcomedy.com/show/x/"))
+
+    def test_detail_fields_and_description_cap(self):
+        long_desc = " ".join(["blurb"] * 600)   # > 2000 chars
+        with patch.object(ucb, "fetch_html", return_value=_ucb_show_page(description=long_desc)):
+            description, cast, image, members = ucb.detail("https://ucbcomedy.com/show/x/")
+        self.assertEqual(cast, "Ava One, Bo Two")
+        self.assertEqual(image, "https://u.test/hero.jpg")
+        self.assertEqual(len(members), 2)
+        self.assertLessEqual(len(description), 2000)
+        self.assertTrue(description.endswith("blurb\u2026"))
+
+
+# ---- UCB classes (Arlo) ------------------------------------------------------
+
+def _arlo_event(eid: int, summary: str, tag: str = "LOC_NY") -> dict:
+    return {"EventID": eid, "Name": f"Improv 101: Section {eid}", "StartDateTime": "2026-10-01T19:00:00-04:00",
+            "Summary": summary, "Tags": [tag], "Categories": [{"Name": "1. Improv"}],
+            "Presenters": [{"Name": "Jane Doe"}], "AdvertisedOffers": []}
+
+
+class UcbClassesTests(unittest.TestCase):
+    def setUp(self):
+        ucb_classes._memo = None
+        self.addCleanup(setattr, ucb_classes, "_memo", None)
+
+    def test_category_summary_is_not_a_description(self):
+        page = {"Items": [_arlo_event(1, "Category: Improv &amp; Musical Improv"),
+                          _arlo_event(2, "<p>Learn the Harold.</p>")]}
+        with patch.object(ucb_classes, "fetch_json", return_value=page) as fj:
+            by_id = {c["id"]: c for c in ucb_classes.fetch_ny()}
+        self.assertEqual(by_id["ucb_ny/1"]["description"], "")
+        self.assertEqual(by_id["ucb_ny/2"]["description"], "Learn the Harold.")
+        self.assertEqual(by_id["ucb_ny/1"]["level"], "Improv")
+        url = fj.call_args[0][0]
+        self.assertNotIn("Location", url)   # never read; dropped from fields/expand
+        self.assertNotIn("ViewUri", url)
+
+    def test_failed_walk_is_memoised_within_a_run(self):
+        # A mid-walk failure must not be re-walked by the LA and Online passes.
+        with patch.object(ucb_classes, "fetch_json", side_effect=RuntimeError("arlo down")) as fj:
+            for fetch in (ucb_classes.fetch_ny, ucb_classes.fetch_la, ucb_classes.fetch_online):
+                with self.assertRaises(RuntimeError):
+                    fetch()
+        self.assertEqual(fj.call_count, 1)
+
+
+# ---- UCB talent (DCM grid + dt_team pages) ----------------------------------
+
+def _dcm_posts(offset: int, n: int, total: int, names=None) -> dict:
+    names = names or [f"Person {offset + i}" for i in range(n)]
+    posts = "".join(
+        f'<a href="https://ucbcomedy.com/people/p-{offset + i}/" aria-label="{name}">'
+        f'<img class="x" src="https://u.test/{offset + i}.jpg"></a>'
+        for i, name in enumerate(names))
+    return {"posts": posts, "total": total}
+
+
+class UcbTalentTests(unittest.TestCase):
+    def test_dcm_names_are_html_unescaped(self):
+        payload = _dcm_posts(0, 2, 2, ["Brady O&#8217;Callahan", "Ethan &amp; Gigi"])
+        with patch.object(ucb_talent, "post_json", return_value=payload):
+            people, total = ucb_talent._dcm_batch(0)
+        self.assertEqual([p["name"] for p in people], ["Brady O\u2019Callahan", "Ethan & Gigi"])
+        self.assertEqual(total, 2)
+
+    def test_one_failed_batch_is_not_fatal(self):
+        # 60 people at 12 per batch: offset 24 fails, 48/60 = 80 % still passes.
+        def fake_post(url, data):
+            offset = int(url.rsplit("=", 1)[1])
+            if offset == 24:
+                raise RuntimeError("status=202 challenged=True")
+            return _dcm_posts(offset, 12, 60)
+        with patch.object(ucb_talent, "post_json", side_effect=fake_post):
+            with self.assertLogs("ucb.talent", level="WARNING"):
+                roster = ucb_talent.fetch_dcm_roster()
+        self.assertEqual(len(roster), 48)
+
+    def test_too_many_failed_batches_raise(self):
+        def fake_post(url, data):
+            offset = int(url.rsplit("=", 1)[1])
+            if offset:
+                raise RuntimeError("status=202 challenged=True")
+            return _dcm_posts(0, 12, 60)
+        with patch.object(ucb_talent, "post_json", side_effect=fake_post):
+            with self.assertLogs("ucb.talent", level="WARNING"):
+                with self.assertRaises(RuntimeError):
+                    ucb_talent.fetch_dcm_roster()
+
+    def test_page_names_are_unescaped(self):
+        html = ('<div class="wf-cell" data-name="Ethan &amp; Gigi"><div class="team-container dt_team_category-dcm">'
+                '<a href="https://ucbcomedy.com/people/ethan-gigi/"><img data-src="https://u.test/e.jpg"></a>'
+                '</div></div>')
+        with patch.object(ucb_talent, "fetch_html", return_value=html):
+            (p,) = ucb_talent.fetch_page("https://ucbcomedy.com/talent/new-york/")
+        self.assertEqual(p["name"], "Ethan & Gigi")
+        self.assertTrue(p["dcm"])
 
 
 # ---- Crowdwork (per-date expansion) ----------------------------------------
@@ -112,7 +260,9 @@ def _cw_show(name: str, dates: list[str], *, status="active", spots=None, venue=
 class CrowdworkShowTests(unittest.TestCase):
     def setUp(self):
         crowdwork._memo.clear()
-        self.today = date.today()
+        # The adapter cuts on Chicago-local today, not the machine's date:
+        # the two differ on a UTC runner in the US evening.
+        self.today = crowdwork.local_today("Chicago")
 
     def _fetch(self, payload):
         return patch.object(crowdwork, "fetch_json", return_value={"data": payload})
@@ -152,19 +302,71 @@ class CrowdworkShowTests(unittest.TestCase):
             got = crowdwork.fetch_shows("wgis", "wgis_la", "WGIS", "Los Angeles", city_from_tz=True)
         self.assertEqual([s["title"] for s in got], ["LA Show"])
 
+    def test_tz_split_prefers_the_timezone_field(self):
+        # -05:00 is EST *and* CDT; the API's zone name settles it.
+        d = self.today + timedelta(days=3)
+        chi = _cw_show("Chicago Show", [_iso(d, offset="-05:00")])
+        chi["timezone"] = "Central Time (US & Canada)"
+        ny = _cw_show("NY Show", [_iso(d, offset="-05:00")])
+        ny["timezone"] = "Eastern Time (US & Canada)"
+        bare = _cw_show("Bare Show", [_iso(d, offset="-05:00")])   # no field → offset
+        with self._fetch([chi, ny, bare]):
+            got = crowdwork.fetch_shows("wgis", "wgis_ny", "WGIS", "New York", city_from_tz=True)
+        self.assertEqual([s["title"] for s in got], ["NY Show", "Bare Show"])
+
     def test_sold_out_detection(self):
         self.assertTrue(crowdwork._is_full({"badges": {"spots": "Sold out"}}))
         self.assertTrue(crowdwork._is_full({"badges": {"spots": "Join the wait list"}}))
+        self.assertTrue(crowdwork._is_full({"badges": {"spots": "Class is full"}}))
+        self.assertFalse(crowdwork._is_full({"badges": {"spots": "Fully refundable"}}))
         self.assertFalse(crowdwork._is_full({"badges": {"spots": "Only 2 spots left"}}))
         self.assertFalse(crowdwork._is_full({}))
+
+    def test_only_genre_tags_become_comedy_types(self):
+        d = self.today + timedelta(days=3)
+        show = _cw_show("Tagged", [_iso(d)])
+        show["tags"] = {"public": ["Select Featured Shows", "Improv", "All Featured Shows",
+                                   "front", "Stand-Up", "iO Classics"]}
+        with self._fetch([show]):
+            (s,) = crowdwork.fetch_shows("x", "src", "Org", "Chicago")
+        self.assertEqual(s["comedy_types"], ["Improv", "Stand-Up"])
+
+    def test_odd_field_types_do_not_crash_the_source(self):
+        d = self.today + timedelta(days=3)
+        odd = _cw_show("Odd", [_iso(d)])
+        odd.update({"cost": "Free", "tags": ["Improv"], "img": "https://c.test/i.jpg", "url": 123, "id": 77})
+        with self._fetch([odd, _cw_show("Fine", [_iso(d)])]):
+            shows = crowdwork.fetch_shows("x", "src", "Org", "Chicago")
+        self.assertEqual([s["title"] for s in shows], ["Odd", "Fine"])
+        odd_show = shows[0]
+        self.assertEqual(odd_show["url"], "")
+        self.assertTrue(odd_show["slug"].startswith("77/"))   # numeric id, not ""
+        self.assertIsNone(odd_show["image"])
+        self.assertEqual(odd_show["comedy_types"], [])
+
+    def test_occurrences_deduped_on_wall_clock(self):
+        d = self.today + timedelta(days=3)
+        show = _cw_show("Twice", [_iso(d)])
+        show["next_date"] = _iso(d).replace(".000", "")   # same instant, different formatting
+        with self._fetch([show]):
+            shows = crowdwork.fetch_shows("x", "src", "Org", "Chicago")
+        self.assertEqual(len(shows), 1)
+
+    def test_malformed_well_shaped_date_skipped(self):
+        d = self.today + timedelta(days=3)
+        show = _cw_show("Bad Date", ["2026-13-45T99:00:00.000-05:00", _iso(d)])
+        with self._fetch([show]):
+            shows = crowdwork.fetch_shows("x", "src", "Org", "Chicago")
+        self.assertEqual([s["start"][:10] for s in shows], [d.isoformat()])
 
 
 class CrowdworkClassTests(unittest.TestCase):
     def setUp(self):
         crowdwork._memo.clear()
+        self.today = crowdwork.local_today("Chicago")
 
     def test_past_dated_run_dropped_undated_kept(self):
-        past = _cw_show("Ended", [_iso(date.today() - timedelta(days=30))])
+        past = _cw_show("Ended", [_iso(self.today - timedelta(days=30))])
         past["next_date"] = None
         undated = _cw_show("Drop-in", [])
         undated["next_date"] = None
@@ -172,6 +374,35 @@ class CrowdworkClassTests(unittest.TestCase):
             classes = crowdwork.fetch_classes("x", "src", "Org", "Chicago")
         self.assertEqual([c["title"] for c in classes], ["Drop-in"])
         self.assertIsNone(classes[0]["start"])
+
+    def test_past_next_date_does_not_shadow_future_dates(self):
+        future = self.today + timedelta(days=8)
+        running = _cw_show("Running", [_iso(self.today - timedelta(days=20)), _iso(future)])
+        running["next_date"] = _iso(self.today - timedelta(days=20))
+        stale = _cw_show("Stale", [])
+        stale["next_date"] = _iso(self.today - timedelta(days=20))   # past, nothing upcoming
+        with patch.object(crowdwork, "fetch_json", return_value={"data": [running, stale]}):
+            classes = crowdwork.fetch_classes("x", "src", "Org", "Chicago")
+        (c,) = classes
+        self.assertEqual(c["title"], "Running")
+        self.assertEqual(c["start"][:10], future.isoformat())
+        self.assertTrue(c["schedule"].startswith(future.strftime("%A")))
+
+    def test_malformed_class_date_is_not_published(self):
+        bad = _cw_show("Bad", [])
+        bad["next_date"] = "2026-13-45T99:00:00.000-05:00"
+        with patch.object(crowdwork, "fetch_json", return_value={"data": [bad]}):
+            (c,) = crowdwork.fetch_classes("x", "src", "Org", "Chicago")
+        self.assertIsNone(c["start"])
+        self.assertEqual(c["schedule"], "")
+
+    def test_missing_url_falls_back_to_numeric_id(self):
+        item = _cw_show("No URL", [_iso(self.today + timedelta(days=2))])
+        item.update({"url": None, "id": 4242})
+        with patch.object(crowdwork, "fetch_json", return_value={"data": [item]}):
+            (c,) = crowdwork.fetch_classes("x", "src", "Org", "Chicago")
+        self.assertEqual(c["id"], "src/4242")
+        self.assertEqual(c["url"], "")
 
 
 # ---- Magnet (calendar + class pages) ---------------------------------------
@@ -187,17 +418,18 @@ _MAGNET_MONTH = """
 
 
 def _magnet_class_card(cid: int, ctype: str, starts: str, ends: str, status: str = "Open") -> str:
+    # Mirrors the live div.details: the type link, then the schedule line,
+    # then Starts:/Ends: pairs and the status (the type is NOT repeated as text).
     return f"""
     <div class="class-holder">
       <div class="instructor"><a>Jane Doe</a></div>
       <div class="details">
         <strong><a href="{cid}">{ctype}</a></strong><br>
-        {ctype}
-        Mondays 7-10pm
-        Starts:
-        {starts}
-        Ends:
-        {ends}
+        Mondays 7pm - 10pm (in-person)<br>
+        Starts:<br>
+        {starts}<br>
+        Ends:<br>
+        {ends}<br>
         {status}
       </div>
     </div>"""
@@ -228,6 +460,10 @@ class MagnetTests(unittest.TestCase):
         by_id = {c["id"]: c for c in classes}
         self.assertIsNone(by_id["magnet/11"]["start"])          # in-session: undated
         self.assertEqual(by_id["magnet/22"]["start"], "2026-09-19")  # upcoming: dated
+        self.assertEqual(by_id["magnet/22"]["schedule"],
+                         "Mondays 7pm - 10pm (in-person) \u00b7 September 19th \u2013 November 7th")
+        self.assertEqual(by_id["magnet/22"]["instructor"], "Jane Doe")
+        self.assertFalse(by_id["magnet/22"]["is_full"])
 
     def test_ended_sections_dropped(self):
         today = date(2026, 7, 22)
@@ -328,10 +564,40 @@ _WGIS_PAGE = """
 </div></html>"""
 
 
+_WGIS_RUNNING_PAGE = """
+<html><h4><a href="#currentlyrunning">Currently Running</a></h4>
+<div class="row mb-1">
+  <div class="col-3"><a href="/workshop/view/1775">Level 3</a> WAITLIST</div>
+  <div class="col-3">Jane Host</div>
+  <div class="col-3">Tue Jul 14 7pm (LA) 8 classes</div>
+  <div class="col-3">$400</div>
+</div></html>"""
+
+
 class WgisYearBoundaryTests(unittest.TestCase):
     def test_january_class_seen_in_december_lands_next_year(self):
         start = wgis._parse_when_start("Sat Jan 9 7pm (2 hrs)", today=date(2026, 12, 20))
         self.assertEqual(start, "2027-01-09T19:00:00")
+
+    def test_roll_forward_beyond_nine_months_is_undated(self):
+        # An 8-week course 55 days into its run must not be published as next
+        # July's (it would stay "upcoming" forever).
+        self.assertIsNone(wgis._parse_when_start("Tue Jul 14 7pm (LA) 8 classes", today=date(2026, 9, 7)))
+        # …while a January class seen in October still rolls (86 days out).
+        self.assertEqual(wgis._parse_when_start("Sat Jan 9 7pm", today=date(2026, 10, 15)),
+                         "2027-01-09T19:00:00")
+
+    def test_dayless_strings_are_undated(self):
+        for when in ("Mondays 7pm (LA) drop in", "Sat 7pm (LA)", "TBA", "Ongoing"):
+            self.assertIsNone(wgis._parse_when_start(when, today=date(2026, 9, 7)), when)
+
+    def test_ordinal_day_still_counts_as_a_date(self):
+        self.assertEqual(wgis._parse_when_start("Thu Jul 9th 7pm (2 hrs)", today=date(2026, 7, 22)),
+                         "2026-07-09T19:00:00")
+
+    def test_explicit_year_is_taken_as_written(self):
+        self.assertEqual(wgis._parse_when_start("Thu Dec 18 2026 7pm", today=date(2027, 3, 1)),
+                         "2026-12-18T19:00:00")
 
     def test_recent_past_class_keeps_its_year(self):
         # "Currently running" listings sit a few weeks back — no rollover.
@@ -380,7 +646,9 @@ class PlaygroundIcsTests(unittest.TestCase):
 
 class WgisClassTests(unittest.TestCase):
     def test_parse_row(self):
-        classes = wgis._parse_classes(_WGIS_PAGE, "wgis_ny", "New York")
+        # Fixed `today`: the fixture carries no year, and with the real clock
+        # the row rolls/undates itself as the calendar moves.
+        classes = wgis._parse_classes(_WGIS_PAGE, "wgis_ny", "New York", today=date(2026, 7, 22))
         (c,) = classes
         self.assertEqual(c["id"], "wgis_ny/42")
         self.assertEqual(c["title"], "Drop-In")
@@ -388,7 +656,19 @@ class WgisClassTests(unittest.TestCase):
         self.assertEqual(c["price"], "$20")
         self.assertTrue(c["is_full"])
         self.assertEqual(c["level"], "NYC Workshops")
-        self.assertTrue(c["start"].startswith(f"{date.today().year}-07-23"))
+        self.assertIn("-07-23T19:00:00", c["start"])
+
+    def test_default_today_is_venue_local(self):
+        with patch.object(wgis, "local_today", return_value=date(2026, 7, 22)):
+            (c,) = wgis._parse_classes(_WGIS_PAGE, "wgis_ny", "New York")
+        self.assertEqual(c["start"], "2026-07-23T19:00:00")
+
+    def test_currently_running_section_is_undated(self):
+        (c,) = wgis._parse_classes(_WGIS_RUNNING_PAGE, "wgis_la", "Los Angeles", today=date(2026, 9, 7))
+        self.assertEqual(c["level"], "Currently Running")
+        self.assertIsNone(c["start"])
+        self.assertEqual(c["schedule"], "Tue Jul 14 7pm (LA) 8 classes")
+        self.assertTrue(c["is_full"])   # "WAITLIST" spelling
 
 
 if __name__ == "__main__":

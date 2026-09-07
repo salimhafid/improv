@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
+from dateutil import parser as dateparser
 
 from common import clean, fetch_html, fetch_json, make_class, make_show, safe_url, strip_html
 
@@ -44,6 +45,11 @@ def fetch() -> list[dict]:
         url = safe_url(BASE + full) if full.startswith("/") else safe_url(full)
         slug = full.rstrip("/").split("/")[-1] if full else ""
         title_l = title.lower()
+        if title_l.startswith("no show"):
+            continue    # "No Shows - Labor Day Weekend": a closure notice, not a show
+        # Squarespace categories are the rooms (Eris Mainstage / Eris Deep
+        # Space / BCC Pig Pen), so they are the venue, not comedy types.
+        rooms = [c for c in (clean(c) for c in (it.get("categories") or [])) if c][:3]
 
         shows.append(make_show(
             title=title,
@@ -53,9 +59,9 @@ def fetch() -> list[dict]:
             start=start_iso,
             end=end_iso,
             has_time=start_dt is not None,
-            venue="Brooklyn Comedy Collective",
-            venues=["Brooklyn Comedy Collective"],
-            comedy_types=[clean(c) for c in (it.get("categories") or [])][:3],
+            venue=rooms[0] if rooms else "Brooklyn Comedy Collective",
+            venues=rooms or ["Brooklyn Comedy Collective"],
+            comedy_types=[],
             image=safe_url(it.get("assetUrl")) or None,
             description=strip_html(it.get("body")) or strip_html(it.get("excerpt")),
             excerpt=strip_html(it.get("excerpt")),
@@ -113,8 +119,26 @@ def _class_level(title: str) -> str:
 
 
 def _class_instructor(title: str) -> str:
-    m = re.search(r"w/\s*(.+?)\s*(?:\(|$)", title)
+    # Anchored on " w/ " so "Sketch Show/Workshop" doesn't yield "Workshop".
+    m = re.search(r"(?:^|\s)w/\s*(.+?)\s*(?:\(|$)", title)
     return clean(m.group(1)) if m else ""
+
+
+_TITLE_DATE = re.compile(r"\(\s*(?:[A-Za-z]+,\s*)?([A-Za-z]+ \d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\s*\)")
+
+
+def _class_start(title: str) -> str | None:
+    """Drop-ins and workshops carry their date in the title — '(Saturday,
+    September 12th, 2026)' — so they can age out of the feed. Multi-week
+    levels only say "(Aug-Oct '26)" and stay undated: there is no day to
+    start from, and a made-up first-of-month would drop them mid-run."""
+    m = _TITLE_DATE.search(title)
+    if not m:
+        return None
+    try:
+        return dateparser.parse(f"{m.group(1)} {m.group(2)}").date().isoformat()
+    except (ValueError, OverflowError):
+        return None
 
 
 def _class_schedule(title: str) -> str:
@@ -168,9 +192,10 @@ def fetch_classes() -> list[dict]:
             url=safe_url(BASE + href),
             instructor=_class_instructor(title),
             schedule=_class_schedule(title),
-            start=None,  # Squarespace products carry no structured date
+            start=_class_start(title),  # Squarespace products carry no structured date
             price=_variant_price(it),
             level=_class_level(title),
+            image=safe_url(it.get("assetUrl")) or None,
             description=strip_html(it.get("body")) or strip_html(it.get("excerpt")),
             is_full=_is_full(it),
             source="brooklyn_cc", org="Brooklyn Comedy Collective", city="New York",

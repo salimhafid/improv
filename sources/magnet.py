@@ -20,8 +20,15 @@ from common import clean, fetch_html, local_today, make_class, make_show, safe_u
 
 CAL = "https://magnettheater.com/calendar/month/?date=%04d-%02d-01"
 CLASS_INDEX = "https://magnettheater.com/class/all-classes-in-session/"
-_TIME = re.compile(r"\d{1,2}:\d{2}\s*[ap]m", re.I)
+_TIME = re.compile(r"\d{1,2}(?::\d{2})?\s*[ap]m", re.I)   # "6:00pm", also "8pm"
 MONTHS_AHEAD = 3
+# Show pages put the venue address and a per-performance ticket table right
+# after the copy; when the narrow selector is missing, cut the text at the
+# address, or — if the address is gone — at the ticket table's "Tickets"
+# header: the last "Tickets" before the first "Buy Ticket" cell, so copy that
+# itself opens with "Tickets …" survives.
+_ADDRESS = re.compile(r"\s*Magnet Theater\s+254 West 29th\b")
+_TICKET_TABLE = re.compile(r"\s*\bTickets\b(?=(?:(?!\bTickets\b).)*\bBuy Tickets?\b)", re.S)
 
 
 def _months(today: date, n: int) -> list[tuple[int, int]]:
@@ -54,7 +61,7 @@ def _parse_month(html: str, year: int, month: int) -> list[dict]:
             if not a:
                 continue
             title = clean((ev.select_one("p.summary") or a).get_text())
-            url = safe_url(a.get("href"))
+            url = safe_url(urljoin(CAL % (year, month), a.get("href") or ""))
             if not title or not url:
                 continue
 
@@ -99,15 +106,21 @@ def detail(url: str) -> tuple[str, str, str | None, list[dict]] | None:
     cast), or None when the fetch fails (so it's retried next run — the
     calendar grid has no images at all, so the og:image here is each show's
     only artwork and must not be cached away by one bad fetch). Cast isn't
-    structured on Magnet, so only description + og:image are returned. No
-    whole-page fallback for the description: nav/footer soup cached as a
-    'description' is worse than none."""
+    structured on Magnet, so only description + og:image are returned. The
+    copy is the schema.org `itemprop="description"` paragraph; the wider
+    #content fallback is cut before the address/ticket table. No whole-page
+    fallback beyond that: nav/footer soup cached as a 'description' is worse
+    than none."""
     try:
         soup = BeautifulSoup(fetch_html(url), "lxml")
     except RuntimeError:
         return None
-    el = soup.select_one("#content") or soup.select_one(".summary")
+    el = (soup.select_one('[itemprop="description"]') or soup.select_one("#content")
+          or soup.select_one(".summary"))
     text = re.sub(r"^\s*About the Show\s*", "", clean(el.get_text(" "))) if el else ""
+    cut = _ADDRESS.search(text) or _TICKET_TABLE.search(text)
+    if cut:
+        text = text[:cut.start()]
     og = soup.select_one('meta[property="og:image"]')
     image = safe_url(og.get("content")) if og else None
     return text[:2000], "", image, []
@@ -128,29 +141,43 @@ def fetch(today: date | None = None) -> list[dict]:
 # MARK: Classes
 
 def _class_discipline(ctype: str) -> str:
-    """Drop a level indicator ('Level Two', 'L1', '… Level Two Intensive') so
-    sections group by discipline (Improv, Musical Improv, Sketch Writing, …)."""
-    return re.sub(r"\s*(?:\bLevel\b.*|\bL\d.*)$", "", ctype, flags=re.I).strip() or ctype
+    """Drop a trailing level indicator ('Level Two', 'L1', '… Level Two
+    Intensive') so sections group by discipline (Improv, Musical Improv,
+    Sketch Writing, …). Only a numbered level counts, so 'Next Level Improv'
+    is left alone."""
+    return re.sub(r"\s*(?:\bLevel\s+(?:one|two|three|four|five|six|\d+|[ivx]+)\b.*|\bL\d.*)$",
+                  "", ctype, flags=re.I).strip() or ctype
+
+
+_STALE_DAYS = 240   # same-year date further back than this → it's next year's
 
 
 def _infer_date(txt: str, today: date):
-    """Parse 'June 28th' (no year) to the nearest occurrence around `today`, so we
-    can tell whether a section has already ended."""
+    """Parse 'June 28th' (no year) so we can tell whether a section has already
+    ended. The same-year reading wins unless it is ~8 months stale (a January
+    date seen in December is next year's) or, mirrored, ~4 months ahead (a
+    December date seen in January is last year's). Magnet posts sections at
+    most a few months out, so a plain nearest-year pick would re-date a card
+    left up from last winter into next year instead of letting it age out."""
     if not txt:
         return None
     try:
         base = dateparser.parse(txt, default=datetime(today.year, 1, 1)).date()
     except (ValueError, OverflowError, TypeError):
         return None
-    best = None
-    for y in (today.year - 1, today.year, today.year + 1):
+
+    def in_year(y: int):
         try:
-            cand = base.replace(year=y)
-        except ValueError:
-            continue
-        if best is None or abs((cand - today).days) < abs((best - today).days):
-            best = cand
-    return best
+            return base.replace(year=y)
+        except ValueError:   # Feb 29
+            return None
+
+    cand = in_year(today.year) or base
+    if (today - cand).days > _STALE_DAYS:
+        return in_year(today.year + 1) or cand
+    if (cand - today).days > 365 - _STALE_DAYS:
+        return in_year(today.year - 1) or cand
+    return cand
 
 
 # Confirmed per-discipline listing slugs, used only if nav discovery finds
@@ -218,6 +245,8 @@ def _collect_cards(soup: BeautifulSoup, today: date,
             continue
         href = type_a.get("href", "")
         cid = re.sub(r"\D", "", href) or href
+        if not cid:
+            continue    # href-less card: no id, no page — would collapse onto "magnet/"
         if cid in seen_ids:
             continue    # same section listed on both the index and its discipline page
         # The href is a bare relative WordPress id; resolve it against the index

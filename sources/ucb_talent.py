@@ -15,13 +15,17 @@ on the static pages still contributes dcm tags as a bonus.
 """
 from __future__ import annotations
 
+import html
 import json
+import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 
 from bs4 import BeautifulSoup
 
-from common import clean, fetch_html, safe_url
+from common import clean, fetch_html, post_json, safe_url
+
+log = logging.getLogger("ucb.talent")
 
 PAGES = [
     ("ny",       "https://ucbcomedy.com/talent/new-york/"),
@@ -42,17 +46,28 @@ _DCM_BATCH = 12
 
 
 def _dcm_batch(offset: int) -> tuple[list[dict], int]:
-    """One load-more batch of the DCM grid → (people, reported total)."""
-    from curl_cffi import requests as curl
-    r = curl.post(_DCM_ENDPOINT.format(offset=offset),
-                  data={"wpgb": _DCM_GRID_CONFIG}, impersonate="chrome", timeout=30)
-    d = r.json()
+    """One load-more batch of the DCM grid → (people, reported total).
+    Raises RuntimeError when the endpoint cannot be fetched/decoded."""
+    d = post_json(_DCM_ENDPOINT.format(offset=offset), data={"wpgb": _DCM_GRID_CONFIG})
+    if not isinstance(d, dict):
+        raise RuntimeError(f"ucb_talent: DCM batch {offset} is not a JSON object")
     posts = (d.get("posts") or "").replace("\\/", "/")
     people = []
     for m in re.finditer(r'<a href="(https://ucbcomedy\.com/people/([^/"]+)/)"\s+aria-label="([^"]+)">\s*<img[^>]+src="([^"]+)"', posts):
-        people.append({"name": clean(m.group(3)), "slug": m.group(2),
+        # aria-label is raw attribute text: "Brady O&#8217;Callahan" needs unescaping.
+        people.append({"name": clean(html.unescape(m.group(3))), "slug": m.group(2),
                        "url": m.group(1), "image": safe_url(m.group(4))})
     return people, int(d.get("total") or 0)
+
+
+def _dcm_batch_or_empty(offset: int) -> list[dict]:
+    """A failed batch is non-fatal: the 80 % completeness check below decides
+    whether the roster is usable, so one bad answer doesn't sink ~75 others."""
+    try:
+        return _dcm_batch(offset)[0]
+    except Exception as e:  # noqa: BLE001 - fetch, decode or shape error alike
+        log.warning("ucb_talent: DCM batch at offset %d failed: %s", offset, e)
+        return []
 
 
 def fetch_dcm_roster() -> list[dict]:
@@ -63,7 +78,7 @@ def fetch_dcm_roster() -> list[dict]:
         raise RuntimeError("ucb_talent: DCM roster endpoint returned nothing")
     offsets = list(range(len(first), total, _DCM_BATCH))
     with ThreadPoolExecutor(max_workers=8) as ex:
-        batches = list(ex.map(lambda o: _dcm_batch(o)[0], offsets))
+        batches = list(ex.map(_dcm_batch_or_empty, offsets))
     seen: dict[str, dict] = {p["slug"]: p for p in first}
     for b in batches:
         for p in b:
@@ -90,7 +105,7 @@ def fetch_page(url: str) -> list[dict]:
     soup = BeautifulSoup(fetch_html(url), "lxml")
     people: list[dict] = []
     for cell in soup.select("div.wf-cell[data-name]"):
-        name = clean(cell.get("data-name", ""))
+        name = clean(html.unescape(cell.get("data-name", "")))
         link = cell.select_one("a[href*='/people/']")
         if not name or not link:
             continue

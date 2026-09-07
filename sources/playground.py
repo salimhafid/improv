@@ -8,6 +8,7 @@ Every show at The Playground is free (per the theater's own banner).
 """
 from __future__ import annotations
 
+import html as _html
 import logging
 import re
 from datetime import date, datetime, timedelta
@@ -44,7 +45,19 @@ def _unescape(value: str) -> str:
             .replace("\\,", ",").replace("\\;", ";").replace("\\\\", "\\"))
 
 
-def _parse_dt(value: str) -> datetime | None:
+def _zone(tzid: str | None) -> ZoneInfo:
+    """The zone named by a DTSTART;TZID=… parameter. Anything unknown is
+    logged and read as Chicago (the calendar only uses America/Chicago today)."""
+    if not tzid:
+        return _CHICAGO
+    try:
+        return ZoneInfo(tzid)
+    except (KeyError, ValueError):
+        log.warning("playground: unknown TZID %r; reading as America/Chicago", tzid)
+        return _CHICAGO
+
+
+def _parse_dt(value: str, tzid: str | None = None) -> datetime | None:
     """ICS datetime → aware Chicago datetime (dates count as all-day)."""
     value = value.strip()
     try:
@@ -52,7 +65,7 @@ def _parse_dt(value: str) -> datetime | None:
             return (datetime.strptime(value, "%Y%m%dT%H%M%SZ")
                     .replace(tzinfo=ZoneInfo("UTC")).astimezone(_CHICAGO))
         if "T" in value:
-            return datetime.strptime(value, "%Y%m%dT%H%M%S").replace(tzinfo=_CHICAGO)
+            return datetime.strptime(value, "%Y%m%dT%H%M%S").replace(tzinfo=_zone(tzid))
         return datetime.strptime(value, "%Y%m%d").replace(tzinfo=_CHICAGO)
     except ValueError:
         return None
@@ -61,6 +74,7 @@ def _parse_dt(value: str) -> datetime | None:
 def _events(ics: str) -> list[dict]:
     events: list[dict] = []
     current: dict | None = None
+    in_alarm = False
     for line in _unfold(ics):
         if line == "BEGIN:VEVENT":
             current = {"exdates": set()}
@@ -68,23 +82,31 @@ def _events(ics: str) -> list[dict]:
             if current is not None:
                 events.append(current)
             current = None
-        elif current is not None and ":" in line:
+        elif line == "BEGIN:VALARM":
+            in_alarm = True   # an alarm's DESCRIPTION/SUMMARY must not overwrite the event's
+        elif line == "END:VALARM":
+            in_alarm = False
+        elif current is not None and not in_alarm and ":" in line:
             key, value = line.split(":", 1)
-            name = key.split(";")[0].upper()
+            name, *params = key.split(";")
+            name = name.upper()
+            tzid = next((p.split("=", 1)[1] for p in params if p.upper().startswith("TZID=")), None)
             if name == "DTSTART":
-                current["start"] = _parse_dt(value)
+                current["start"] = _parse_dt(value, tzid)
                 current["all_day"] = "T" not in value
+            elif name == "DTEND":
+                current["end"] = _parse_dt(value, tzid)
             elif name == "RRULE":
                 current["rrule"] = value
             elif name == "EXDATE":
                 # RFC 5545 allows several comma-separated values on one EXDATE
                 # line (Google emits this when multiple instances are deleted).
                 for part in value.split(","):
-                    dt = _parse_dt(part)
+                    dt = _parse_dt(part, tzid)
                     if dt:
                         current["exdates"].add(dt)
             elif name == "RECURRENCE-ID":
-                current["recurrence_id"] = _parse_dt(value)
+                current["recurrence_id"] = _parse_dt(value, tzid)
             elif name in ("SUMMARY", "DESCRIPTION", "STATUS", "UID"):
                 current[name.lower()] = _unescape(value.strip())
     return events
@@ -106,12 +128,18 @@ def fetch(today: date | None = None) -> list[dict]:
     shows: list[dict] = []
     seen: set[str] = set()
 
-    def emit(title: str, description: str, dt: datetime, all_day: bool) -> None:
+    def emit(title: str, description: str, dt: datetime, all_day: bool,
+             duration: timedelta | None) -> None:
         local = dt.astimezone(_CHICAGO).replace(tzinfo=None, microsecond=0)
         key = f"{title}/{local.isoformat()}"
         if key in seen:
             return
         seen.add(key)
+        # A multi-day all-day entry gets an `end` (DTEND is exclusive: the day
+        # after the last one); timed shows are single-night and leave it null.
+        end = None
+        if all_day and duration and duration > timedelta(days=1):
+            end = (local + duration - timedelta(days=1)).date().isoformat()
         shows.append(make_show(
             title=title,
             url=PAGE_URL,
@@ -119,6 +147,7 @@ def fetch(today: date | None = None) -> list[dict]:
             date_raw=(local.strftime("%A, %B %-d") if all_day
                       else local.strftime("%A, %B %-d @ %-I:%M %p")),
             start=local.isoformat() if not all_day else local.date().isoformat(),
+            end=end,
             has_time=not all_day,
             venue="The Playground Theater",
             venues=["The Playground Theater"],
@@ -139,14 +168,24 @@ def fetch(today: date | None = None) -> list[dict]:
         start = ev.get("start")
         if not title or not start:
             continue
-        description = clean(re.sub(r"<[^>]+>", " ", ev.get("description", "")))
+        if ev.get("all_day") and not ev.get("rrule") and not ev.get("recurrence_id"):
+            # A one-off entry with no time is a calendar note ("Happy Labor
+            # Day", closures), not a show. A recurring all-day series is
+            # deliberate programming and is kept — and so is a RECURRENCE-ID
+            # override of one (the occurrence it replaces is already suppressed).
+            log.info("playground: skipping all-day entry %r on %s", title, start.date())
+            continue
+        description = clean(_html.unescape(re.sub(r"<[^>]+>", " ", ev.get("description", ""))))
+        duration = (ev["end"] - start) if ev.get("end") else None
 
         if ev.get("rrule"):
             # All-day recurring events carry a date-only UNTIL (required by RFC
             # 5545 when DTSTART is VALUE=DATE), which dateutil rejects against
             # our aware dtstart — normalize any naive UNTIL to a UTC datetime.
+            # The lookahead must reject T and Z too, or the optional time group
+            # backtracks on a Z-form UNTIL and the value is doubled.
             rule_text = re.sub(
-                r"UNTIL=(\d{8})(T\d{6})?(?!\d|Z)",
+                r"UNTIL=(\d{8})(T\d{6})?(?![\dTZ])",
                 lambda m: f"UNTIL={m.group(1)}{m.group(2) or 'T235959'}Z",
                 ev["rrule"],
             )
@@ -160,10 +199,10 @@ def fetch(today: date | None = None) -> list[dict]:
             for occ in occurrences:
                 if occ in ev["exdates"] or (ev.get("uid"), occ) in overridden:
                     continue
-                emit(title, description, occ, ev.get("all_day", False))
+                emit(title, description, occ, ev.get("all_day", False), duration)
         else:
             if window_start <= start <= window_end:
-                emit(title, description, start, ev.get("all_day", False))
+                emit(title, description, start, ev.get("all_day", False), duration)
 
     if not shows:
         raise RuntimeError("playground: no upcoming occurrences in window")
