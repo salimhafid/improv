@@ -1,74 +1,162 @@
 # TODO.md — open items, watchlist, and likely next steps
 
-Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-07-22.
+Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-09-07 (branch
+`fix/deep-read-issues`, app at 1.4 build 23).
 
-## Blocking release (user actions in App Store Connect)
+## Release (user actions in App Store Connect — web-only)
 
-- [ ] **Ship v1.2**: create version 1.2 on the app's page, add What's New
-      (Second City*, Logan Square Improv, The Playground, six months of
-      Annoyance + Second City shows, Second City & Logan Square classes,
-      collapsible UCB Core Curriculum section, rich share previews,
-      Apple/Google calendar choice, 1-hour reminders — *trim to whatever
-      the approved 1.1 build lacked), select build **1.2 (16)** (build 15
-      predates the Core Curriculum UI), Submit for Review.
+- [ ] Check the state of the **1.4** train before the next archive: 1.2 and 1.3
+      closed on approval; builds 19/20 are stranded in 1.3. Anything new must
+      bump CURRENT_PROJECT_VERSION (both configs) past 23.
 - [ ] Confirm ASC Support URL = `https://github.com/salimhafid/improv` and
       Privacy Policy URL = `.../blob/main/PRIVACY.md` (changed after 1.1 was
       prepared; may still show old salimhafid.com values).
+- [ ] App Review notes and the App Privacy answers in ASC must match the
+      updated `ios/AppStore/metadata.md` (optional UCB account, CloudKit
+      pushes, iCloud sync) — the previous notes said "no account or login".
+- [ ] A demo UCB student login for App Review (the reserve / QR / Wallet flow
+      is invisible without one) — placeholder in metadata.md.
 
 ## Watchlist (check occasionally; all fail-soft)
 
-- [x] ~~`wgis_ny` 0 upcoming shows~~ — RESOLVED 2026-07-22: verified correct.
-      All WGIS Crowdwork shows are Pacific-timezone; WGIS NY runs classes
-      only. 0 is the right answer, not a breakage.
+- [ ] **Second City shows** were frozen 2026-08-12 → 2026-09 (PatronTicket
+      dropped `Event_City__c`; the Toronto guard rejected everything). Fixed
+      on this branch; confirm on the first scheduled run after merge that
+      `second_city.scraped_at` in `docs/shows.json` is no longer null and the
+      count moves off 541. The stage now comes from `showAttributes.venue`
+      — the blank-venue rate (68 % of the frozen carry) should drop; if it
+      doesn't, the field moved again.
+- [ ] **ucbcomedy.com 202s** to the Actions runner: all three talent pages fail
+      every run (roster carried from 2026-08-31), DCM alternates 202 / non-JSON,
+      `ucb_ny` shows succeed only on some ticks. This branch logs the first
+      offending body per host once per run at WARNING (`ucb.common`) — read it
+      in the scrape log to learn what Cloudflare is serving — and backs the
+      talent sweep off 6 h after a total failure. Root cause and remedy
+      (different fingerprint? request volume? egress IP?) still open.
+- [ ] **A failing source is due every run** (its `scraped_at` stays null), and
+      the cron is now hourly: a broken Second City costs ~91 requests/hour
+      until fixed. Consider a failure back-off in `run_sources` like the
+      talent sweep's.
 - [ ] Annoyance meta enrichment (descriptions/images) is partial whenever
       ThunderTix 429s mid-run; self-heals daily. If chronically bad, add
-      per-URL carry-over like the UCB detail cache. (The 180-day horizon
-      raised productions-per-run from ~49 to ~80 — watch 429 frequency.)
-- [ ] UCB shows pagination (`?_page=N`, 88 cards/page) assumes WPGB keeps
-      server-rendering history pages; if UCB's feed count ever snaps back to
-      exactly 88/city, the walk broke — check `_PAGE_SIZE` still matches.
+      per-URL carry-over like the UCB detail cache. (180-day horizon ≈ 80
+      productions/run — watch 429 frequency.)
+- [ ] UCB shows pagination (`?_page=N`) stops when a page adds nothing new,
+      capped at `_MAX_PAGES = 8` — no page-size assumption any more. If UCB's
+      feed count ever snaps back to exactly one page (88/city today), WPGB
+      stopped server-rendering history pages; if LA ever needs > 8 pages the
+      cap truncates silently.
 - [ ] Second City classes ride `/_next/data/<buildId>/find-a-class/chicago.json`;
       a Next.js build mid-scrape 404s once (fail-soft, carries). Chronic
       failure likely means the route or payload shape changed.
-- [ ] UCB detail-enrichment budget is 400 fetches/run vs ~413 first-time
-      targets after pagination (281 UCB shows + 132 Magnet) — new-show
-      backlogs converge on the second run via `detail_done`; fine unless
-      the budget is lowered.
+- [ ] Detail-enrichment: budget 400 fetches/run plus an 8-minute wall-clock
+      deadline (bios: 150 + 5 minutes). Live first-time targets are ~247 UCB
+      shows + ~70 Magnet URLs, so a backlog converges in one or two runs via
+      `detail_done`; a source that starts hanging (not erroring) now costs at
+      most the deadline.
 - [ ] Playground depends on a hardcoded Google Calendar id (in
       sources/playground.py). If the theater regenerates it, the source
       raises and carries; re-extract the id from their show-calendar page
       (`calendar.google.com/calendar/embed?src=…` in the Canva HTML).
-- [ ] Second City stage names are a slug heuristic (Mainstage / e.t.c. /
-      Skybox); shows that don't match get an empty venue.
-- [ ] GitHub Actions crons on public repos can lag minutes-to-an-hour at
-      peak; the bot's own commits keep the workflow from being auto-disabled
-      at 60 days of repo inactivity.
-- [ ] ASC screenshots were captured before Second City / Logan Square /
-      Playground shipped, and now also predate the Classes redesign:
-      04-classes.png / 03-classes.png show the retired theater-scoped,
-      level-grouped list with a Classes filter button, and the iPad shot still
-      shows the retired "All Theaters" row and "Change City" footer. A refresh
-      would show the fuller Chicago lineup and the current city-wide
-      school-folder Classes tab (recipe in CONTEXT.md).
+- [ ] GitHub Actions cron starvation: the scrape cron moved to hourly (`23 * *
+      * *`) because a 3-hourly one was delivered 2–5×/day. If delivered
+      cadence drops again, the same trick (more ticks, cheap no-ops) is the
+      only lever short of a real scheduler. The bot's own commits keep the
+      workflow from being auto-disabled at 60 days of repo inactivity.
+- [ ] **Class-alert watcher on Actions** (`class-watch.yml`): a job that loops
+      and re-dispatches itself ~24 h/day is a serverless cron, which GitHub's
+      Actions usage policy lists as prohibited. Never enforced so far; if the
+      workflow is ever disabled, alerts stop. A real host (or accepting a
+      slower scheduled cadence) is the fallback plan. Related: ~144
+      `class-watch-state` commits/day because `updated` is rewritten every
+      scan (it doubles as the `--all-if-stale` stamp — a second "last scanned"
+      stamp would let it commit only on id changes); a one-shot `ucb|all|both`
+      dispatched while a chain is live runs concurrently and can double-alert.
+- [ ] ASC screenshots predate the Second City / Logan Square / Playground
+      additions, the Classes redesign (school folders) and the **Tickets** tab
+      (no set has a wallet shot), and the iPad shot still shows the retired
+      "All Theaters" row and "Change City" footer. A
+      refresh would show the current app (recipe in CONTEXT.md; wallet via
+      `UITEST_FAKE_TICKETS=1`).
+- [ ] `aps-environment` is `development` in `UCBShows.entitlements`; the watcher
+      writes every alert to both CloudKit environments. Verify once that an
+      App Store build actually receives a production alert (nothing in the
+      repo proves it).
+
+## Open items left by the 2026-09-07 fix pass
+
+Skipped or deferred by the fixing agents, with the reason — none are bugs
+that break the build.
+
+- [ ] **Wallet signing key ships in the binary** (`PassSigning/`): an extractor
+      could sign cosmetic passes under our pass type id. Accepted for now;
+      rotate the certificate if it ever matters. Also pin `swift-certificates`
+      tighter than `upToNextMajor 1.0.0` — `@_spi(CMS)` is not covered by
+      semver.
+- [ ] **LA Annex coordinates**: `Venue.forSource` maps every `ucb_la` ticket to
+      Franklin, so an Annex ticket's Wallet pass geo-surfaces a block away.
+      Needs verified coordinates for a per-`venueLabel` map — none exist in
+      the repo, do not invent them.
+- [ ] **Swift 6 readiness**: `SWIFT_VERSION = 5.0`. Known blockers under
+      strict concurrency: `DateUtils`' static `ISO8601DateFormatter`s, the
+      harness's `var failures`, `Task.detached` captures of
+      `UIImage`/`Ticket`/`SigningIdentity` in `WalletPass.pass(for:)` and the
+      `NSString` key in `PosterPipeline`. Also the dead project-level
+      `IPHONEOS_DEPLOYMENT_TARGET = 17.0` (target is 18.6) and the
+      `#available(iOS 18.0, *)` else-branches in `Modifiers.swift`.
+- [ ] **Localisation**: the app is English-only; `Localizable.strings` sits at
+      the bundle root and holds only the `CA_TITLE`/`CA_BODY` passthroughs
+      that CloudKit pushes need. The first real `en.lproj` localisation must
+      migrate that file or pushes lose their titles.
+- [ ] iCloud KVS **last-writer-wins ping-pong** for `tickets.json`: device B
+      signing out publishes an empty wallet, device A refuses it and re-pushes,
+      B re-adopts A's tickets into its hidden cache and arms reminders. Same
+      iCloud user, so harmless today; a real fix needs per-device tombstones.
+      Related: `pushFile` is not held back until the initial KVS sync, so a
+      heart in the first seconds after a fresh install can be overwritten by
+      the cloud copy — needs a merge in `GoingStore.reloadFromCloud`.
+- [ ] **Mixed-city day sections** in the I'm-Going list take Today/Tomorrow
+      from the first show's zone (`DaySection.group`); keying sections on
+      city+day would change the grouping — product decision.
+- [ ] `SourceInfo.stale`/`scraped_at` are decoded but ignored by the app, so a
+      carried source (`ucb_ny`, Second City) renders as fully available. The
+      data is there if the sidebar should hint "last updated N days ago".
+- [ ] `ShowsStore.sections` memo key does not include the moving 6-hour grace
+      cutoff, so between 00:00 and 06:00 a show crossing the line waits for
+      the next key change to drop out. `ClassItem.hasKeyword` tolerates `+s`
+      plurals but not `+es`. `SearchText.normalized` does not apply the
+      `nameKey` Latin-letter fold (typing "soren" won't find "Søren").
+- [ ] `QRCodeView` keeps the previous image if a new SVG fails to render;
+      `UCBSignInView` shows no message when a detected sign-in turns out
+      `.signedOut` (the sheet just stays up on the login form).
+- [ ] Arlo class data: `Categories[0]` / `AdvertisedOffers[0]` are taken
+      arbitrarily and the real description lives on the eventtemplate (one
+      extra request per template) — product/API call.
+- [ ] `run_tests.sh` writes `~/Library/Preferences/improv_logic_tests.plist`
+      and creates `~/Library/Application Support/UCBShows/` (no `UserDefaults`
+      suite / cache-dir injection point yet; tests reset state explicitly so
+      runs stay order-independent).
+- [ ] `class-watch.yml` `mode: test` tests development only (`--test` is
+      dev-only; production needs `--test-prod` from a shell).
+- [ ] Non-UCB `comedy_types` are now genre-only (Crowdwork allow-list, Second
+      City rating/policy tags dropped, BCC rooms → venue): watch the filter
+      chips after the first live run for anything that disappeared and
+      shouldn't have.
 
 ## Nice-to-haves (discussed, not committed)
 
-- [x] ~~Classes for the newer Chicago sources~~ — DONE 2026-07-22: Second City
-      (Next.js find-a-class data route, ~109 sections) and Logan Square
-      (Crowdwork `lsi`) shipped. Playground verified to have NO classes
-      program (sitemap + rendered site) — nothing to add.
-- [ ] **UCB online classes** (Arlo tag LOC_Online, ~15 offerings incl. core
-      levels): bookable from anywhere but the app's model is city-scoped —
-      needs a product decision (attach to both cities? an "Online" scope?).
-      Same question for WGIS `/onlineclasses` (~7 open workshops).
-- [ ] Arlo satellite locations (Austin 12, Pittsburgh 10, Edinburgh 7
-      classes) if the app ever expands beyond NY/LA/Chicago.
-- [ ] Second City stage/venue: 84% of show items have blank venue (slug
-      heuristic only matches Mainstage/e.t.c./Skybox) — the patronticket
-      blob or page data may carry the real stage; needs field spelunking.
-- [ ] Brooklyn CC polish: map Squarespace categories (Eris Mainstage / Deep
-      Space / Pig Pen + two street addresses) into venue instead of
-      comedy_types; parse class start dates out of product titles.
+- [x] ~~UCB online classes~~ — DONE: scraped as `ucb_online` (Arlo LOC_Online,
+      16 offerings), alertable in Class Alerts, and shown as a "UCB Online"
+      folder in the Classes tab whenever a UCB campus is selected (pseudo-city
+      `Online`, Eastern time). WGIS `/onlineclasses` (~7 open workshops) is
+      still unscoped — same question.
+- [x] ~~Second City stage/venue~~ — DONE on this branch: stage from
+      `showAttributes.venue[].name`, slug heuristic as fallback. Verify live.
+- [x] ~~Brooklyn CC polish~~ — DONE on this branch: Squarespace categories
+      (rooms) map to `venue`/`venues`; class start dates parse out of product
+      titles when the title carries a day.
+- [ ] Arlo satellite locations (Austin, Pittsburgh, Edinburgh) if the app ever
+      expands beyond NY/LA/Chicago.
 - [ ] WGIS class enrichment (0% descriptions/images — needs per-workshop
       detail-page fetches) and show prices (cost.formatted is in the API;
       shows have no price field in the feed model today).
@@ -76,44 +164,44 @@ Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-07-22.
       "CLASS:"-titled ThunderTix entries duplicate Crowdwork classes —
       both could use tagging/dedupe.
 - [ ] Cast/talent for non-UCB theaters (no structured data found so far;
-      Second City's patronticket blob has no lineup info).
+      Second City's patronticket blob has no lineup info). UCB `cast_members`
+      may also name *teams* (`/people/<team-slug>/`) that never resolve in the
+      directory.
 - [ ] Hosted OG interstitial pages so *pasted* links get custom previews —
       **explicitly skipped by user** (needs a GitHub org for generic Pages);
       revisit only if asked.
 - [ ] Tonight home-screen widget — built once (build ~1), removed by user
-      request when cutting bandwidth. Code is in git history
-      (`git log --all -- 'ios/UCBWidget/*'`) if ever wanted again.
-- [ ] Talent directory: DCM-only performers who are on none of the four
-      scraped pages can't exist by construction now (DCM page is fully
-      scraped), but UCB could add rosters (e.g. touring companies) — the
-      PAGES list in sources/ucb_talent.py is the extension point.
+      request when cutting bandwidth. The code is in git history, but note
+      that `main` was rewritten on 2026-09-04, so search by message/date
+      (`git log --all -- 'ios/UCBWidget/*'`), not by old hashes.
+- [ ] Talent directory: the PAGES list in sources/ucb_talent.py is the
+      extension point if UCB adds rosters (e.g. touring companies).
+- [ ] Watcher payload: `count`/`classIDs` are written but never read by the
+      app (only `pushTitle`/`pushBody` are). Either use them (deep-link to
+      the class) or drop them.
 
 ## Docs debt
 
-- [x] ~~Root README.md describes the Cloud Host era~~ — DONE 2026-08-08:
-      README rewritten for the Actions+raw architecture, and the entire
-      legacy stack (app.py, build_local.py, Dockerfile, deploy.sh,
-      serve-local.sh, templates/, site/, storage.py's object storage backend, Flask/
-      gunicorn/objectstore-client deps) was deleted — git history has it.
-- [x] ~~ios/README.md "Cloud Host backend" intro line~~ — already fixed; no
-      Cloud Host mention remains in ios/README.md.
-- [ ] Deferred from the 2026-08-08 review: ShowsService / ClassesService /
-      TalentService are three near-identical fetch+cache copies (with dead
-      `offlineNoCache` cases) that could collapse into one generic feed
-      service — pure simplification, some regression risk, do it early in a
-      train, then run ./run_tests.sh + a sim smoke test.
-- [ ] UCBapp.md (the future-apps playbook) predates the raw-CDN move, the
-      LPLinkMetadata share pattern, and several scraping protocols
-      (patronticket blobs, WPGB ajax, ThunderTix reports/calendar, Crowdwork
-      API, Google-Calendar-behind-Canva). Worth a refresh pass if it gets
-      used for a new app.
+- [x] ~~Root README.md describes the Cloud Host era~~ — DONE 2026-08-08.
+- [x] ~~Collapse ShowsService / ClassesService / TalentService~~ — DONE
+      2026-08-13 (`FeedService<Payload>`).
+- [x] ~~UCBapp.md predates the raw-CDN move~~ — refreshed 2026-09-07 along
+      with CONTEXT/README/ios README/PRIVACY/metadata.
+- [ ] `ios/UCBShows/PassSigning/README.md` is copied into the app bundle by
+      the synchronized root group (harmless; an `explicitFolders` exception
+      would keep it out — but the PEM lookup must keep working).
+- [ ] Keep `ios/project.yml` in step with the pbxproj whenever a build
+      setting, entitlement or package changes (it was two trains stale).
 
 ## Session hygiene reminders (for the next Claude)
 
 - Re-ask the user for the GitHub PAT when pushing (never stored on disk).
-- Always `git pull --rebase` before pushing (the scrape bot commits often);
+- Always `git pull --rebase` before pushing (the scrape bot commits hourly);
   keep the newer docs/*.json on conflicts.
 - Rate-limit empathy: ThunderTix ≤3 concurrent; don't loop full-scrape tests
-  back-to-back against it.
+  back-to-back against it — and don't hammer ucbcomedy.com while it is
+  already answering 202.
 - After any app-code change that ships: bump CURRENT_PROJECT_VERSION (both
   configs), archive, upload, commit — the full runbook is in CONTEXT.md.
+- Run `./run_tests.sh` (Python + Swift harness) before committing; CI only
+  runs the Python half.

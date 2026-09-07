@@ -4,126 +4,415 @@ Read this first in any new session. It captures how the product is built, how
 it operates, and every non-obvious lesson learned. Companion files:
 [TODO.md](TODO.md) (open items), [UCBapp.md](UCBapp.md) (generic playbook for
 future apps), [ios/README.md](ios/README.md) (app architecture),
-[ios/AppStore/metadata.md](ios/AppStore/metadata.md) (listing copy).
+[ios/AppStore/metadata.md](ios/AppStore/metadata.md) (listing copy),
+[PRIVACY.md](PRIVACY.md) (the App Store privacy policy).
 
 ## What this is
 
 **Improv** — a free, native iOS app aggregating live-comedy shows, classes,
-and UCB talent across New York, Los Angeles, and Chicago. Zero-cost backend:
-GitHub Actions scrapes on a cron and commits static JSON to this repo; the
-app reads it from GitHub's raw CDN. No accounts, no analytics, no server.
+and UCB talent across New York, Los Angeles, and Chicago (plus UCB's online
+classes). Zero-cost backend: GitHub Actions scrapes on a cron and commits
+static JSON to this repo; the app reads it from GitHub's raw CDN. No server
+of ours, no analytics. The only "backend" beyond the repo is Apple's: a
+CloudKit public database that the class-alert watcher writes to, iCloud
+key-value storage that mirrors the user's own settings, and APNs.
 
 - Repo: **github.com/salimhafid/improv** (public) — this directory.
 - App Store: bundle `com.salimhafid.UCBShows`, display name **Improv**,
-  team `8FKP6A38FJ`. **v1.1 approved and live** (July 2026). v1.2 (build 15)
-  uploaded, pending version creation + submission in App Store Connect.
+  team `8FKP6A38FJ`. v1.1 approved and live July 2026; the 1.2 and 1.3
+  trains closed on approval (2026-08-08, 2026-08-27). The project is at
+  **MARKETING_VERSION 1.4, CURRENT_PROJECT_VERSION 23** (build bumped
+  2026-09-03). Whether 1.4 (23) has been submitted is only visible in App
+  Store Connect (web-only) — check the train before archiving.
+- Accounts: none of ours. The app offers an **optional UCB student sign-in**
+  (ucbcomedy.com, inside a web view) for reserving free student tickets — see
+  "UCB session engine" below and PRIVACY.md.
 
 ## System shape
 
 ```
-GitHub Actions cron (.github/workflows/scrape.yml, "17 */3 * * *")
+GitHub Actions cron (.github/workflows/scrape.yml, "23 * * * *" — hourly)
   → publish_static.py  (LOCAL_STORE_DIR=docs — the checkout IS the state)
-      scraper.py    → docs/shows.json    (~2,600 shows, 11 sources)
-      classes.py    → docs/classes.json  (~444 classes, 10 sources)
-      talent.py     → docs/talent.json   (~2,086 people, ~1,586 bios)
-  → commits changed feeds (bot commits keep the cron alive past GitHub's
+      scraper.py    → docs/shows.json    (11 sources; 2,182 shows in the 2026-09-05 feed,
+                                          541 of them a frozen Second City carry — see watchlist)
+      classes.py    → docs/classes.json  (11 sources incl. ucb_online; 402 classes)
+      talent.py     → docs/talent.json   (UCB directory; 1,735 people, 1,585 bios)
+  → commits changed feeds (bot commits also keep the cron alive past GitHub's
     60-day-inactivity auto-disable)
 
-App fetch URLs (ETag + max-age≈300 revalidation, ~5-min freshness):
+Class-alert watcher (.github/workflows/class-watch.yml + 3 kicker crons)
+  → watcher.py scans class sources every ~10 min, writes CloudKit `ClassAlert`
+    records; devices receive them as pushes via their CKQuerySubscriptions.
+    State on the orphan branch `class-watch-state`. (Section below.)
+
+tests.yml: push to main (ignoring docs/**) → Python unit tests only.
+           The Swift harness (./run_tests.sh) runs locally only.
+
+App fetch URLs (default URLSession cache policy → ETag/304 revalidation):
   https://raw.githubusercontent.com/salimhafid/improv/main/docs/shows.json
   …/classes.json  …/talent.json
 ```
 
-Key pipeline behaviors (aggregation.py shared loop + scraper.py / talent.py):
-- **Per-source cadence**: `_SCRAPE_INTERVALS` — ucb_ny every 3h, everything
-  else 24h. Sources not due carry last-good data from the previous payload;
-  failures carry stale data (flagged) instead of wiping a source. Class
-  sources all refresh daily (`classes.py`). Both aggregators run on
-  `aggregation.run_sources()` — one loop, not two copies.
+The hourly cron replaced `17 */3 * * *` on this branch: GitHub starves a
+3-hourly cron on a quiet repo (runs landed hours late or were skipped; the
+delivered cadence from 2026-08-27 was 2–5 runs/day). Extra ticks are ~1-minute
+no-ops because the aggregator's own per-source cadence carries everything that
+isn't due.
+
+Key pipeline behaviors (aggregation.py shared loop + scraper.py / classes.py /
+talent.py):
+- **Per-source cadence**: `_SCRAPE_INTERVALS` — ucb_ny every 3h, every other
+  show source 24h (`scraper.py`); every class source daily (`classes.py`);
+  each talent group daily (`talent.py`). All with a 30-minute early-tick
+  grace. Sources not due carry last-good data from the previous payload;
+  failures carry stale data (flagged `stale: true`) instead of wiping a
+  source. Both show and class aggregators run on `aggregation.run_sources()`
+  — one loop, not two copies; talent.py mirrors the contract with its own
+  per-group loop.
+- **A failed source is due on every run**: `carry()` keeps the previous
+  `scraped_at`, and once that is `null` (Second City today) the source is
+  retried every tick — hourly, now. Second City is a ~91-page crawl, so a
+  broken adapter costs ~91 requests/hour until fixed.
 - **Empty-scrape guard**: a due fetch that returns 0 items while carry-over
   exists is treated like a failure (stale carry, scraped_at unchanged) — a
   200-OK page parsing to nothing is indistinguishable from a markup change.
   Adapters that KNOW empty is impossible raise instead (ucb page 1,
-  annoyance calendar, playground ICS, brooklyn_cc link/collection mismatch,
-  any failed magnet month).
+  annoyance calendar, playground ICS, second_city index/class payload,
+  brooklyn_cc link/collection mismatch, any failed magnet month). Crowdwork
+  `data: []` does not raise (the aggregator guard covers it).
+- **Carried rows are filtered one at a time** (`_filter_carried`): a corrupt
+  row drops itself (logged) instead of aborting the whole source's carry.
 - **Venue-local today**: upcoming filtering uses `common.local_today(city)`
   everywhere (aggregators AND adapters) — the runner's UTC date is already
   "tomorrow" from 5pm PT, which used to wipe same-night shows from the
-  evening builds.
+  evening builds. `CITY_TZ["Online"]` is America/New_York (UCB schedules
+  online classes in Eastern time).
 - **Crowdwork shows expand per-performance**: the shared adapter emits one
   item per future date in each show's `dates[]` (90-day cap, slug suffixed
-  `/<YYYYMMDDHHMM>`), not just `next_date` — a weekly show is ~13 items.
+  `/<YYYYMMDDHHMM>`, occurrences deduped on wall-clock time), not just
+  `next_date` — a weekly show is ~13 items. Classes take the first future
+  date of `[next_date] + dates[]`. Crowdwork `tags` are mostly
+  visibility/marketing flags; only a genre allow-list (`_GENRE_TAGS`) becomes
+  `comedy_types`, while the class `level` still reads the raw first tag
+  (that is where iO/Annoyance levels live).
 - **Enrichment failure ≠ emptiness**: detail()/bio() return None on fetch
-  failure and only successful fetches set `detail_done`/`bio_done`, so a
-  Cloudflare burst is retried next run instead of cached as empty forever.
-  Detail fetches dedupe by URL (Magnet's per-occurrence items share pages).
+  failure (and UCB `detail()` returns None when the page has no `#main`), and
+  only successful fetches set `detail_done`/`bio_done`, so a Cloudflare burst
+  is retried next run instead of cached as empty forever. Detail fetches
+  dedupe by URL (Magnet's per-occurrence items share pages).
+- **Detail enrichment budget** (UCB + Magnet): 400 detail-page fetches/run
+  (`_DETAIL_BUDGET`, 8 workers) AND an 8-minute wall-clock deadline
+  (`_DETAIL_DEADLINE`, measured from the start of `aggregate()`): past it no
+  new fetch starts and the rest stay unflagged for next run. Cached per URL
+  via `detail_done`. Carries (description, cast, image, cast_members) and
+  fills an empty listing `excerpt` from the description (240 chars, cut at a
+  word). `REFRESH_DETAILS=1` forces every show source due and re-fetches
+  details (shows only; via `run_sources(force=True)`, so a source that fails
+  on that run keeps its last-good `scraped_at`).
+- **Talent roster**: three dt_team pages (ny / la / teachers) + the DCM
+  load-more endpoint, each group on its own daily stamp (`scraped_at` per
+  summary row). A group that fails carries stale and is retried next tick,
+  but a sweep in which EVERY attempted group failed sets
+  `roster_attempted_at` and backs off for 6 h (`_ROSTER_BACKOFF`) — the host
+  is blocking us, so don't hammer it hourly. A page that parses to < 60 % of
+  its previous head-count is treated as a failed fetch (`_SHRINK_RATIO`); DCM
+  additionally requires 80 % of the total the endpoint reports. Bios: budget
+  150/run (`TALENT_BIO_BUDGET`, parsed leniently), 8 workers, 5-minute
+  deadline, `bio_done` carry-over by slug.
+- **Never publish empty**: `publish_static.py` exits nonzero if no show source
+  is *healthy* (`ok` AND `count > 0` — a legitimately empty `wgis_ny` cannot
+  vouch for an empty feed), or if any feed could not be written (including an
+  unset `LOCAL_STORE_DIR`). An empty classes or talent payload keeps the
+  previous file rather than failing the run.
 - **Tests**: `./run_tests.sh` = offline Python suite (tests/, synthetic
-  fixtures, no network) + Swift logic harness (tests/ios/, compiled straight
-  against app sources — no Xcode test target). Run it before committing.
-- **Detail enrichment budget** (UCB + Magnet): 400 detail-page fetches/run,
-  cached per URL via `detail_done` in the payload — converges, never
-  re-fetches. Carries (description, cast, image, cast_members).
-- **Talent bios**: budget 150/run (`TALENT_BIO_BUDGET`), `bio_done`
-  carry-over by slug.
-- **Never publish empty**: publish_static exits nonzero only if every show
-  source failed.
+  fixtures, no network; `REFRESH_DETAILS` unset) + Swift logic harness
+  (tests/ios/LogicTests.swift, compiled straight against the Foundation-only
+  app sources — no Xcode test target). Run it before committing. CI runs
+  only the Python half. Python locally is 3.9 (`.venv`), CI is 3.12 —
+  `requirements.txt` states the ≥ 3.9 floor.
 - Workflow probe mode (`workflow_dispatch` input `probe`): from-scratch
   scrape into a throwaway dir, no commit — tests runner connectivity. A
   "successful" scheduled run can be 100% cadence carry-over; read per-source
   log lines ("scraped N" vs "not due"/"carried"), not exit codes.
+- **HTTP**: everything goes through `common._request` (curl_cffi):
+  impersonation rotates `chrome → chrome120 → safari` across the 3 attempts;
+  404/410 stop after one attempt (403 does NOT — Cloudflare 403s a rejected
+  fingerprint, which is what the rotation exists for); a 202 is treated as a
+  challenge; the first bad body per (host, status) is logged once at WARNING
+  (`ucb.common`) so the Actions log captures what ucbcomedy.com actually
+  serves; `post_json` exists for the DCM load-more endpoint.
 
 ## Sources (id · method · the quirks that matter)
 
 | id | Theater | Method & quirks |
 |---|---|---|
-| ucb_ny / ucb_la | UCB NY / LA | WP Grid Builder listing (`ucbcomedy.com/shows/<city>`) + detail pages. **Paginated**: the grid serves 88 cards/page and `?_page=N` is server-rendered — walk pages until a short page (LA runs to 3 pages / ~185 shows; reading only page 1 once silently dropped 54% of LA). Images: strip WP `-WxH` suffix for full-size; detail `og:image` fills gaps. **Structured cast** from detail-page `/people/<slug>/` anchors inside `#main` (nav has team links — never scan outside #main); text "Featuring:" heuristic (multi-LINE — one name per line, stop at `—`/ticket words) is fallback only. Classes via the **Arlo registration API** (`ucbcomedy.arlo.co/api/.../eventsearch`, LOC_NY/LOC_LA tags); LOC_Online + satellite cities (Austin/Pittsburgh/Edinburgh) exist in Arlo but are deliberately unscoped. |
-| brooklyn_cc | Brooklyn Comedy Collective | Squarespace (pre-existing adapter). |
-| magnet | Magnet Theater | Month-calendar tables (3 months) + detail pages; **calendar has zero images — og:image from detail is the only artwork**. Classes: the all-classes-in-session index PLUS ~14 per-discipline `/class/<slug>/` pages (nav-discovered, same `div.class-holder` markup, deduped by WP id) — upcoming/enrolling sections only appear on the discipline pages. |
-| wgis_ny / wgis_la | WGIS | Crowdwork slug `wgis` split by timezone offset. **wgis_ny = 0 shows is correct**: all Crowdwork items are Pacific — WGIS NY runs classes only (HTML `/nycclasses`, `/laclasses`; `/onlineclasses` deliberately unscoped). |
-| annoyance | The Annoyance | **ThunderTix calendar-feed endpoint**: `GET theannoyance.thundertix.com/reports/calendar?start=<epoch>&end=<epoch>` → JSON, one call serves 6+ months (**180-day horizon**, ~450 perfs / ~80 productions). Per-production meta (desc/img/free) from event-page JSON-LD, `_WORKERS=3` — **ThunderTix 429s aggressively** (~400 reqs in 15 min triggers it; partial meta self-heals on the next daily run). A calendar failure/empty RAISES (aggregator carries last-good) — the old ~1-week JSON-LD fallback was removed 2026-08-08: replacing 180 carried days with 1 fresh week was strictly worse. Classes via Crowdwork slug `annoyancetrial`. |
+| ucb_ny / ucb_la | UCB NY / LA | WP Grid Builder listing (`ucbcomedy.com/shows/<city>`) + detail pages. **Paginated**: `?_page=N` is server-rendered; the walk stops when a page adds nothing new (out-of-range pages re-serve page 1), capped at `_MAX_PAGES = 8` — deliberately NOT a page-size heuristic (88 cards/page today), so a smaller grid can't silently truncate. Reading only page 1 once dropped 54% of LA (134 LA shows in the current feed). Images: strip WP `-WxH` suffix for full-size; detail `og:image` fills gaps. **Structured cast** from detail-page `/people/<slug>/` anchors inside `#main` (nav has team links — never scan outside #main; no `#main` → `detail()` returns None and the page is retried); text "Featuring:" heuristic (one name per line, or a comma list of short names on the label line; stop at `—`/ticket words; "Podcast:" does not match) is fallback only. Text caps (400 cast / 2000 description) cut at a word with "…". Classes via the **Arlo registration API** (`ucbcomedy.arlo.co/api/.../eventsearch`): LOC_NY → `ucb_ny`, LOC_LA → `ucb_la`, **LOC_Online → `ucb_online`** (city "Online", 16 items); the paged walk is memoised per run (including a failure) so the three passes cost one walk; Arlo `Summary` becomes the description only when it isn't a "Category: …" line. Satellite cities (Austin/Pittsburgh/Edinburgh) are still deliberately unscoped. |
+| brooklyn_cc | Brooklyn Comedy Collective | Squarespace Events collection via `?format=json`. Squarespace categories are **rooms** (Eris Mainstage / Deep Space / Pig Pen…) → `venue`/`venues`, `comedy_types=[]`. "No show…" closure notices skipped. Classes: instructor after ` w/`; a date in the product title ("(Saturday, September 12th, 2026)") becomes `start` so drop-ins age out; multi-week "(Aug-Oct '26)" titles stay undated. |
+| magnet | Magnet Theater | Month-calendar tables (`MONTHS_AHEAD = 3`) + detail pages; **calendar has zero images — og:image from detail is the only artwork**. `detail()` reads `[itemprop="description"]` first, falling back to `#content` cut at the address line / ticket table. Card years are inferred (same-year unless > 240 days stale or > 125 days ahead); href-less cards skipped. Classes: the all-classes-in-session index PLUS per-discipline `/class/<slug>/` pages (nav-discovered, capped at `_MAX_DISCIPLINE_PAGES = 20`, same `div.class-holder` markup, deduped by WP id) — upcoming/enrolling sections only appear on the discipline pages. |
+| wgis_ny / wgis_la | WGIS | Crowdwork slug `wgis` split by the event's `timezone` name (UTC offset as fallback). **wgis_ny = 0 shows is correct**: all Crowdwork items are Pacific — WGIS NY runs classes only (HTML `/nycclasses`, `/laclasses`; `/onlineclasses` deliberately unscoped). Class dates carry no year: month + day required (else undated); "Currently Running"/"in session" sections publish undated; a date > 45 days behind rolls to next year unless that lands > 270 days out (then undated — an in-session course); an explicit year is taken as written. `is_full` recognises full / sold-out / waitlist. |
+| annoyance | The Annoyance | **ThunderTix calendar-feed endpoint**: `GET theannoyance.thundertix.com/reports/calendar?start=<epoch>&end=<epoch>` → JSON, one call serves the **180-day horizon** (353 perfs in the current feed). Per-production meta (desc/img/free) from event-page JSON-LD, `_WORKERS=3` — **ThunderTix 429s aggressively** (partial meta self-heals on the next daily run). A calendar failure/empty RAISES (aggregator carries last-good) — the old ~1-week JSON-LD fallback was removed 2026-08-08: replacing 180 carried days with 1 fresh week was strictly worse. Default venue "Annoyance Theatre". Classes via Crowdwork slug `annoyancetrial`. |
 | io_chicago | iO Theater | Crowdwork slug `iotheater` for shows AND classes. |
-| second_city | The Second City | Crawl `/shows/chicago` index (~90 pages); each show page's `__NEXT_DATA__` has a **base64 `patronticketData`** blob with the full run (ISO UTC → convert to America/Chicago). Filter `custom.Event_City__c == "Chicago"` (Toronto leaks in). The show-finder page's `?dates=` filter is **client-side only** — never use it for enumeration. **180-day horizon** (blobs carry full on-sale runs incl. holiday shows — no extra requests). Stage from slug heuristic (mainstage/e.t.c./skybox). **Classes**: `/_next/data/<buildId>/find-a-class/chicago.json` (buildId from the find-a-class page's `__NEXT_DATA__`) → 86 class nodes, each with an Activenet section-rows JSON string (dates, weekly pattern, open seats) + hero (desc/image/price) — one item per open future section, 2 requests total. |
-| logan_square | Logan Square Improv | Shared Crowdwork adapter, slug `lsi`, shows AND classes (their /events/ page is a Crowdwork widget on the same API). The old hand-rolled 28-day-window pagination was removed 2026-08-08 after verifying the bare endpoint returns a strict superset. `tags` are visibility flags, NOT genres. |
-| playground | The Playground Theater | Site is **Canva**; show-calendar embeds a public **Google Calendar** — adapter reads the ICS (`calendar id c_eb31…@group.calendar.google.com`, hardcoded in sources/playground.py). Full RRULE expansion (dateutil) + EXDATE / RECURRENCE-ID overrides / CANCELLED. All shows free. No images (app's GeneratedCover handles). If they regenerate the calendar id, the source fails loudly and carries. |
+| second_city | The Second City | Crawl `/shows/chicago` index (~90 pages, 6 workers); each show page's `__NEXT_DATA__` has a **base64 `patronticketData`** blob with the full run (ISO UTC → America/Chicago). **Toronto guard**: an instance is skipped only when `custom.Event_City__c` is present AND not "Chicago" — PatronTicket stopped sending the field in August 2026 and the old `== "Chicago"` test rejected every showtime (the source was frozen from 2026-08-12 until this fix; see watchlist). Stage from the page's own show record `showAttributes.venue[].name` (city suffix stripped), slug heuristic (mainstage/e.t.c./skybox) as fallback; description from the blob's `description`/`detail`, else `showAttributes.description` — never the first `description` in tree order (that's the parking paragraph). Rating/policy `showTags` (Rated R, 21+, drink minimum, Guest Performance) are not `comedy_types`. The show-finder's `?dates=` filter is **client-side only** — never use it for enumeration. **180-day horizon**. **Classes**: `/_next/data/<buildId>/find-a-class/chicago.json` (buildId from the find-a-class page's `__NEXT_DATA__`) → class nodes, each with an Activenet section-rows JSON string (dates, weekly pattern, open seats) + hero (desc/image/price) — one item per open future section (53 in the current feed), 2 requests total. |
+| logan_square | Logan Square Improv | Shared Crowdwork adapter, slug `lsi`, shows AND classes (their /events/ page is a Crowdwork widget on the same API). The old hand-rolled 28-day-window pagination was removed 2026-08-08 after verifying the bare endpoint returns a strict superset. |
+| playground | The Playground Theater | Site is **Canva**; show-calendar embeds a public **Google Calendar** — adapter reads the ICS (`calendar id c_eb31…@group.calendar.google.com`, hardcoded in sources/playground.py), **62-day horizon**. RRULE expansion (dateutil) + EXDATE / RECURRENCE-ID overrides / CANCELLED; date-only and Z-form `UNTIL` both handled (a regex used to double a Z-form UNTIL and drop the series); `TZID=` honoured; `VALARM` blocks ignored; `DTEND` → `end`. One-off all-day entries ("Happy Labor Day") are skipped as calendar notes; recurring all-day series and their overrides are kept. All shows free. No images (app's GeneratedCover handles). If they regenerate the calendar id, the source fails loudly and carries. |
 
 **Talent** (talent.py + sources/ucb_talent.py): NY + LA + Teachers pages are
 dt_team grids (`div.wf-cell[data-name]`, `/people/<slug>/`, headshot
-data-src, `dt_team_category-dcm` class). The **DCM page is a WP Grid Builder
-AJAX grid** — `/page/N` URLs all serve the same 30 people; the real protocol
-is `POST /?wpgb-ajax=refresh&_load_more=<offset>` with the grid's form fields
-(see `_fetch_dcm` in sources/ucb_talent.py) → full 1,228-person roster.
-Groups: ny / la / teachers / dcm, merged by slug. DCM roster re-scrapes at
-most daily.
+data-src) read by `fetch_page`. The **DCM page is a WP Grid Builder AJAX
+grid** — `/page/N` URLs all serve the same 30 people; the real protocol is
+`POST /?wpgb-ajax=refresh&_load_more=<offset>` with the grid's form fields
+(`_dcm_batch`, driven by `fetch_dcm_roster`; the first batch supplies the
+total and is fatal, later batches that fail log and return `[]` and the 80 %
+completeness check decides). Names are HTML-unescaped. Groups: ny / la /
+teachers / dcm, merged by slug (880 DCM people in the current feed; la 903,
+ny 448, teachers 134). Live status: see the watchlist — all four groups have
+failed on every recent run.
+
+## Class-alert watcher (watcher.py + .github/workflows/class-watch*.yml)
+
+Pushes "new class posted" notifications with no server of ours: a GitHub
+Actions job scans the class sources, and new classes become records in the
+app's **CloudKit public database**; each device's `CKQuerySubscription`s turn
+those into APNs pushes.
+
+- **The chain** (`class-watch.yml`, `workflow_dispatch` only, `mode=chain`
+  by default): GitHub delays *scheduled* runs by hours on a quiet repo but a
+  running job keeps its clock, so one job loops "scan, commit state, sleep
+  600 s" for `CHAIN_BUDGET_MIN=330` minutes (job `timeout-minutes: 355`) and
+  then, `if: always()`, dispatches its own successor (3 attempts). Each
+  iteration runs `python watcher.py --ucb --all-if-stale 20`: UCB's Arlo
+  catalog every iteration, every other school only when the newest non-UCB
+  state stamp is > 20 h old (so roughly daily). Concurrency group
+  `class-watch-chain` for the chain; one-shot modes (`ucb|all|both|test`) get
+  a per-run group so they are not cancelled by the chain's self-dispatch.
+- **Kickers** (`class-watch-kick-{1,2,3}.yml`, crons `4,24,44` / `11,31,51`
+  / `17,37,57` past the hour): restart-only. `gh run list` — if no chain run
+  is in progress/queued, `gh workflow run class-watch.yml -f mode=chain`;
+  otherwise exit. Three staggered odd-minute crons because :00 is the worst
+  slot in GitHub's scheduler lottery.
+- **State**: `class-watch.json` at the root of the orphan branch
+  `class-watch-state` (checked out into `state-branch/`, `WATCH_STATE` points
+  at it; the bare default `state/class-watch.json` is for local runs).
+  `{ "<school>": {"ids": [...], "updated": iso}, "_pending_alerts": [...] }`.
+  Committed after every iteration by `class-watch-bot` (rebase-on-top on a
+  rejected push) — ~144 commits/day on that branch. If the state checkout
+  fails, the job baselines from scratch ONLY when `git ls-remote` positively
+  reports no such branch (exit 2); any other failure aborts, because an empty
+  state would silently baseline every school and then overwrite the real one.
+- **Scan → diff**: `scan_ucb()` = one Arlo pull split by `LOC_*` tag into
+  `ucb_ny / ucb_la / ucb_online`, each class tagged with EVERY matching
+  `CTG_*`/`FRQ_*` category (`UCB_CATEGORY_TAGS`; first match = primary
+  `category`); `scan_others()` = every non-UCB `CLASS_SOURCES` adapter (a
+  raising adapter is skipped, state untouched). `diff_and_alert`: a school
+  with no prior state is **baselined silently**; a scan that comes back
+  **empty for a school that had classes is treated as a failed scan** (prior
+  ids kept, nothing alerted, `updated` not bumped) so the next good scan
+  doesn't alert on every class; a corrupt state entry is re-baselined. New
+  UCB classes are bundled per (school, category set); other schools get one
+  bundle per school (`category "all"`). `compose()` builds `pushTitle`
+  ("New Improv classes at UCB New York") and `pushBody` (up to three titles,
+  capped at 170 chars).
+- **CloudKit record**: `POST https://api.apple-cloudkit.com/database/1/
+  iCloud.com.salimhafid.UCBShows/<env>/public/records/modify`, record type
+  `ClassAlert`, fields `school`, `category`, `categories` (STRING_LIST),
+  `count`, `pushTitle`, `pushBody`, `classIDs`. Written to BOTH
+  environments by default (`CLOUDKIT_ENVS=development,production`) so dev
+  and App Store builds both hear it. Signed per Apple's server-to-server
+  spec: ECDSA P-256 over `"<ISO date>:<base64 sha256(body)>:<subpath>"`
+  (`cryptography`, now in requirements.txt).
+- **Secrets** (repo Actions secrets, set 2026-08-15): `CLOUDKIT_KEY_ID`
+  (development key), `CLOUDKIT_KEY_ID_PROD`, `CLOUDKIT_PRIVATE_KEY` (PEM).
+  Keys come from CloudKit Console → server-to-server keys; rotate by
+  uploading a new public key there and replacing the secrets. Without
+  `CLOUDKIT_KEY_ID`/`CLOUDKIT_PRIVATE_KEY` the watcher runs in **dry-run**
+  mode and logs what it would send.
+- **At-least-once delivery**: `send_alerts` runs BEFORE `save_state`; any
+  alert an environment did not accept (HTTP/auth/network error, per-record
+  `serverErrorCode`, or a malformed key) is parked under
+  `state["_pending_alerts"]` (tagged with the envs still owed, capped at 50)
+  and retried first on the next iteration — only to the envs owed. `main()`
+  then exits **non-zero, which means "alerts parked for retry"**, not
+  "crashed": the workflow logs a `::warning` and still commits the state.
+- `--test` writes and deletes a probe record in **development only**;
+  `--test-prod` opts production in. `mode=test` in the workflow therefore
+  tests development only.
+- **Risk to know about**: a job that sleeps in a loop ~24 h/day and
+  re-dispatches itself is a serverless cron running on Actions; GitHub's
+  Actions usage policy lists that kind of use as prohibited. Whether it
+  would ever be enforced against this repo is unknowable from here — if the
+  workflow is ever disabled by GitHub, alerts stop and this is why.
 
 ## iOS app — what's beyond ios/README.md
 
-- **Feed contract**: defensive decoding everywhere; `cast_members`
-  [{name, slug}] enables exact talent matching (slug first, normalized name
-  fallback). Saved I'm-Going shows persist as full encoded Show objects.
+- **Feed contract**: defensive decoding everywhere (`try?` per scalar, lossy
+  arrays for `venues`/`comedy_types`/`cast_members`; an empty
+  `source`/`org`/`city` takes the same fallback as a missing one);
+  `cast_members` [{name, slug}] enables exact talent matching (slug first,
+  normalized name fallback — `nameKey` folds diacritics and ø/ł/ß/æ/œ).
+  Saved I'm-Going shows persist as full encoded Show objects. Shows whose
+  start is before `min(start of today in the venue zone, now − 6 h)` are
+  pruned from the feed display (undated shows kept). `DateUtils.parse`
+  accepts only the feed's naive 10/16/19-char forms.
+- **Cities**: `City` is `newYork | chicago | losAngeles | online`. **Online**
+  is a pseudo-city for `ucb_online` (`hasShows: false`, so never a sidebar
+  section; Eastern time): the catalog has 12 entries for 11 theaters, and
+  `classScope` adds `ucb_online` whenever `ucb_ny` or `ucb_la` is selected,
+  so the Classes tab shows a "UCB Online" folder (last, after the selected
+  city's schools; Improv 101–401 rank as Core Curriculum there too).
+  `SourceCatalog.isUCB(id)` is the one "is this UCB" helper (talent
+  directory, class alerts, student reserve).
 - **City timezones**: every show parses/day-buckets/labels in its own city's
   zone (City.timeZone). Never anchor to one city.
-- **Talent UX**: cast chips on ucb_ny/ucb_la detail pages (coral = matched →
-  bio; gray = unmatched → directory pre-searched); bio shows city tag
-  (LA wins, else New York — DCM/teachers read as New York), scraped bio, and
-  slug-matched Upcoming Shows; directory filters All/New York/Los Angeles
-  are mutually exclusive (LA membership wins; NY includes DCM).
+- **Tabs**: Shows (0) · **Tickets** (1 — Student ID and reserved tickets on
+  top, the hearted "I'm Going" list below) · Classes (2).
+- **Talent UX**: cast chips on UCB detail pages (coral = matched → bio; gray
+  = unmatched → directory pre-searched); bio shows city tag (LA wins, else
+  New York — DCM/teachers read as New York), scraped bio, and slug-matched
+  Upcoming Shows; directory filters All/New York/Los Angeles (LA membership
+  wins; NY = everyone whose city label is New York). `TalentStore.phase`
+  (`loading/loaded/offline/failed`) drives a Try Again / offline banner.
 - **Calendar**: first Add-to-Calendar asks Apple vs Google, remembered in
   `@AppStorage("calendarProvider")`. Apple = write-only EventKit; Google =
-  calendar.google.com/render TEMPLATE URL (routes to the Google app),
-  venue-local times pinned with `ctz`.
+  calendar.google.com/render TEMPLATE URL (routes to the Google app; title,
+  venue, excerpt and show URL leave the device in that URL), venue-local
+  times pinned with `ctz`, `+&=` percent-encoded.
 - **Share**: UIActivityItemSource + custom LPLinkMetadata (title — date @
   time · theater · stage + poster). Rich preview applies when shared from
   the app; pasted-raw links fall back to the theater page's own OG
   (hosted OG interstitials were considered and deliberately skipped).
-- **Reminders**: 1 hour before showtime; pending notifications rescheduled
-  on every launch (migrates lead-time changes).
+- **Reminders**: 1 hour before showtime (`ReminderPlan.lead`), rescheduled
+  on every launch (migrates lead-time changes) and re-armed when permission
+  is granted by any feature. Identifiers: `<show.id>` for hearts,
+  `ticket/<ticket.id>` for tickets. **One reminder per show**: `TicketStore`
+  publishes coverage and the heart's reminder stands down (the ticket's tap
+  opens the QR). Ids that vanish from `going.json` (iCloud reload) have
+  their pending notifications cancelled. Tapping a heart reminder deep-links
+  to the show in the Tickets tab (`AppState.openShowID`); a ticket reminder
+  opens that ticket (`openTicketID`); a class alert opens the Classes tab.
 - **Onboarding**: none. A fresh install opens on UCB New York; theaters are
   picked in the sidebar and the city is always inferred from that selection.
-- **DEBUG UITEST launch-env hooks** (Support/UITestSupport.swift + detail
-  view): `UITEST_TAB` (0 Shows / 1 I'm Going / 2 Classes),
-  `UITEST_PUSH_SOURCE=<source id>`, `UITEST_TALENT=directory|person|<name>`,
-  `UITEST_SCROLL_CAST=1`, `UITEST_CALENDAR_DIALOG=1`, `UITEST_SHARE=1`,
-  `UITEST_SIDEBAR=1`.
+- **Filters**: persisted as JSON under `filters` (lenient decoder, unknown
+  values fall back to defaults); `reconcileFilters` drops a venue/type no
+  longer offered in scope, clears the venue when fewer than two venues are
+  offered (the picker hides), and does nothing while the scope has zero shows
+  (a temporarily empty carry must not wipe persisted filters).
+- **Caches**: feed caches in Application Support (`<feed>.cache.json`, no
+  TTL — freshness comes from the network refresh; pull-to-refresh uses
+  `.reloadRevalidatingCacheData`); an undecodable file is moved aside as
+  `<name>.bak-<unix seconds>.json`. `URLCache.shared` = 32 MB / 256 MB for
+  posters (`PosterPipeline` downsamples with ImageIO, `NSCache`s the thumbs,
+  and coalesces identical in-flight URLs).
+- **iCloud KVS sync** (`CloudSync`, `NSUbiquitousKeyValueStore`, entitlement
+  `ubiquity-kvstore-identifier`): defaults keys `selectedTheaters`,
+  `filters`, `classAlertPrefs`, `calendarProvider` and files `going.json`,
+  `tickets.json` (as `file/<name>`). `bootstrap()` runs before any store is
+  built and adopts the cloud copy only where nothing local exists; local
+  changes push (last writer wins, never deletes cloud state; defaults pushes
+  are held until the initial sync lands or a 5 s fallback); external changes
+  are written to disk and `fileDidChange` reloads GoingStore/TicketStore
+  live; class-alert prefs apply live (the store observes `UserDefaults`);
+  theater selection and filters apply on next launch. `AccountChange` /
+  `QuotaViolationChange` reasons are logged and not adopted. Device-local
+  only: `classAlertSyncPending`.
+- **Class alerts (app side)**: `ClassAlertsStore.Prefs {master, schools,
+  ucb: [school: Set<category>], version}` under `classAlertPrefs` (lenient
+  decoder; a blob without `version` decodes as 0 and is migrated once; a
+  fresh `Prefs()` is already v1). Enabling a UCB school seeds
+  `improv, improv_electives, featured_programs`. Desired subscriptions:
+  `alert/<school>/all` (`school == %@`) for other schools,
+  `alert/v2/<school>/<category>` (`school == %@ AND categories CONTAINS %@`)
+  per UCB category; `CKQuerySubscription(recordType: "ClassAlert",
+  firesOnRecordCreation)` with `titleLocalizationKey CA_TITLE` /
+  `alertLocalizationKey CA_BODY` bound to `pushTitle`/`pushBody`
+  (`Localizable.strings` at the bundle root holds the `"%@"` passthroughs —
+  the first real `en.lproj` localisation must migrate it). Reconcile
+  (`syncSubscriptions`) is coalesced, loops until prefs stop moving,
+  surfaces per-item CloudKit failures as `syncIssue`, and a persisted dirty
+  flag (`classAlertSyncPending`) makes `armOnLaunch` retry a reconcile that
+  failed offline — including the delete-everything reconcile after the
+  master switch goes Off. `armOnLaunch` (launch + every foreground) never
+  prompts; `armIfNeeded` (sheet open) does. `PushRegistrationDelegate`
+  surfaces APNs registration failures. Entitlements: `aps-environment`,
+  iCloud container `iCloud.com.salimhafid.UCBShows`, CloudKit, KVS.
+- **UCB session engine** (`UCBSession`): UCB has no API and sits behind
+  Cloudflare Turnstile + JA3 binding, so ONE permanent off-screen `WKWebView`
+  over a named `WKWebsiteDataStore` (fixed UUID) is both the login surface's
+  cookie jar and the API client — every authenticated call runs as injected
+  JS inside it. The sign-in sheet (`UCBSignInView`) opens UCB's real
+  `/my-account/` login in a second web view over the SAME data store, ticks
+  WooCommerce's "Remember me" (else the auth cookie is a session cookie and
+  users got signed out), and treats the sheet as signed in only when a page
+  shows a positive dashboard marker (`.woocommerce-MyAccount-navigation` or
+  `.ucb-student-id`) — not merely "no login form" (the lost-password page and
+  Cloudflare interstitials used to fire it). Ops are serialized behind an
+  async lock, bounded by a 20 s navigation gate, stand down while the login
+  sheet owns the web view, and re-check cancellation after acquiring the
+  lock. API: `refresh() → RefreshOutcome (signedIn(snapshot) | signedOut |
+  unknown)`, `claimAvailability(showURL:)`, `reserve(showURL:) → ActionResult`
+  (POST `admin-ajax.php` `ucb_student_claim`), `release(order:nonce:) →
+  ActionResult`, `signOut()` (wipes the data store). `unknown` never wipes
+  the cached wallet.
+- **Account + tickets**: `UCBAccountStore` holds `phase`, `name`, `eligible`,
+  `freeRemaining`, `isConfirmed` (a real signed-in read landed — the wallet
+  gates "N free shows left" on it) and a Keychain marker (service
+  `com.salimhafid.UCBShows.ucb`, account `session-valid`,
+  `AfterFirstUnlockThisDeviceOnly`, never iCloud Keychain) so launch starts
+  in `.checking` and cached tickets render immediately.
+  `completeSignIn() → RefreshOutcome` is handed straight to `tickets.adopt`
+  so sign-in costs one navigation. `TicketStore`: `reserved: [Ticket]` +
+  `studentID` in `tickets.json` (mirrored to iCloud; an empty remote copy
+  is refused and the local wallet re-pushed). Carry-forward by order id keeps
+  `showID/start/posterURL`, and keeps the old QR/title/venue when a partial
+  page read comes back blank. Show ↔ ticket join from the tapped show
+  (`pendingJoins`) or a unique title + venue-local-night match
+  (`ReminderPlan.uniqueBooking`), backfilled when the feed lands. Foreground
+  sync throttled to one per 5 minutes (`syncIfStale`). `reserve(show:)` also
+  adopts an `alreadyClaimed` answer (reserved on the website) into the
+  wallet. `release(_:) → ActionResult`: on a successful POST it re-syncs; if
+  two reads fail it drops the ticket locally (a spent nonce must not linger).
+  `Ticket.isReleasable(now:)` = nonce present and > 1 h before start (false
+  when undated); `isPast` = 3 h after start; `Ticket.cleanVenue` /
+  `Show.cleanVenueName` share one anchored, case-insensitive regex for the
+  `NY – 14th St. ` / `LA - ` prefixes. `StudentReserveButton` sits between
+  the heart and Get Tickets on UCB shows ("Reserve · Free").
+- **Apple Wallet** (`WalletPass`, `AddToWalletButton`): a `.pkpass` is built
+  and CMS-signed **on device** (`swift-certificates`, `@_spi(CMS) import
+  X509`) for the Student ID (storeCard, `locations` = both UCB venues) or a
+  reserved ticket (eventTicket, its venue, `relevantDate`). The QR payload is
+  decoded from our rasterized SVG with Vision (CIDetector fallback). Signing
+  identity = `PassSigning/pass_cert.pem` + `pass_key.pem` (git-ignored;
+  `wwdr_g4.pem` committed); no certificate in the bundle → the button hides.
+  **The signing key ships inside the binary** (and the synchronized root
+  group copies everything under `ios/UCBShows/`, PassSigning/README.md
+  included): an extractor could sign cosmetic passes under this pass type
+  id — no payment/identity risk, rotate the certificate if that ever
+  matters. `Venue` maps per SOURCE (14th Street, Franklin); an LA **Annex**
+  ticket's pass geo-surfaces at Franklin because no verified Annex
+  coordinates exist in the repo (don't invent them). Wallet is absent on
+  iPad; the button also hides when the ticket has no QR. The app itself uses
+  no location services.
+- **QR rendering** (`QRRender`): UCB's inline SVG is rasterized once through
+  an off-screen `WKWebView` snapshot (430 pt side) into an `NSCache` keyed by
+  the SVG (16 entries / 96 MB), concurrent requests coalesced; the ticket
+  screen shows the QR at maximum brightness while visible.
+- **DEBUG UITEST launch-env hooks** (Support/UITestSupport.swift,
+  Support/DebugFixtures.swift, detail view): `UITEST_TAB` (0 Shows /
+  1 Tickets / 2 Classes), `UITEST_PUSH_SOURCE=<source id>`,
+  `UITEST_TALENT=directory|person|<name>`, `UITEST_SCROLL_CAST=1`,
+  `UITEST_CALENDAR_DIALOG=1`, `UITEST_SHARE=1`, `UITEST_SIDEBAR=1` (no-op on
+  regular width — there is no drawer on iPad), **`UITEST_FAKE_TICKETS=1`**
+  (or launch argument `-UITestFakeTickets`: seeds a signed-in account, a
+  sample Student ID and a reserved ticket in memory, never persisted; a
+  built pass is also dumped to Documents as `debug_pass.pkpass`),
+  **`UITEST_RESTORING=1`** (holds the account in the launch-restore phase to
+  capture the "Updating…" wallet state; combine with the fake tickets to put
+  a cached wallet behind it).
+- **Dependencies**: one SPM package, `apple/swift-certificates`
+  (`upToNextMajor 1.0.0`; `Package.resolved` pins 1.19.4 with swift-asn1
+  1.7.1 and swift-crypto 4.5.1). A clean clone resolves it on first build.
+  `SWIFT_VERSION = 5.0`; the first Swift 6 strict-concurrency blockers are
+  `DateUtils`' static `ISO8601DateFormatter`s, the harness's `var failures`,
+  and the `Task.detached` captures in `WalletPass`/`PosterPipeline`.
 
 ## Build & release runbook
 
@@ -141,20 +430,33 @@ xcodebuild -exportArchive -archivePath <path>/Improv.xcarchive \
 
 - ExportOptions.plist (recreate if missing): method `app-store-connect`,
   teamID `8FKP6A38FJ`, signingStyle automatic, uploadSymbols true,
-  destination `upload` (or `export` for a local .ipa).
-- **Version rule**: a train closes once approved — 1.3 is closed (builds 19
-  and 20 were uploaded into it and are stranded); new uploads must carry
-  MARKETING_VERSION ≥ 1.4. The upload fails at the very END of a ~15 min
-  export with "Invalid Pre-Release Train", so check the train before
-  archiving, not after. Both settings appear twice in
+  destination `upload` (or `export` for a local .ipa — nothing local is
+  produced by default), `manageAppVersionAndBuildNumber` false (the build
+  number is bumped by hand; Xcode must not rewrite it at upload).
+- **Version rule**: a train closes once approved — 1.2 and 1.3 are closed
+  (builds 19 and 20 were uploaded into 1.3 and are stranded); new uploads
+  must carry MARKETING_VERSION ≥ 1.4 (currently 1.4). The upload fails at
+  the very END of a ~15 min export with "Invalid Pre-Release Train", so
+  check the train before archiving, not after. Both settings appear twice in
   the pbxproj (Debug+Release) — sed with /g.
 - `ITSAppUsesNonExemptEncryption = NO` is baked in — no compliance prompt.
+- `CODE_SIGN_ENTITLEMENTS = UCBShows/UCBShows.entitlements` (aps-environment
+  `development` in the file; iCloud container + CloudKit; KVS). The watcher
+  writes alerts to both CloudKit environments, so development and App Store
+  builds both receive them.
+- Wallet passes need `PassSigning/pass_cert.pem` + `pass_key.pem` in the
+  tree at build time (git-ignored) — see ios/UCBShows/PassSigning/README.md
+  (the `openssl … -legacy` step needs OpenSSL 3, not macOS's LibreSSL).
 - **"Failed to Use Accounts"** on upload = Xcode's ASC session expired →
   user signs in via Xcode ▸ Settings ▸ Accounts, then retry (no rebuild).
 - App record creation / version pages / Submit are **web-only** (no API).
   Listing copy lives in ios/AppStore/metadata.md; screenshots in
   ios/screenshots/appstore{,-65,-ipad}/ (6.9" 1320×2868 native; 6.5"
-  1284×2778 derived via sips resize+crop; iPad 13" 2064×2752).
+  1284×2778 derived via sips resize+crop; iPad 13" 2064×2752). They predate
+  the Tickets tab and the Classes redesign.
+- `ios/project.yml` (XcodeGen) is the regeneration escape hatch; it mirrors
+  the pbxproj's settings, the entitlements path, and the swift-certificates
+  package — keep it in step when either changes.
 
 ## Simulator verification recipe
 
@@ -164,6 +466,7 @@ xcrun simctl boot <udid>            # list: xcrun simctl list devices available
 xcrun simctl spawn <udid> defaults write com.salimhafid.UCBShows selectedTheaters -array "ucb_ny"
 xcrun simctl status_bar <udid> override --time "9:41" --batteryState charged --batteryLevel 100
 SIMCTL_CHILD_UITEST_PUSH_SOURCE=ucb_ny xcrun simctl launch <udid> com.salimhafid.UCBShows
+SIMCTL_CHILD_UITEST_TAB=1 SIMCTL_CHILD_UITEST_FAKE_TICKETS=1 xcrun simctl launch <udid> com.salimhafid.UCBShows  # wallet without a UCB login
 xcrun simctl io <udid> screenshot out.png
 ```
 
@@ -177,6 +480,31 @@ Gotchas learned the hard way:
 - xcodebuild by-name simulator destinations fail if CoreSimulator version
   mismatches Xcode (fix: reboot/open Xcode once); `generic/platform=iOS
   Simulator` always compiles.
+- iCloud KVS and CloudKit pushes need a signed-in iCloud account on the
+  simulator; without one the app runs fine and `syncIssue` reads "Sign in to
+  iCloud…".
+
+## Watchlist — known live outages
+
+- **Second City shows frozen 2026-08-12 → fixed on this branch.** PatronTicket
+  stopped sending `custom.Event_City__c`; the `== "Chicago"` Toronto guard
+  rejected every instance, `second_city` raised "parsed no showtimes from any
+  show page" on every run, and the feed carried a frozen 541-show set
+  (`stale: true, scraped_at: null`). The adapter now skips an instance only
+  when the field is present and names another city, and reads the stage from
+  `showAttributes.venue[].name`. **To confirm after merge**: the next
+  scheduled run's log shows `second_city: scraped N`, and
+  `sources[second_city].scraped_at` in `docs/shows.json` is no longer null.
+- **ucbcomedy.com answers 202 to the Actions runner** (intermittently for
+  `ucb_ny` shows since July — the source still succeeds on some runs — and on
+  every recent run for the three talent pages, while the DCM endpoint
+  alternates between success and a non-JSON body). Root cause unknown (a
+  Cloudflare-style challenge is the working theory). This branch: the first
+  202/non-JSON body per host is logged once at WARNING (read it in the scrape
+  log), a 202 counts as a challenge for the fingerprint rotation, and the
+  talent sweep backs off 6 h after a total failure instead of retrying every
+  tick. Until it clears, `docs/talent.json` keeps carrying the 2026-08-31
+  roster and `ucb_ny` runs on whatever ticks get through.
 
 ## Access & conventions
 
@@ -185,18 +513,30 @@ Gotchas learned the hard way:
   Remote `origin` = plain https; push with the token inline. Commits MUST
   use author email `1709833+salimhafid@users.noreply.github.com` (email
   privacy is on; real-email commits are rejected).
-- The scrape bot commits every few hours → **always `git pull --rebase`
+- The scrape bot commits every hour or so → **always `git pull --rebase`
   before pushing; on docs/*.json conflicts take the newer feed (usually
-  `git checkout --theirs` during rebase of your local commit)**.
+  `git checkout --theirs` during rebase of your local commit)**. The
+  class-watch bot commits only to `class-watch-state`, never to main.
+- **History**: `main` was force-pushed on **2026-08-08** (dropped ≈113 bot
+  commits from 07-22 → 08-08) and on **2026-09-04** (every commit rewritten
+  for a vendor-name scrub; `deploy.sh` purged). Author/committer dates
+  survived, but **no commit hash quoted before 2026-09-04** (run logs, older
+  notes, ASC build notes) resolves in today's history — use dates and
+  messages, not hashes, when digging.
 - Xcode holds the Apple ID session; simulators available include iPhone 17
   Pro Max (6.9" shots) and iPad Pro 13-inch (M5).
-- Scraping stack: python3 via `.venv/bin/python`, curl_cffi
-  `impersonate="chrome"` everywhere (several sites block plain clients).
-- **No AI co-author trailers on commits** (user decision 2026-07-22; the
-  full history was rewritten to strip them — Salim is the sole human
+- Scraping stack: python3 via `.venv/bin/python` (3.9; CI is 3.12),
+  curl_cffi with TLS impersonation rotating `chrome / chrome120 / safari`
+  across retries (several sites block plain clients). `cryptography` is a
+  requirement (watcher signing).
+- Actions secrets: `CLOUDKIT_KEY_ID`, `CLOUDKIT_KEY_ID_PROD`,
+  `CLOUDKIT_PRIVATE_KEY` (watcher). Nothing else is secret; feeds are public.
+- **No AI co-author trailers on commits** (user decision 2026-07-22; no
+  commit in today's history carries one — Salim is the sole human
   contributor).
 
 ## Money
 
 $0/month for everything (public-repo Actions + raw CDN). The only recurring
-cost anywhere is Apple's $99/yr developer program.
+cost anywhere is Apple's $99/yr developer program, which also covers
+CloudKit, APNs, iCloud KVS and the Wallet pass type id.
