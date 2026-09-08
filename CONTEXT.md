@@ -281,7 +281,20 @@ CloudKit Console subsequently reported **Changes Deployed**. At
 `2026-09-08T20:27:24Z`, [probe run 34274880391](https://github.com/salimhafid/improv/actions/runs/34274880391)
 accepted and removed the exact UCB subscription in **both development and
 production**, verifying that the production subscription gate was repaired.
-Actual push receipt on the user's device remains unverified.
+The user confirmed receipt of **Improv notification test** on their phone on
+2026-09-08. [Owner-only production test 34275363613](https://github.com/salimhafid/improv/actions/runs/34275363613)
+created the matching alert at `20:32:32Z`. That run's failure was its original
+record-cleanup request, not alert creation; the subscription was removed, and
+[cleanup run 34275715138](https://github.com/salimhafid/improv/actions/runs/34275715138)
+removed the diagnostic record after the cleanup fix. Production push delivery
+to the physical device is verified.
+
+This temporary test subscription is separate from the user's saved choices.
+[Diagnostic run 34276008696](https://github.com/salimhafid/improv/actions/runs/34276008696)
+at `20:38:56Z` still found zero production subscriptions for the server key's
+owner. The user was asked to open Class Alerts and confirm the enabled UCB
+schools/categories so the app can reconcile them. The watcher is running and
+its first scan after the fix completed at `20:33:40Z` with no pending alerts.
 
 The workflow exposes separate checks using the existing Actions secrets:
 

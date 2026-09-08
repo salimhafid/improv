@@ -91,21 +91,22 @@ to main; app 1.5 build 25 submitted for review, WAITING_FOR_REVIEW).
       "All Theaters" row and "Change City" footer. A
       refresh would show the current app (recipe in CONTEXT.md; wallet via
       `UITEST_FAKE_TICKETS=1`).
-- [ ] `aps-environment` is `development` in `UCBShows.entitlements`; the watcher
-      writes every alert to both CloudKit environments. Verify once that an
-      App Store build actually receives a production alert (nothing in the
-      repo proves it).
+- [x] **Production push receipt on a physical device**: the owner-only test
+      wrote to production at `2026-09-08T20:32:32Z` (run `34275363613`), and
+      the user confirmed receipt on their phone. Temporary test objects were
+      removed; the record cleanup retry succeeded in run `34275715138`.
 - [ ] **UCB production subscription recovery (2026-09-08)**: record writes and
       exact school/category queries succeeded, but creating the UCB query
       subscription failed in production with `BAD_REQUEST: attempting to
       create a subscription in a production container`; development accepted
       and removed the probe. **Schema deployed; production subscription gate
-      verified repaired** by probe run `34274880391` at 20:27 UTC. Remaining:
-      foreground the signed app to reconcile and confirm actual device receipt
-      (an owner-only test is available as `mode=test-push-owner`). Field indexes
-      alone did not establish subscription readiness. Evidence and diagnostic
-      modes are in CONTEXT.md's production UCB failure runbook. Device receipt
-      remains unverified.
+      verified repaired** by probe run `34274880391` at 20:27 UTC; the user
+      also confirmed production test-push receipt. Remaining: confirm the
+      app's saved UCB subscriptions reconcile after foregrounding. Read-only
+      run `34276008696` still found zero production subscriptions for the key
+      owner at 20:38 UTC; the user was asked to check the Class Alerts screen.
+      Field indexes alone did not establish subscription readiness. Evidence
+      and diagnostic modes are in CONTEXT.md's production UCB failure runbook.
 
 ## Open items left by the 2026-09-07 fix pass
 
