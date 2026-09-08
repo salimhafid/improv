@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "chain | ucb | all | both | test | diagnose | probe-subscription | test-push-owner | cleanup-owner-test"
+        description: "chain | ucb | all | both | test | diagnose | probe-subscription | probe-subscription-matrix | test-push-owner | cleanup-owner-test"
         default: "chain"
       diagnostic_record:
         description: "Only for cleanup-owner-test: exact improv-diagnostic-<32 hex digits> record name"
@@ -124,6 +124,10 @@ jobs:
               python tools/probe_class_alert_subscriptions.py
               exit $?
               ;;
+            probe-subscription-matrix)
+              python tools/probe_class_alert_subscriptions.py --matrix
+              exit $?
+              ;;
             test-push-owner)
               python tools/test_class_alert_push.py --send
               exit $?
@@ -148,7 +152,7 @@ jobs:
               exit $rc
               ;;
             *)
-              echo "::error::unknown mode '$MODE' (chain | ucb | all | both | test | diagnose | probe-subscription | test-push-owner | cleanup-owner-test)"
+              echo "::error::unknown mode '$MODE' (chain | ucb | all | both | test | diagnose | probe-subscription | probe-subscription-matrix | test-push-owner | cleanup-owner-test)"
               exit 1
               ;;
           esac

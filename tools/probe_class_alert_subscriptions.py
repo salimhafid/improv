@@ -4,9 +4,12 @@ Creates a temporary subscription for an impossible school value, then removes
 only that subscription. Does not create ClassAlert records or send pushes.
 Development may learn the school-only, legacy UCB scalar-category, and current
 UCB list-category query types, ready for schema promotion.
+The optional matrix also checks reversed filter order and explicit default-zone
+scope. It diagnoses server validation differences, not the native app's scope.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import urllib.error
@@ -65,7 +68,15 @@ def modify(env: str, operation: str, subscription: dict) -> dict:
     return matches[0]
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--matrix", action="store_true",
+                        help="Probe both filter orders and all-zone/default-zone scopes")
+    args = parser.parse_args(argv)
+    variants = [(shape, field, comparator, reverse, zone_wide)
+                for shape, field, comparator in QUERY_SHAPES
+                for reverse in ((False, True) if args.matrix else (False,))
+                for zone_wide in ((True, False) if args.matrix else (True,))]
     failed = False
     if not watcher.ENVIRONMENTS:
         print("ERROR: No CloudKit environments configured", file=sys.stderr)
@@ -75,23 +86,31 @@ def main() -> int:
             print(f"{env}: credentials missing", file=sys.stderr)
             failed = True
             continue
-        for shape, category_field, comparator in QUERY_SHAPES:
+        for shape, category_field, comparator, reverse, zone_wide in variants:
             subscription_id = "improv-diagnostic/" + uuid.uuid4().hex
             query = query_body()["query"]
             query["filterBy"][0]["fieldValue"]["value"] = "__improv_diagnostic__"
             if category_field is not None:
                 query["filterBy"].append({"fieldName": category_field, "comparator": comparator,
                                           "fieldValue": {"value": "improv", "type": "STRING"}})
+            if reverse:
+                query["filterBy"].reverse()
             subscription = {
                 "subscriptionID": subscription_id, "subscriptionType": "query",
                 "query": query, "firesOn": ["create"], "firesOnce": False,
-                "zoneWide": True,
+                "zoneWide": zone_wide,
                 "notificationInfo": {"titleLocalizationKey": "CA_TITLE",
                                      "titleLocalizationArgs": ["pushTitle"],
                                      "alertLocalizationKey": "CA_BODY",
                                      "alertLocalizationArgs": ["pushBody"],
                                      "soundName": "default"}}
+            if not zone_wide:
+                subscription["zoneID"] = {"zoneName": "_defaultZone"}
             label = f"{env} / {shape}"
+            if args.matrix:
+                order = "reversed" if reverse else "school-first"
+                scope = "all-zones" if zone_wide else "default-zone"
+                label += f" / {order} / {scope}"
             try:
                 modify(env, "create", subscription)
                 print(f"{label}: subscription type accepted")

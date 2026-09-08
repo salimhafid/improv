@@ -61,8 +61,9 @@ class DiagnosticHarness(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.output, self.errors = io.StringIO(), io.StringIO()
 
-    def run_main(self, tool):
-        with redirect_stdout(self.output), redirect_stderr(self.errors):
+    def run_main(self, tool, argv=()):
+        with patch.object(sys, "argv", [tool.__name__, *argv]), \
+                redirect_stdout(self.output), redirect_stderr(self.errors):
             return tool.main()
 
     @staticmethod
@@ -78,6 +79,83 @@ class DiagnosticHarness(unittest.TestCase):
 
 
 class SubscriptionProbeTests(DiagnosticHarness):
+    def test_matrix_exercises_every_shape_order_and_scope_without_record_writes(self):
+        self.urlopen.side_effect = self.acknowledge_subscription
+        self.assertEqual(self.run_main(probe, ["--matrix"]), 0)
+        requests = [call.args[0] for call in self.urlopen.call_args_list]
+        self.assertEqual(len(requests), 48)
+        created_ids = set()
+        variants_by_env = {env: [] for env in ("development", "production")}
+        for create, delete in zip(requests[::2], requests[1::2]):
+            env = "development" if "/development/" in create.full_url else "production"
+            self.assertTrue(create.full_url.endswith(f"/{env}/public/subscriptions/modify"))
+            self.assertEqual(delete.full_url, create.full_url)
+            created = _operation(create)
+            self.assertEqual(created["operationType"], "create")
+            subscription = created["subscription"]
+            sid = subscription["subscriptionID"]
+            self.assertRegex(sid, r"^improv-diagnostic/[0-9a-f]{32}$")
+            self.assertNotIn(sid, created_ids)
+            created_ids.add(sid)
+            self.assertEqual(_operation(delete), {"operationType": "delete",
+                                                 "subscription": {"subscriptionID": sid}})
+            filters = subscription["query"]["filterBy"]
+            school = next(f for f in filters if f["fieldName"] == "school")
+            self.assertEqual(school, {"fieldName": "school", "comparator": "EQUALS",
+                                     "fieldValue": {"value": "__improv_diagnostic__",
+                                                    "type": "STRING"}})
+            self.assertEqual(subscription["query"]["recordType"], "ClassAlert")
+            self.assertEqual(subscription["firesOn"], ["create"])
+            self.assertFalse(subscription["firesOnce"])
+            self.assertEqual(subscription["notificationInfo"], {
+                "titleLocalizationKey": "CA_TITLE", "titleLocalizationArgs": ["pushTitle"],
+                "alertLocalizationKey": "CA_BODY", "alertLocalizationArgs": ["pushBody"],
+                "soundName": "default"})
+            if subscription["zoneWide"]:
+                self.assertNotIn("zoneID", subscription)
+            else:
+                self.assertEqual(subscription["zoneID"], {"zoneName": "_defaultZone"})
+            variants_by_env[env].append((tuple((f["fieldName"], f["comparator"])
+                                               for f in filters), subscription["zoneWide"]))
+        expected = []
+        for field, comparator in ((None, None), ("category", "EQUALS"),
+                                  ("categories", "LIST_CONTAINS")):
+            order = [("school", "EQUALS")]
+            if field:
+                order.append((field, comparator))
+            for filters in (order, list(reversed(order))):
+                for zone_wide in (True, False):
+                    expected.append((tuple(filters), zone_wide))
+        for env, actual in variants_by_env.items():
+            self.assertEqual(actual, expected)
+            self.assertIn(f"{env} / ucb-v2 / reversed / default-zone: subscription type accepted",
+                          self.output.getvalue())
+
+    def test_matrix_rejection_still_cleans_owned_id_and_continues_other_variants(self):
+        diagnose.watcher.ENVIRONMENTS = ["production"]
+
+        def answer(request, **kwargs):
+            operation = _operation(request)
+            subscription = operation["subscription"]
+            if operation["operationType"] == "create" and not subscription["zoneWide"]:
+                # A server-side create might commit before returning an error.
+                raise urllib.error.HTTPError(request.full_url, 400, "Bad request", {},
+                                             io.BytesIO(b'{"reason":"scope type not deployed"}'))
+            return self.acknowledge_subscription(request, **kwargs)
+
+        self.urlopen.side_effect = answer
+        self.assertEqual(self.run_main(probe, ["--matrix"]), 1)
+        operations = [_operation(c.args[0]) for c in self.urlopen.call_args_list]
+        self.assertEqual(len(operations), 24)
+        for create, delete in zip(operations[::2], operations[1::2]):
+            self.assertEqual(delete, {"operationType": "delete", "subscription": {
+                "subscriptionID": create["subscription"]["subscriptionID"]}})
+        self.assertIn("production / ucb-v2 / reversed / all-zones: subscription type accepted",
+                      self.output.getvalue())
+        self.assertIn("production / ucb-v2 / reversed / default-zone: subscription creation HTTP 400",
+                      self.errors.getvalue())
+        self.assertIn("scope type not deployed", self.errors.getvalue())
+
     def test_probe_only_modifies_its_own_impossible_school_subscriptions(self):
         self.urlopen.side_effect = self.acknowledge_subscription
         self.assertEqual(self.run_main(probe), 0)

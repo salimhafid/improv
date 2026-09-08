@@ -90,12 +90,14 @@ def main() -> int:
             # Compare native subscription formats with the server probes
             # without exposing school/category choices, account IDs or tokens.
             shapes = Counter(json.dumps({
-                "filters": sorted(f"{f.get('fieldName')}:{f.get('comparator')}"
-                                  for f in (sub.get("query") or {}).get("filterBy", [])),
+                "filters": [f"{f.get('fieldName')}:{f.get('comparator')}:{(f.get('fieldValue') or {}).get('type')}"
+                            for f in (sub.get("query") or {}).get("filterBy", [])],
                 "zoneWide": sub.get("zoneWide"),
                 "zoneSpecified": bool(sub.get("zoneID")),
+                "defaultZone": (sub.get("zoneID") or {}).get("zoneName") == "_defaultZone",
                 "firesOn": sorted(sub.get("firesOn") or []),
                 "firesOnce": sub.get("firesOnce"),
+                "notificationKeys": sorted((sub.get("notificationInfo") or {}).keys()),
             }, sort_keys=True) for sub in ours)
             for shape, count in sorted(shapes.items()):
                 print(f"{env} / subscription shape ({count}): {shape}")
