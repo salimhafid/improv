@@ -101,10 +101,12 @@ to main; app 1.5 build 25 submitted for review, WAITING_FOR_REVIEW).
       create a subscription in a production container`; development accepted
       and removed the probe. **Schema deployed; production subscription gate
       verified repaired** by probe run `34274880391` at 20:27 UTC; the user
-      also confirmed production test-push receipt. Remaining: confirm the
-      app's saved UCB subscriptions reconcile after foregrounding. Read-only
-      run `34276008696` still found zero production subscriptions for the key
-      owner at 20:38 UTC; the user was asked to check the Class Alerts screen.
+      also confirmed production test-push receipt. Native registration still
+      failed after the user enabled alerts: an expanded probe found the
+      school-only template was also missing. That second template is now
+      deployed, and run `34276958719` passed all three shipped query shapes
+      in both environments at 20:48 UTC. Remaining: confirm saved subscriptions
+      reconcile after the user foregrounds the app following this second fix.
       Field indexes alone did not establish subscription readiness. Evidence
       and diagnostic modes are in CONTEXT.md's production UCB failure runbook.
 

@@ -296,6 +296,19 @@ owner. The user was asked to open Class Alerts and confirm the enabled UCB
 schools/categories so the app can reconcile them. The watcher is running and
 its first scan after the fix completed at `20:33:40Z` with no pending alerts.
 
+After the user enabled alerts, production Console logs showed repeated native
+iPhone `SubscriptionCreate` requests failing with `BAD_REQUEST` at
+`20:41:37–20:41:56Z`. The native and server requests used the same account.
+The expanded [probe run 34276819038](https://github.com/salimhafid/improv/actions/runs/34276819038)
+identified a second missing template: **school-only** subscriptions, used for
+non-UCB schools, still failed in production while legacy scalar-category and
+current list-category UCB subscriptions succeeded. The school-only template
+was then deployed. [Full probe 34276958719](https://github.com/salimhafid/improv/actions/runs/34276958719)
+accepted and cleaned up **all three query shapes in both environments** at
+`20:48:58Z`. The user was asked to foreground the app again after this second
+deployment; registration of the app's real saved choices remains to be checked.
+Always probe every shape the app can send, not only the UCB predicate.
+
 The workflow exposes separate checks using the existing Actions secrets:
 
 | Mode | Action | What success establishes |
