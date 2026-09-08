@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "chain (loop + self-dispatch) | ucb | all | both | test (one-shot)"
+        description: "chain (loop + self-dispatch) | ucb | all | both | test | diagnose (read-only queries)"
         default: "chain"
 
 # One chain at a time. A second dispatch queues rather than cancels, and
@@ -112,6 +112,10 @@ jobs:
           case "$MODE" in
             chain)
               ;;
+            diagnose)
+              python tools/diagnose_class_alerts.py
+              exit $?
+              ;;
             test)
               python watcher.py --test
               exit $?
@@ -128,7 +132,7 @@ jobs:
               exit $rc
               ;;
             *)
-              echo "::error::unknown mode '$MODE' (chain | ucb | all | both | test)"
+              echo "::error::unknown mode '$MODE' (chain | ucb | all | both | test | diagnose)"
               exit 1
               ;;
           esac
