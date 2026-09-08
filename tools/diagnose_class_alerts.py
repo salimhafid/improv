@@ -12,6 +12,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import watcher
@@ -86,6 +87,18 @@ def main() -> int:
                       (sub.get("notificationInfo") or {}).get("alertLocalizationKey")]
             print(f"{env} / key owner's subscriptions: total={len(subscriptions)}, "
                   f"class_alerts={len(ours)}, ucb_v2={len(v2)}, visible_alerts={len(alerts)}")
+            # Compare native subscription formats with the server probes
+            # without exposing school/category choices, account IDs or tokens.
+            shapes = Counter(json.dumps({
+                "filters": sorted(f"{f.get('fieldName')}:{f.get('comparator')}"
+                                  for f in (sub.get("query") or {}).get("filterBy", [])),
+                "zoneWide": sub.get("zoneWide"),
+                "zoneSpecified": bool(sub.get("zoneID")),
+                "firesOn": sorted(sub.get("firesOn") or []),
+                "firesOnce": sub.get("firesOnce"),
+            }, sort_keys=True) for sub in ours)
+            for shape, count in sorted(shapes.items()):
+                print(f"{env} / subscription shape ({count}): {shape}")
             print("Subscription counts belong only to the server key's owner; other users may differ.")
         except urllib.error.HTTPError as error:
             print(f"{env} / key owner's subscriptions: unavailable (HTTP {error.code}): "

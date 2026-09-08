@@ -82,29 +82,36 @@ class SubscriptionProbeTests(DiagnosticHarness):
         self.urlopen.side_effect = self.acknowledge_subscription
         self.assertEqual(self.run_main(probe), 0)
         requests = [call.args[0] for call in self.urlopen.call_args_list]
-        self.assertEqual(len(requests), 4)
+        self.assertEqual(len(requests), 12)
         created_ids = set()
-        for env, (create, delete) in zip(("development", "production"),
-                                       (requests[:2], requests[2:])):
-            for request in (create, delete):
-                self.assertEqual(request.get_method(), "POST")
-                self.assertTrue(request.full_url.endswith(f"/{env}/public/subscriptions/modify"))
-            created, deleted = _operation(create), _operation(delete)
-            self.assertEqual((created["operationType"], deleted["operationType"]),
-                             ("create", "delete"))
-            subscription = created["subscription"]
-            sid = subscription["subscriptionID"]
-            self.assertTrue(sid.startswith("improv-diagnostic/"))
-            self.assertNotIn(sid, created_ids)
-            created_ids.add(sid)
-            self.assertEqual(deleted["subscription"], {"subscriptionID": sid})
-            filters = subscription["query"]["filterBy"]
-            school_filter = next(f for f in filters if f["fieldName"] == "school")
-            self.assertEqual(school_filter["comparator"], "EQUALS")
-            self.assertEqual(school_filter["fieldValue"]["value"], "__improv_diagnostic__")
-            self.assertEqual(subscription["query"]["recordType"], "ClassAlert")
-            self.assertTrue(any(f["fieldName"] == "categories" and
-                                f["comparator"] == "LIST_CONTAINS" for f in filters))
+        expected_filters = [[], [{"fieldName": "category", "comparator": "EQUALS",
+                                 "fieldValue": {"value": "improv", "type": "STRING"}}],
+                            [{"fieldName": "categories", "comparator": "LIST_CONTAINS",
+                              "fieldValue": {"value": "improv", "type": "STRING"}}]]
+        for env, group in zip(("development", "production"), (requests[:6], requests[6:])):
+            for index, extra_filters in enumerate(expected_filters):
+                create, delete = group[index * 2:index * 2 + 2]
+                for request in (create, delete):
+                    self.assertEqual(request.get_method(), "POST")
+                    self.assertTrue(request.full_url.endswith(f"/{env}/public/subscriptions/modify"))
+                created, deleted = _operation(create), _operation(delete)
+                self.assertEqual((created["operationType"], deleted["operationType"]),
+                                 ("create", "delete"))
+                subscription = created["subscription"]
+                sid = subscription["subscriptionID"]
+                self.assertTrue(sid.startswith("improv-diagnostic/"))
+                self.assertNotIn(sid, created_ids)
+                created_ids.add(sid)
+                self.assertEqual(deleted["subscription"], {"subscriptionID": sid})
+                self.assertEqual(subscription["query"], {"recordType": "ClassAlert", "filterBy": [
+                    {"fieldName": "school", "comparator": "EQUALS",
+                     "fieldValue": {"value": "__improv_diagnostic__", "type": "STRING"}},
+                    *extra_filters]})
+                self.assertEqual(subscription["firesOn"], ["create"])
+                self.assertFalse(subscription["firesOnce"])
+                self.assertTrue(subscription["zoneWide"])
+            for shape in ("school-only", "ucb-legacy", "ucb-v2"):
+                self.assertIn(f"{env} / {shape}: subscription type accepted", self.output.getvalue())
 
     def test_production_item_error_is_reported_after_development_cleanup(self):
         def answer(request, **kwargs):
@@ -122,10 +129,30 @@ class SubscriptionProbeTests(DiagnosticHarness):
         self.assertEqual(self.run_main(probe), 1)
         requests = [call.args[0] for call in self.urlopen.call_args_list]
         self.assertEqual([_operation(r)["operationType"] for r in requests],
-                         ["create", "delete", "create", "delete"])
-        self.assertIn("production: subscription creation FAILED: INVALID_ARGUMENT", self.errors.getvalue())
+                         ["create", "delete"] * 6)
+        self.assertIn("production / ucb-legacy: subscription creation FAILED: INVALID_ARGUMENT",
+                      self.errors.getvalue())
         self.assertIn("query type is not deployed", self.errors.getvalue())
-        self.assertIn("development: temporary subscription removed", self.output.getvalue())
+        self.assertIn("development / ucb-v2: temporary subscription removed", self.output.getvalue())
+
+    def test_one_rejected_query_shape_does_not_block_other_shapes(self):
+        diagnose.watcher.ENVIRONMENTS = ["production"]
+
+        def answer(request, **kwargs):
+            operation = _operation(request)
+            subscription = operation["subscription"]
+            if operation["operationType"] == "create" and any(
+                    f["fieldName"] == "category" for f in subscription["query"]["filterBy"]):
+                raise urllib.error.HTTPError(request.full_url, 400, "Bad request", {},
+                                             io.BytesIO(b'{"reason":"legacy type not deployed"}'))
+            return self.acknowledge_subscription(request, **kwargs)
+
+        self.urlopen.side_effect = answer
+        self.assertEqual(self.run_main(probe), 1)
+        self.assertEqual(self.urlopen.call_count, 6)
+        self.assertIn("production / ucb-legacy: subscription creation HTTP 400", self.errors.getvalue())
+        self.assertIn("production / school-only: subscription type accepted", self.output.getvalue())
+        self.assertIn("production / ucb-v2: subscription type accepted", self.output.getvalue())
 
     def test_cleanup_failure_is_nonzero_and_identifies_the_owned_subscription(self):
         diagnose.watcher.ENVIRONMENTS = ["production"]
@@ -141,8 +168,9 @@ class SubscriptionProbeTests(DiagnosticHarness):
 
         self.urlopen.side_effect = answer
         self.assertEqual(self.run_main(probe), 1)
-        self.assertEqual(self.urlopen.call_count, 2)
-        self.assertIn(f"cleanup FAILED for {created_ids[0]}", self.errors.getvalue())
+        self.assertEqual(self.urlopen.call_count, 6)
+        for sid in created_ids:
+            self.assertIn(f"cleanup FAILED for {sid}", self.errors.getvalue())
 
     def test_missing_or_ambiguous_create_acknowledgment_cannot_report_success(self):
         diagnose.watcher.ENVIRONMENTS = ["production"]
@@ -165,12 +193,13 @@ class SubscriptionProbeTests(DiagnosticHarness):
                 self.assertEqual(self.run_main(probe), 1)
                 # The create may have committed despite its malformed reply.
                 # Delete our generated ID, never an unrelated returned ID.
-                self.assertEqual(self.urlopen.call_count, 2)
-                create, delete = [_operation(c.args[0]) for c in self.urlopen.call_args_list]
-                owned_id = create["subscription"]["subscriptionID"]
-                self.assertEqual(delete, {"operationType": "delete",
-                                          "subscription": {"subscriptionID": owned_id}})
-                self.assertNotEqual(owned_id, "alert/v2/ucb_ny/improv")
+                self.assertEqual(self.urlopen.call_count, 6)
+                operations = [_operation(c.args[0]) for c in self.urlopen.call_args_list]
+                for create, delete in zip(operations[::2], operations[1::2]):
+                    owned_id = create["subscription"]["subscriptionID"]
+                    self.assertEqual(delete, {"operationType": "delete",
+                                              "subscription": {"subscriptionID": owned_id}})
+                    self.assertNotEqual(owned_id, "alert/v2/ucb_ny/improv")
 
     def test_lost_create_reply_still_cleans_up_committed_subscription(self):
         diagnose.watcher.ENVIRONMENTS = ["production"]
@@ -189,9 +218,10 @@ class SubscriptionProbeTests(DiagnosticHarness):
 
         self.urlopen.side_effect = answer
         self.assertEqual(self.run_main(probe), 1)
-        self.assertEqual(self.urlopen.call_count, 2)
+        self.assertEqual(self.urlopen.call_count, 6)
         self.assertEqual(stored_ids, set())
-        self.assertIn(generated_ids[0], self.errors.getvalue())
+        for sid in generated_ids:
+            self.assertIn(sid, self.errors.getvalue())
 
     def test_delete_already_absent_is_a_noop_for_shared_helper_callers(self):
         sid = "improv-diagnostic/owned-test-id"
