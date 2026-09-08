@@ -41,6 +41,15 @@ def _operation(request):
     return json.loads(request.data)["operations"][0]
 
 
+def _native_notification_info():
+    # Independent fixture using normalized native REST response names, not an
+    # echo of the request: unknown request keys can be silently discarded.
+    return {"titleLocalizedKey": "CA_TITLE", "titleLocalizedArguments": ["pushTitle"],
+            "alertLocalizationKey": "CA_BODY", "alertLocalizationArgs": ["pushBody"],
+            "soundName": "default", "subtitleLocalizedKey": "",
+            "subtitleLocalizedArguments": [], "additionalFields": []}
+
+
 class DiagnosticHarness(unittest.TestCase):
     def setUp(self):
         for name, value in (
@@ -69,7 +78,10 @@ class DiagnosticHarness(unittest.TestCase):
     @staticmethod
     def acknowledge_subscription(request, **_):
         operation = _operation(request)
-        return _response({"subscriptions": [operation["subscription"]]})
+        subscription = {"subscriptionID": operation["subscription"]["subscriptionID"]}
+        if operation["operationType"] == "create":
+            subscription["notificationInfo"] = _native_notification_info()
+        return _response({"subscriptions": [subscription]})
 
     @staticmethod
     def acknowledge_read(request, **_):
@@ -79,6 +91,42 @@ class DiagnosticHarness(unittest.TestCase):
 
 
 class SubscriptionProbeTests(DiagnosticHarness):
+    def test_stripped_or_changed_notification_fields_fail_and_cleanup_every_shape(self):
+        diagnose.watcher.ENVIRONMENTS = ["development"]
+        cases = [(key, value) for key in ("titleLocalizedKey", "titleLocalizedArguments",
+                                         "alertLocalizationKey", "alertLocalizationArgs", "soundName")
+                 for value in (None, "wrong-value")]
+        cases.extend([(None, None), (None, [])])
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                self.urlopen.reset_mock()
+                self.output = io.StringIO()
+
+                def answer(request, **kwargs):
+                    operation = _operation(request)
+                    if operation["operationType"] != "create":
+                        return self.acknowledge_subscription(request, **kwargs)
+                    info = _native_notification_info()
+                    if key is None:
+                        info = value
+                    elif value is None:
+                        del info[key]
+                    else:
+                        info[key] = value
+                    return _response({"subscriptions": [{
+                        "subscriptionID": operation["subscription"]["subscriptionID"],
+                        "notificationInfo": info}]})
+
+                self.urlopen.side_effect = answer
+                self.assertEqual(self.run_main(probe), 1)
+                operations = [_operation(c.args[0]) for c in self.urlopen.call_args_list]
+                self.assertEqual(len(operations), 6)
+                for create, delete in zip(operations[::2], operations[1::2]):
+                    self.assertEqual(delete, {"operationType": "delete", "subscription": {
+                        "subscriptionID": create["subscription"]["subscriptionID"]}})
+                self.assertNotIn("subscription type accepted", self.output.getvalue())
+                self.assertIn("notificationInfo", self.errors.getvalue())
+
     def test_matrix_exercises_every_shape_order_and_scope_without_record_writes(self):
         self.urlopen.side_effect = self.acknowledge_subscription
         self.assertEqual(self.run_main(probe, ["--matrix"]), 0)
@@ -108,7 +156,7 @@ class SubscriptionProbeTests(DiagnosticHarness):
             self.assertEqual(subscription["firesOn"], ["create"])
             self.assertFalse(subscription["firesOnce"])
             self.assertEqual(subscription["notificationInfo"], {
-                "titleLocalizationKey": "CA_TITLE", "titleLocalizationArgs": ["pushTitle"],
+                "titleLocalizedKey": "CA_TITLE", "titleLocalizedArguments": ["pushTitle"],
                 "alertLocalizationKey": "CA_BODY", "alertLocalizationArgs": ["pushBody"],
                 "soundName": "default"})
             if subscription["zoneWide"]:
@@ -188,8 +236,13 @@ class SubscriptionProbeTests(DiagnosticHarness):
                 self.assertEqual(subscription["firesOn"], ["create"])
                 self.assertFalse(subscription["firesOnce"])
                 self.assertTrue(subscription["zoneWide"])
+                self.assertEqual(subscription["notificationInfo"], {
+                    "titleLocalizedKey": "CA_TITLE", "titleLocalizedArguments": ["pushTitle"],
+                    "alertLocalizationKey": "CA_BODY", "alertLocalizationArgs": ["pushBody"],
+                    "soundName": "default"})
             for shape in ("school-only", "ucb-legacy", "ucb-v2"):
                 self.assertIn(f"{env} / {shape}: subscription type accepted", self.output.getvalue())
+        self.assertEqual(self.output.getvalue().count("title/body payload verified"), 6)
 
     def test_production_item_error_is_reported_after_development_cleanup(self):
         def answer(request, **kwargs):

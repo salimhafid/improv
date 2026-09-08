@@ -95,20 +95,16 @@ to main; app 1.5 build 25 submitted for review, WAITING_FOR_REVIEW).
       wrote to production at `2026-09-08T20:32:32Z` (run `34275363613`), and
       the user confirmed receipt on their phone. Temporary test objects were
       removed; the record cleanup retry succeeded in run `34275715138`.
-- [ ] **UCB production subscription recovery (2026-09-08)**: record writes and
-      exact school/category queries succeeded, but creating the UCB query
-      subscription failed in production with `BAD_REQUEST: attempting to
-      create a subscription in a production container`; development accepted
-      and removed the probe. **Schema deployed; production subscription gate
-      verified repaired** by probe run `34274880391` at 20:27 UTC; the user
-      also confirmed production test-push receipt. Native registration still
-      failed after the user enabled alerts: an expanded probe found the
-      school-only template was also missing. That second template is now
-      deployed, and run `34276958719` passed all three shipped query shapes
-      in both environments at 20:48 UTC. Remaining: confirm saved subscriptions
-      reconcile after the user foregrounds the app following this second fix.
-      Field indexes alone did not establish subscription readiness. Evidence
-      and diagnostic modes are in CONTEXT.md's production UCB failure runbook.
+- [ ] **UCB production subscription recovery (2026-09-08)**: record writes,
+      exact queries, and owner-only phone push receipt succeeded, but native
+      registration failed with a missing `notif_title_loc_arg_0` production
+      schema field. Earlier REST probes used incorrect notification-title wire
+      names and did not check the returned settings, so query-shape acceptance
+      after two schema promotions did not establish native compatibility.
+      The corrected probe validates the full notification configuration.
+      Remaining: seed and deploy the title-bearing templates, then confirm the
+      app's saved UCB subscriptions reconcile on foreground. Evidence and
+      diagnostic modes are in CONTEXT.md's production UCB failure runbook.
 
 ## Open items left by the 2026-09-07 fix pass
 

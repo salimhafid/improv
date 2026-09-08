@@ -39,6 +39,13 @@ def _operation(request):
     return json.loads(request.data)["operations"][0]
 
 
+def _native_notification_info():
+    return {"titleLocalizedKey": "CA_TITLE", "titleLocalizedArguments": ["pushTitle"],
+            "alertLocalizationKey": "CA_BODY", "alertLocalizationArgs": ["pushBody"],
+            "soundName": "default", "subtitleLocalizedKey": "",
+            "subtitleLocalizedArguments": [], "additionalFields": []}
+
+
 class OwnerPushTests(unittest.TestCase):
     def setUp(self):
         for field, value in (("CONTAINER", "iCloud.test.owner-push"),
@@ -67,7 +74,10 @@ class OwnerPushTests(unittest.TestCase):
     def acknowledge(request, **_):
         operation = _operation(request)
         if "subscription" in operation:
-            return _response({"subscriptions": [operation["subscription"]]})
+            subscription = {"subscriptionID": operation["subscription"]["subscriptionID"]}
+            if operation["operationType"] == "create":
+                subscription["notificationInfo"] = _native_notification_info()
+            return _response({"subscriptions": [subscription]})
         return _response({"records": [operation["record"]]})
 
     def operations(self):
@@ -99,8 +109,10 @@ class OwnerPushTests(unittest.TestCase):
         self.assertEqual(record["recordType"], "ClassAlert")
         self.assertEqual(subscription["firesOn"], ["create"])
         info = subscription["notificationInfo"]
-        self.assertEqual(info["titleLocalizationKey"], "CA_TITLE")
-        self.assertEqual(info["titleLocalizationArgs"], ["pushTitle"])
+        self.assertEqual(info["titleLocalizedKey"], "CA_TITLE")
+        self.assertEqual(info["titleLocalizedArguments"], ["pushTitle"])
+        self.assertNotIn("titleLocalizationKey", info)
+        self.assertNotIn("titleLocalizationArgs", info)
         self.assertEqual(info["alertLocalizationKey"], "CA_BODY")
         self.assertEqual(info["alertLocalizationArgs"], ["pushBody"])
         self.assertEqual(record_delete["record"],
@@ -154,6 +166,37 @@ class OwnerPushTests(unittest.TestCase):
         self.assertEqual(operations[1]["subscription"],
                          {"subscriptionID": operations[0]["subscription"]["subscriptionID"]})
         self.sleep.assert_not_called()
+
+    def test_stripped_or_wrong_title_acknowledgment_never_sends_a_record(self):
+        for field, value in (("titleLocalizedKey", None), ("titleLocalizedKey", "OTHER_TITLE"),
+                             ("titleLocalizedArguments", None),
+                             ("titleLocalizedArguments", ["pushBody"]),
+                             ("titleLocalizedArguments", [])):
+            with self.subTest(field=field, value=value):
+                self.urlopen.reset_mock()
+                self.sleep.reset_mock()
+
+                def answer(request, **kwargs):
+                    operation = _operation(request)
+                    if operation["operationType"] != "create":
+                        return self.acknowledge(request, **kwargs)
+                    info = _native_notification_info()
+                    if value is None:
+                        del info[field]
+                    else:
+                        info[field] = value
+                    return _response({"subscriptions": [{
+                        "subscriptionID": operation["subscription"]["subscriptionID"],
+                        "notificationInfo": info}]})
+
+                self.urlopen.side_effect = answer
+                self.assertEqual(self.run_main(), 1)
+                created, deleted = self.operations()
+                self.assertEqual(deleted, {"operationType": "delete", "subscription": {
+                    "subscriptionID": created["subscription"]["subscriptionID"]}})
+                self.assertTrue(all("record" not in operation for operation in self.operations()))
+                self.sleep.assert_not_called()
+                self.assertIn(f"notificationInfo.{field}", self.errors.getvalue())
 
     def test_ambiguous_subscription_write_still_cleans_only_its_generated_id(self):
         def answer(request, **kwargs):

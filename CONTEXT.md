@@ -279,8 +279,9 @@ template with the development schema to production. Checking or deploying
 field indexes alone is not sufficient evidence that this step happened.
 CloudKit Console subsequently reported **Changes Deployed**. At
 `2026-09-08T20:27:24Z`, [probe run 34274880391](https://github.com/salimhafid/improv/actions/runs/34274880391)
-accepted and removed the exact UCB subscription in **both development and
-production**, verifying that the production subscription gate was repaired.
+accepted and removed the UCB query shape in **both development and
+production**. This early probe did not validate the returned notification title;
+it therefore did not establish that the native app's full subscription worked.
 The user confirmed receipt of **Improv notification test** on their phone on
 2026-09-08. [Owner-only production test 34275363613](https://github.com/salimhafid/improv/actions/runs/34275363613)
 created the matching alert at `20:32:32Z`. That run's failure was its original
@@ -305,16 +306,28 @@ non-UCB schools, still failed in production while legacy scalar-category and
 current list-category UCB subscriptions succeeded. The school-only template
 was then deployed. [Full probe 34276958719](https://github.com/salimhafid/improv/actions/runs/34276958719)
 accepted and cleaned up **all three query shapes in both environments** at
-`20:48:58Z`. The user was asked to foreground the app again after this second
-deployment; registration of the app's real saved choices remains to be checked.
-Always probe every shape the app can send, not only the UCB predicate.
+`20:48:58Z`. Native registration still failed afterward, and the account still
+had zero production subscriptions at `20:59:45Z`.
+
+The phone's detailed error identified the remaining missing schema field:
+`cannot create or modify field 'notif_title_loc_arg_0' ... in production schema`
+for `alert/v2/ucb_ny/improv`. The REST helpers had sent the Swift SDK names
+`titleLocalizationKey` / `titleLocalizationArgs`; existing native subscriptions
+returned the wire names `titleLocalizedKey` / `titleLocalizedArguments`. Earlier
+probes checked only the subscription ID, so silently omitted title settings
+could pass. The corrected helpers use the observed wire names and require the
+server's returned title, body, arguments, and sound to match the app before
+reporting success or creating a test alert. Probe all three query shapes with
+the full notification configuration in development before promoting schema.
+Registration of the app's real saved choices must still be verified after the
+title-bearing templates are deployed.
 
 The workflow exposes separate checks using the existing Actions secrets:
 
 | Mode | Action | What success establishes |
 |---|---|---|
 | `diagnose` | Read-only school/category record queries and a best-effort subscription count for the server key's owner. No records, subscriptions, or state are written. | Server authentication and query support; counts do not describe every app user. |
-| `probe-subscription` | Creates and deletes uniquely named temporary subscriptions for each shipped query shape: school-only, school plus scalar category (legacy UCB), and school plus list-category membership (current UCB). All use `school == __improv_diagnostic__`. Creates no class records and sends no pushes. Development may learn the templates. | All supported app versions' query shapes can be registered in each environment; cleanup must also succeed. |
+| `probe-subscription` | Creates and deletes uniquely named temporary subscriptions for each shipped query shape: school-only, school plus scalar category (legacy UCB), and school plus list-category membership (current UCB). All use `school == __improv_diagnostic__`. Validates the returned notification title, body, arguments, and sound. Creates no class records and sends no pushes. Development may learn the templates. | All supported app versions' query shapes and notification settings can be registered in each environment; cleanup must also succeed. |
 | `probe-subscription-matrix` | Runs the same temporary, impossible-school probes with both filter orders and all-zone/default-zone scopes. Creates no class records. | Diagnoses server sensitivity to query representation; does not prove which representation a native client sends. |
 | `test-push-owner` | Sends one real production push using a temporary subscription and matching `ClassAlert` for a UUID-specific diagnostic school. Existing school-specific subscriptions cannot match it. Both temporary objects are cleaned up. The CLI requires `--send`; selecting this workflow mode invokes it explicitly. | CloudKit accepted the test and cleanup completed. Only the server key owner's registered app devices are targeted; the person must confirm receipt. |
 | `cleanup-owner-test` | Removes only the diagnostic UUID record named by the `diagnostic_record` workflow input, using `forceDelete`. Rejects normal alert names and creates nothing. | A leftover diagnostic record is removed or already absent; no new push is sent. |

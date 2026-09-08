@@ -26,6 +26,30 @@ QUERY_SHAPES = (
 )
 
 
+def class_alert_notification_info() -> dict:
+    """Use CloudKit's REST title keys, which differ from the Swift SDK names.
+
+    Native subscription responses use titleLocalizedKey/Arguments. Sending
+    titleLocalizationKey/Args can omit the title argument from the learned
+    subscription schema, leaving native production creates unable to use it.
+    """
+    return {"titleLocalizedKey": "CA_TITLE",
+            "titleLocalizedArguments": ["pushTitle"],
+            "alertLocalizationKey": "CA_BODY",
+            "alertLocalizationArgs": ["pushBody"],
+            "soundName": "default"}
+
+
+def validate_notification_info(subscription: dict) -> None:
+    """Reject accepted subscriptions whose normalized payload lost any field."""
+    info = subscription.get("notificationInfo")
+    if not isinstance(info, dict):
+        raise ValueError("CloudKit did not return notificationInfo")
+    for key, expected in class_alert_notification_info().items():
+        if info.get(key) != expected:
+            raise ValueError(f"CloudKit did not retain notificationInfo.{key}")
+
+
 class CloudKitSubscriptionError(ValueError):
     """A per-subscription failure acknowledged by CloudKit."""
 
@@ -99,11 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                 "subscriptionID": subscription_id, "subscriptionType": "query",
                 "query": query, "firesOn": ["create"], "firesOnce": False,
                 "zoneWide": zone_wide,
-                "notificationInfo": {"titleLocalizationKey": "CA_TITLE",
-                                     "titleLocalizationArgs": ["pushTitle"],
-                                     "alertLocalizationKey": "CA_BODY",
-                                     "alertLocalizationArgs": ["pushBody"],
-                                     "soundName": "default"}}
+                "notificationInfo": class_alert_notification_info()}
             if not zone_wide:
                 subscription["zoneID"] = {"zoneName": "_defaultZone"}
             label = f"{env} / {shape}"
@@ -112,8 +132,9 @@ def main(argv: list[str] | None = None) -> int:
                 scope = "all-zones" if zone_wide else "default-zone"
                 label += f" / {order} / {scope}"
             try:
-                modify(env, "create", subscription)
-                print(f"{label}: subscription type accepted")
+                created = modify(env, "create", subscription)
+                validate_notification_info(created)
+                print(f"{label}: subscription type accepted; title/body payload verified")
             except urllib.error.HTTPError as error:
                 failed = True
                 print(f"{label}: subscription creation HTTP {error.code}: "

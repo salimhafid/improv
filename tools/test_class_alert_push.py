@@ -19,7 +19,9 @@ import urllib.request
 import uuid
 
 from diagnose_class_alerts import query_body, watcher
-from probe_class_alert_subscriptions import modify
+from probe_class_alert_subscriptions import (
+    class_alert_notification_info, modify, validate_notification_info,
+)
 
 
 def diagnostic_record_name(value: str) -> str:
@@ -86,10 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     subscription = {
         "subscriptionID": subscription_id, "subscriptionType": "query",
         "query": query, "firesOn": ["create"], "firesOnce": False, "zoneWide": True,
-        "notificationInfo": {"titleLocalizationKey": "CA_TITLE",
-                             "titleLocalizationArgs": ["pushTitle"],
-                             "alertLocalizationKey": "CA_BODY",
-                             "alertLocalizationArgs": ["pushBody"], "soundName": "default"}}
+        "notificationInfo": class_alert_notification_info()}
     record = {"recordType": "ClassAlert", "recordName": record_name, "fields": {
         "school": {"type": "STRING", "value": school},
         "category": {"type": "STRING", "value": "improv"},
@@ -102,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     attempted_record = False
     print(f"Temporary subscription: {subscription_id}; record: {record_name}", flush=True)
     try:
-        modify("production", "create", subscription)
+        created = modify("production", "create", subscription)
+        validate_notification_info(created)
         # Allow subscription indexing to settle before the matching create.
         time.sleep(10)
         attempted_record = True
