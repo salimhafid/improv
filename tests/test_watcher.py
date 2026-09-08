@@ -301,6 +301,32 @@ class SendAlertsRetryTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(unsent, alerts)
 
+    def test_unconfigured_pending_environment_is_preserved_until_reenabled(self):
+        from unittest.mock import patch
+        parked = dict(_alert(), envs=["production"])
+        with patch.object(watcher, "ENVIRONMENTS", ["development"]):
+            unsent, calls = self._run([parked], self._accepted)
+        self.assertEqual(calls, [], "do not resend an already accepted environment")
+        self.assertEqual(unsent, [parked])
+        unsent, calls = self._run(unsent, self._accepted)
+        self.assertEqual(calls, ["production"])
+        self.assertEqual(unsent, [])
+
+    def test_success_in_one_environment_does_not_consume_deferred_environment(self):
+        from unittest.mock import patch
+        parked = dict(_alert(), envs=["development", "production"])
+        with patch.object(watcher, "ENVIRONMENTS", ["development"]):
+            unsent, calls = self._run([parked], self._accepted)
+        self.assertEqual(calls, ["development"])
+        self.assertEqual(unsent, [dict(parked, envs=["production"])])
+
+    def test_duplicate_configured_environments_do_not_duplicate_writes(self):
+        from unittest.mock import patch
+        with patch.object(watcher, "ENVIRONMENTS", ["development", "production", "production"]):
+            unsent, calls = self._run([_alert()], self._accepted)
+        self.assertEqual(calls, ["development", "production"])
+        self.assertEqual(unsent, [])
+
 
 class MainAtLeastOnceTests(unittest.TestCase):
     """main() with the scans and CloudKit patched: state is written after the

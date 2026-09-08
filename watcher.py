@@ -285,14 +285,23 @@ def send_alerts(alerts: list[dict]) -> list[dict]:
     if not alerts:
         log.info("nothing new")
         return []
-    if not ENVIRONMENTS:
+    environments = list(dict.fromkeys(ENVIRONMENTS))
+    if not environments:
         log.error("no CloudKit environments configured; keeping %d alert(s) pending", len(alerts))
         return alerts
 
     batch = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     unsent: dict[int, list[str]] = {}   # alert index → environments still owed
-    for env in ENVIRONMENTS:
-        targets = [(i, a) for i, a in enumerate(alerts) if env in (a.get("envs") or ENVIRONMENTS)]
+    for i, a in enumerate(alerts):
+        # Temporarily narrowing CLOUDKIT_ENVS must not erase an earlier
+        # obligation. Those environments have not acknowledged anything and
+        # remain pending until a later run enables them again.
+        deferred = list(dict.fromkeys(env for env in (a.get("envs") or []) if env not in environments))
+        if deferred:
+            unsent[i] = deferred
+            log.warning("keeping alert pending for unconfigured environment(s): %s", ",".join(deferred))
+    for env in environments:
+        targets = [(i, a) for i, a in enumerate(alerts) if env in (a.get("envs") or environments)]
         if not targets:
             continue
         if not _key_id(env) or not PRIVATE_KEY_PEM:
