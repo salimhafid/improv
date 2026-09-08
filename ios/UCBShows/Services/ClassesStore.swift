@@ -156,21 +156,7 @@ final class ClassesStore {
         SearchText.contains(hay, needle)
     }
 
-    // MARK: Core curriculum (UCB Improv 101–401)
-
-    /// Rank in UCB's core improv sequence: 101 → 0 … 401 → 3, nil for
-    /// everything else. Matched on title or level prefix so a renamed feed
-    /// subtitle ("Improv 101: Improv Basics") still qualifies; "Musical
-    /// Improv 101" etc. don't (prefix is anchored at the start). UCB Online
-    /// teaches the same sequence, so it ranks too.
-    static func coreRank(_ item: ClassItem) -> Int? {
-        guard SourceCatalog.isUCB(item.source) else { return nil }
-        for (rank, number) in ["101", "201", "301", "401"].enumerated() {
-            let prefix = "Improv \(number)"
-            if item.title.hasPrefix(prefix) || item.level.hasPrefix(prefix) { return rank }
-        }
-        return nil
-    }
+    // MARK: Core curriculum
 
     private static func dateSorted(_ group: [ClassItem]) -> [ClassItem] {
         group.sorted { lhs, rhs in
@@ -181,9 +167,9 @@ final class ClassesStore {
         }
     }
 
-    private static func coreSorted(_ core: [(rank: Int?, item: ClassItem)]) -> [ClassItem] {
+    private static func coreSorted(_ core: [(rank: Int, item: ClassItem)]) -> [ClassItem] {
         core.sorted { lhs, rhs in
-            if lhs.rank != rhs.rank { return (lhs.rank ?? 0) < (rhs.rank ?? 0) }
+            if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
             let ld = lhs.item.startDate ?? .distantFuture
             let rd = rhs.item.startDate ?? .distantFuture
             if ld != rd { return ld < rd }
@@ -243,18 +229,24 @@ final class ClassesStore {
                                   orderKey: folders.map(\.id).joined(separator: "|"))
     }
 
-    /// Core Curriculum pinned first, then the fixed subject order, date-sorted
-    /// within. Internal rather than private only so the logic harness can drive
-    /// it directly — `schoolFolders` is the app's entry point.
+    /// Improv Core and Sketch Core lead, then the fixed subject order. Each
+    /// class appears once; core courses sort by rank then date, the rest by
+    /// date. Internal so the logic harness can drive it directly.
     static func subjectGroups(from classes: [ClassItem], source: String) -> [SubjectGroup] {
-        let ranked = classes.map { (rank: coreRank($0), item: $0) }
-        let core = ranked.filter { $0.rank != nil }
-        let rest = ranked.filter { $0.rank == nil }.map(\.item)
+        let classified = classes.map {
+            (course: ClassCurriculum.course(source: $0.source, title: $0.title, level: $0.level), item: $0)
+        }
+        let rest = classified.filter { $0.course == nil }.map(\.item)
 
         var groups: [SubjectGroup] = []
-        if !core.isEmpty {
+        for curriculum in ClassCurriculum.allCases {
+            let core = classified.compactMap { entry -> (rank: Int, item: ClassItem)? in
+                guard let course = entry.course, course.curriculum == curriculum else { return nil }
+                return (course.rank, entry.item)
+            }
+            guard !core.isEmpty else { continue }
             groups.append(SubjectGroup(
-                id: "\(source)/core", title: "Core Curriculum",
+                id: "\(source)/\(curriculum.rawValue)", title: curriculum.title,
                 classes: coreSorted(core)))
         }
 

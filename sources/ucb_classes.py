@@ -9,16 +9,17 @@ from __future__ import annotations
 import re
 import time
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from common import clean, fetch_json, make_class, strip_html
 
 ARLO_BASE = "https://ucbcomedy.arlo.co/api/2012-02-01/pub/resources/"
-# Arlo's ViewUri (?arlo_id=<courseTemplate>) just lands on the UCB home page, and
-# the arlo.co hosted pages 404. UCB's only working deep link is its own course
-# catalog (a JS widget) filtered by a search term — lands on the class.
-CATALOG_SEARCH = "https://ucbcomedy.com/training-center/course/#1-search=%s"
-_FIELDS = ("EventID,Name,StartDateTime,Summary,IsFull,"
+# UCB's supported course resolver redirects to the canonical course permalink
+# and preserves `event`, selecting this exact session (not every Improv 101).
+# Arlo's raw ViewUri points at the old home-page route; use its template ID
+# with the current /courses/ resolver, as UCB's own catalog does.
+COURSE_URL = "https://ucbcomedy.com/courses/"
+_FIELDS = ("EventID,ViewUri,Name,StartDateTime,Summary,IsFull,"
            "Categories,Tags,Presenters,AdvertisedOffers")
 _EXPAND = "Categories,Presenters,AdvertisedOffers"
 
@@ -68,6 +69,24 @@ def _price(offers) -> str:
     return amt.get("FormattedAmountTaxInclusive") or amt.get("FormattedAmountTaxExclusive") or ""
 
 
+def registration_url(event: dict) -> str:
+    """Resolve the source's course template and exact session without guessing a slug.
+
+    Missing identifiers must fail the source and retain its last-good feed,
+    rather than publishing a Register button that opens an unrelated catalog.
+    Only numeric source IDs are used; the source's URL host is never followed.
+    """
+    view_uri = event.get("ViewUri")
+    if not isinstance(view_uri, str):
+        raise ValueError("UCB class is missing its course-template URL")
+    template_ids = parse_qs(urlsplit(view_uri).query).get("arlo_id", [])
+    event_id = str(event.get("EventID") or "")
+    if (len(template_ids) != 1 or not re.fullmatch(r"[1-9][0-9]*", template_ids[0])
+            or not re.fullmatch(r"[1-9][0-9]*", event_id)):
+        raise ValueError("UCB class is missing valid course-template/session identifiers")
+    return COURSE_URL + "?" + urlencode({"eventtemplate": template_ids[0], "event": event_id})
+
+
 def _build(loc_tag: str, source: str, org: str, city: str) -> list[dict]:
     out: list[dict] = []
     for ev in _events():
@@ -87,7 +106,6 @@ def _build(loc_tag: str, source: str, org: str, city: str) -> list[dict]:
         cats = ev.get("Categories") or []
         level = re.sub(r"^\d+\.\s*", "", clean((cats[0] or {}).get("Name"))) if cats else ""
         instructor = ", ".join(clean(p.get("Name")) for p in (ev.get("Presenters") or []) if p.get("Name"))
-        term = title.split(":")[0].strip() or title  # course name, e.g. "Improv 101"
         # Arlo's Summary is usually just "Category: Improv & Musical Improv" —
         # a duplicate of `level`, not a description; publish only real copy.
         summary = strip_html(ev.get("Summary"))
@@ -95,7 +113,7 @@ def _build(loc_tag: str, source: str, org: str, city: str) -> list[dict]:
         out.append(make_class(
             id=f"{source}/{ev.get('EventID')}",
             title=title,
-            url=CATALOG_SEARCH % quote(term),
+            url=registration_url(ev),
             instructor=instructor,
             schedule=schedule,
             start=start,

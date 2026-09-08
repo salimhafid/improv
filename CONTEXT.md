@@ -21,12 +21,10 @@ key-value storage that mirrors the user's own settings, and APNs.
 - App Store: bundle `com.salimhafid.UCBShows`, display name **Improv**,
   team `8FKP6A38FJ`. v1.1 approved and live July 2026; the 1.2, 1.3 and
   1.4 trains closed on approval (2026-08-08, 2026-08-27, and by 2026-09-07
-  when App Store Connect showed 1.4 "Ready for Distribution"). The project
-  is at **MARKETING_VERSION 1.5, CURRENT_PROJECT_VERSION 25**; builds 1.5
-  (24) and 1.5 (25) were uploaded on 2026-09-07, and **version 1.5 with
-  build 25 was submitted for review the same day** (state
-  WAITING_FOR_REVIEW) through the App Store Connect API via
-  `tools/asc_release.py`. The next app change must bump the build past 25.
+  when App Store Connect showed 1.4 "Ready for Distribution"). Live version
+  **1.5 (25)** was verified READY_FOR_DISTRIBUTION on 2026-09-08. The project
+  is now **MARKETING_VERSION 1.6, CURRENT_PROJECT_VERSION 26** for the core
+  class categories and alert defaults update; release verification is pending.
 - Accounts: none of ours. The app offers an **optional UCB student sign-in**
   (ucbcomedy.com, inside a web view) for reserving free student tickets — see
   "UCB session engine" below and PRIVACY.md.
@@ -203,7 +201,7 @@ turn those into APNs pushes on their registered devices.
   reports no such branch (exit 2); any other failure aborts, because an empty
   state would silently baseline every school and then overwrite the real one.
 - **Scan → diff**: `scan_ucb()` = one Arlo pull split by `LOC_*` tag into
-  `ucb_ny / ucb_la / ucb_online`, each class tagged with EVERY matching
+  `ucb_ny / ucb_la / ucb_online`, each noncore class tagged with EVERY matching
   `CTG_*`/`FRQ_*` category (`UCB_CATEGORY_TAGS`; first match = primary
   `category`); `scan_others()` = every non-UCB `CLASS_SOURCES` adapter (a
   raising adapter is skipped, state untouched). `diff_and_alert`: a school
@@ -211,8 +209,15 @@ turn those into APNs pushes on their registered devices.
   **empty for a school that had classes is treated as a failed scan** (prior
   ids kept, nothing alerted, `updated` not bumped) so the next good scan
   doesn't alert on every class; a corrupt state entry is re-baselined. New
-  UCB classes are bundled per (school, category set); other schools get one
-  bundle per school (`category "all"`). `compose()` builds `pushTitle`
+  UCB and BCC classes are bundled per (school, category set); other schools get
+  one bundle per school (`category "all"`). UCB Improv 101/201/301/401 and
+  Sketch 101/201/301, plus BCC Improv 1–4 and Sketch 1–2, carry only
+  `improv_core` or `sketch_core`. Core classes must never retain overlapping
+  Featured/Intensive/etc. tags: that would leak core alerts into noncore picks.
+  BCC noncore categories are `improv`, `sketch`, and `other`. Matching uses
+  source-scoped course prefixes (including ONLINE and BCC seasonal labels),
+  never prerequisites or descriptions; numbered drop-ins stay with their
+  course. `compose()` builds `pushTitle`
   ("New Improv classes at UCB New York") and `pushBody` (up to three titles,
   capped at 170 chars).
 - **CloudKit record**: `POST https://api.apple-cloudkit.com/database/1/
@@ -406,7 +411,9 @@ matches real subscribers.
   section; Eastern time): the catalog has 12 entries for 11 theaters, and
   `classScope` adds `ucb_online` whenever `ucb_ny` or `ucb_la` is selected,
   so the Classes tab shows a "UCB Online" folder (last, after the selected
-  city's schools; Improv 101–401 rank as Core Curriculum there too).
+  city's schools). `ClassCurriculum` splits UCB Improv 101–401 and Sketch
+  101–301, and BCC Improv 1–4 and Sketch 1–2, into exclusive **Improv Core**
+  and **Sketch Core** browsing groups, each sorted by course level then date.
   `SourceCatalog.isUCB(id)` is the one "is this UCB" helper (talent
   directory, class alerts, student reserve).
 - **City timezones**: every show parses/day-buckets/labels in its own city's
@@ -462,14 +469,20 @@ matches real subscribers.
   theater selection and filters apply on next launch. `AccountChange` /
   `QuotaViolationChange` reasons are logged and not adopted. Device-local
   only: `classAlertSyncPending`.
-- **Class alerts (app side)**: `ClassAlertsStore.Prefs {master, schools,
-  ucb: [school: Set<category>], version}` under `classAlertPrefs` (lenient
+- **Class alerts (app side)**: Foundation-only `ClassAlertPreferences` stores
+  `{master, schools, ucb: [school: Set<category>], version}` under
+  `classAlertPrefs` (the Swift property is `categorySelections`, with the
+  existing `ucb` wire key retained for compatibility; lenient
   decoder; a blob without `version` decodes as 0 and is migrated once; a
-  fresh `Prefs()` is already v1). Enabling a UCB school seeds
-  `improv, improv_electives, featured_programs`. Desired subscriptions:
+  fresh preferences value is already v2). Newly enabling UCB or BCC in
+  **Class Alerts** seeds every category except `improv_core` and `sketch_core`.
+  Sidebar theater selection does not enable alerts. Existing UCB category
+  picks and deliberate empty sets are preserved; an enabled legacy BCC
+  school-wide flag migrates to noncore category defaults. A restored BCC flag
+  from an older iCloud client is normalized again even at v2. Desired subscriptions:
   `alert/<school>/all` (`school == %@`) for other schools,
   `alert/v2/<school>/<category>` (`school == %@ AND categories CONTAINS %@`)
-  per UCB category; `CKQuerySubscription(recordType: "ClassAlert",
+  per UCB/BCC category; `CKQuerySubscription(recordType: "ClassAlert",
   firesOnRecordCreation)` with `titleLocalizationKey CA_TITLE` /
   `alertLocalizationKey CA_BODY` bound to `pushTitle`/`pushBody`
   (`Localizable.strings` at the bundle root holds the `"%@"` passthroughs —
@@ -482,6 +495,14 @@ matches real subscribers.
   prompts; `armIfNeeded` (sheet open) does. `PushRegistrationDelegate`
   surfaces APNs registration failures. Entitlements: `aps-environment`,
   iCloud container `iCloud.com.salimhafid.UCBShows`, CloudKit, KVS.
+- **UCB registration links**: Arlo's `ViewUri` supplies `arlo_id`, the course
+  template ID; `EventID` identifies the exact session. The class feed uses
+  `https://ucbcomedy.com/courses/?eventtemplate=<template>&event=<session>`.
+  UCB redirects this supported route to the course permalink and preserves
+  the selected session (verified `44 / 40741` →
+  `/courses/improv-301-i301/?event=40741`). Do not regress to catalog search
+  links or guess a slug from the class title. Missing IDs fail the source so
+  aggregation retains last-good data rather than publishing a broad Register link.
 - **UCB session engine** (`UCBSession`): UCB has no API and sits behind
   Cloudflare Turnstile + JA3 binding, so ONE permanent off-screen `WKWebView`
   over a named `WKWebsiteDataStore` (fixed UUID) is both the login surface's
@@ -583,7 +604,7 @@ xcodebuild -exportArchive -archivePath <path>/Improv.xcarchive \
   number is bumped by hand; Xcode must not rewrite it at upload).
 - **Version rule**: a train closes once approved — 1.2, 1.3 and 1.4 are
   closed (builds 19 and 20 were uploaded into 1.3 and are stranded); new
-  uploads must carry MARKETING_VERSION ≥ 1.5 (currently 1.5). The upload fails at
+  1.5 is also approved; new uploads use MARKETING_VERSION 1.6. The upload fails at
   the very END of a ~15 min export with "Invalid Pre-Release Train", so
   check the train before archiving, not after. Both settings appear twice in
   the pbxproj (Debug+Release) — sed with /g.

@@ -3,6 +3,7 @@ CloudKit — scan/send are exercised only through the functions between them."""
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import watcher
 from watcher import _categories, _category, compose, diff_and_alert
@@ -30,6 +31,140 @@ class CategoryTests(unittest.TestCase):
     def test_no_category_tags_is_other(self):
         self.assertEqual(_categories(["LOC_NY", "TOD_Evening"]), ["other"])
         self.assertEqual(_category([]), "other")
+
+
+class CoreCategoryTests(unittest.TestCase):
+    def test_ucb_numbered_core_is_exclusive_even_when_tags_cross_categories(self):
+        tags = ["CTG_Improv", "CTG_Improv_Electives", "CTG_Sketch_Character",
+                "CTG_Featured_Programs", "FRQ_Workshop", "FRQ_Intensive"]
+        for school in ("ucb_ny", "ucb_la", "ucb_online"):
+            for discipline, levels in (("Improv", (101, 201, 301, 401)), ("Sketch", (101, 201, 301))):
+                for level in levels:
+                    title = f"{discipline} {level}"
+                    if school == "ucb_online":
+                        title = f"ONLINE {title}"
+                    with self.subTest(school=school, title=title):
+                        self.assertEqual(watcher.class_categories(school, title, tags),
+                                         [f"{discipline.lower()}_core"])
+
+    def test_numbered_drop_in_and_intensive_follow_the_explicit_core_level(self):
+        for title in ("Improv 101 Drop-In", "[Online] Improv 201: Intensive", "Sketch 301 - Intensive"):
+            with self.subTest(title=title):
+                expected = "sketch_core" if title.startswith("Sketch") else "improv_core"
+                self.assertEqual(watcher.class_categories("ucb_ny", title,
+                    ["CTG_Improv", "FRQ_Workshop", "FRQ_Intensive"]), [expected])
+        self.assertEqual(watcher.class_categories("ucb_ny", "Improv Drop-In",
+                         ["CTG_Improv", "FRQ_Workshop"]), ["improv", "workshops"])
+
+    def test_ucb_noncore_retains_every_existing_category(self):
+        self.assertEqual(watcher.class_categories("ucb_ny", "Sketch from Improv", MCDONALD_TAGS),
+                         _categories(MCDONALD_TAGS))
+        self.assertEqual(watcher.class_categories("ucb_la", "Musical Improv 101",
+                         ["CTG_Musical_Improv", "FRQ_Intensive"]), ["musical_improv", "intensives"])
+        self.assertEqual(watcher.class_categories("ucb_ny", "Character 101", ["CTG_Sketch_Character"]),
+                         ["sketch_character"])
+
+    def test_core_matching_uses_title_heading_not_embedded_course_mentions(self):
+        for title in ("Musical Improv 101", "Advanced Improv 101", "Workshop for Improv 101 graduates",
+                      "Sketch from Improv", "After Sketch 201: Scene Lab"):
+            with self.subTest(title=title):
+                self.assertEqual(watcher.class_categories("ucb_ny", title, MCDONALD_TAGS),
+                                 _categories(MCDONALD_TAGS))
+
+    def test_exact_source_scoped_levels_and_malformed_numbers_do_not_fall_back(self):
+        for title in ("Improv 999", "Improv 1010", "Improv 0101", "Improv 101A", "Sketch 401"):
+            with self.subTest(title=title):
+                self.assertEqual(watcher.class_categories("ucb_ny", title, ["CTG_Improv"], "Improv 101"),
+                                 ["improv"])
+        self.assertEqual(watcher.class_categories("brooklyn_cc", "Improv Level 101"), ["improv"])
+        self.assertEqual(watcher.class_categories("brooklyn_cc", "Sketch Level 3"), ["sketch"])
+        self.assertEqual(watcher.class_categories("magnet", "Improv Level 1"), ["all"])
+        self.assertEqual(watcher.class_categories("ucb", "Improv 101"), ["all"])
+
+    def test_canonical_level_can_identify_renamed_section_but_not_override_conflicting_title(self):
+        self.assertEqual(watcher.class_categories("ucb_ny", "Saturday Afternoon Section", [],
+                         "3. Improv 101: Improv Basics"), ["improv_core"])
+        for title in ("Musical Improv 101", "[Online] Advanced Scene Study"):
+            with self.subTest(title=title):
+                self.assertEqual(watcher.class_categories("ucb_ny", title,
+                                 ["CTG_Improv_Electives"], "Improv 101"), ["improv_electives"])
+
+    def test_bcc_listing_prefixes_and_course_punctuation_match_all_core_levels(self):
+        for level in (1, 2, 3, 4):
+            title = f"[Aug-Oct] [Virtual] Improv Level {level}: Scene Work w/ Teacher (Mondays)"
+            with self.subTest(title=title):
+                self.assertEqual(watcher.class_categories("brooklyn_cc", title, level="Improv"),
+                                 ["improv_core"])
+        for title in ("[Aug-Oct] Sketch: Level 1 w/ Devin Bockrath", "[Sep-Oct] Sketch: Level 2 w/ Alise Morales",
+                      "  [Virtual] SKETCH:Level 2  "):
+            with self.subTest(title=title):
+                self.assertEqual(watcher.class_categories("brooklyn_cc", title), ["sketch_core"])
+
+    def test_bcc_noncore_has_improv_sketch_or_other_categories(self):
+        for title, level, expected in (
+            ("[Aug-Oct] Musical Improv Level 1: Structure", "Musical Improv", ["improv"]),
+            ("Drop-In: Intro to BCC Improv w/ Andy Junk", "Drop-In", ["improv"]),
+            ("Sketch from Improv", "Workshop", ["improv", "sketch"]),
+            ("Sketch Writing Lab", "Workshop", ["sketch"]),
+            ("Scene Lab", "Improv", ["improv"]),
+            ("[Sep-Oct] Physical Storytelling 201", "Storytelling", ["other"]),
+            ("[Aug-Oct] Clown Level 1", "Clown", ["other"]),
+        ):
+            with self.subTest(title=title):
+                self.assertEqual(watcher.class_categories("brooklyn_cc", title, level=level), expected)
+
+
+class CategoryScanTests(unittest.TestCase):
+    def test_ucb_scan_applies_exclusive_core_and_reads_only_canonical_category_for_fallback(self):
+        events = [
+            {"EventID": 1, "Name": "ONLINE Improv 101", "Tags": ["LOC_Online", "CTG_Improv", "FRQ_Intensive"]},
+            {"EventID": 2, "Name": "Afternoon Section", "Tags": ["LOC_NY", "CTG_Improv"],
+             "Categories": [{"Name": "3. Improv 201: Scene Work"}]},
+            {"EventID": 3, "Name": "Musical Improv 101", "Tags": ["LOC_LA", "CTG_Musical_Improv"],
+             "Categories": [{"Name": "Improv 101"}]},
+            {"EventID": 4, "Name": "Performance Lab", "Tags": ["LOC_NY", "CTG_Improv_Electives"],
+             "Summary": "Prerequisites: Improv 101, 201, 301 and 401."},
+        ]
+        with patch("sources.ucb_classes.raw_events", return_value=events):
+            scanned = watcher.scan_ucb()
+        self.assertEqual(scanned["ucb_online"]["1"]["categories"], ["improv_core"])
+        self.assertEqual(scanned["ucb_ny"]["2"]["categories"], ["improv_core"])
+        self.assertEqual(scanned["ucb_la"]["3"]["categories"], ["musical_improv"])
+        self.assertEqual(scanned["ucb_ny"]["4"]["categories"], ["improv_electives"])
+
+    def test_bcc_scan_and_non_ucb_diff_keep_core_out_of_every_noncore_bundle(self):
+        bcc = [
+            {"id": "bcc/1", "title": "[Aug-Oct] Improv Level 1: Intro", "level": "Improv"},
+            {"id": "bcc/2", "title": "[Sep-Oct] Improv Level 4: Long Forms", "level": "Improv"},
+            {"id": "bcc/3", "title": "[Sep-Oct] Sketch: Level 2", "level": "Sketch"},
+            {"id": "bcc/4", "title": "Improv Drop-In", "level": "Drop-In"},
+            {"id": "bcc/5", "title": "Sketch Lab", "level": "Sketch"},
+            {"id": "bcc/6", "title": "Creative Writing", "level": "Workshop",
+             "description": "Requires Improv Level 1 and Sketch Level 2."},
+        ]
+        sources = [
+            {"id": "brooklyn_cc", "fetch": lambda: bcc},
+            {"id": "magnet", "fetch": lambda: [{"id": "magnet/1", "title": "Improv Level 1"}]},
+        ]
+        with patch("sources.CLASS_SOURCES", sources):
+            scanned = watcher.scan_others()
+        state = {source["id"]: {"ids": []} for source in sources}
+        alerts = diff_and_alert(scanned, state, per_category=False)
+        bcc_alerts = [a for a in alerts if a["school"] == "brooklyn_cc"]
+        self.assertEqual(len(bcc_alerts), 5)
+        by_category = {a["category"]: a for a in bcc_alerts}
+        self.assertEqual(by_category["improv_core"]["classIDs"], "bcc/1,bcc/2")
+        self.assertEqual(by_category["improv_core"]["categories"], ["improv_core"])
+        self.assertEqual(by_category["sketch_core"]["categories"], ["sketch_core"])
+        self.assertEqual(by_category["improv_core"]["pushTitle"],
+                         "New Improv Core classes at Brooklyn Comedy Collective")
+        noncore_ids = {a["classIDs"] for a in bcc_alerts if set(a["categories"]) & {"improv", "sketch", "other"}}
+        self.assertEqual(noncore_ids, {"bcc/4", "bcc/5", "bcc/6"})
+        # The source is unchanged, so existing school-only subscriptions still
+        # match every BCC bundle while category subscriptions can exclude core.
+        self.assertTrue(all(a["school"] == "brooklyn_cc" for a in by_category.values()))
+        self.assertEqual(next(a for a in alerts if a["school"] == "magnet")["categories"], ["all"])
+        self.assertEqual(diff_and_alert(scanned, state, per_category=False), [])
 
 
 def _ucb(title, categories, cid, when="2026-11-01"):

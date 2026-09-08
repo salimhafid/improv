@@ -59,42 +59,107 @@ func showsStore() -> ShowsStore {
 
 // MARK: tests
 
-@MainActor
-func testCoreRank() {
-    checkEqual(ClassesStore.coreRank(ucbClass("Improv 101")), 0, "coreRank 101")
-    checkEqual(ClassesStore.coreRank(ucbClass("Improv 401", source: "ucb_la")), 3, "coreRank 401 LA")
-    checkEqual(ClassesStore.coreRank(ucbClass("Weird Title", level: "Improv 201: The Game of the Scene")), 1,
-               "coreRank via level prefix")
-    checkEqual(ClassesStore.coreRank(ucbClass("Musical Improv 101")), nil, "musical 101 is not core")
-    checkEqual(ClassesStore.coreRank(ucbClass("Sketch 101")), nil, "sketch 101 is not core")
-    checkEqual(ClassesStore.coreRank(classItem(["title": "Improv 101", "source": "magnet"])), nil,
-               "non-UCB source is never core")
-    checkEqual(ClassesStore.coreRank(classItem(["title": "Improv 301", "source": "ucb_online", "city": "Online"])), 2,
-               "UCB Online teaches the same core sequence")
+func testClassCurriculum() {
+    for source in ["ucb_ny", "ucb_la", "ucb_online"] {
+        for (rank, number) in [101, 201, 301, 401].enumerated() {
+            checkEqual(ClassCurriculum.course(source: source, title: "Improv \(number)"),
+                       .init(curriculum: .improvCore, rank: rank), "\(source) improv \(number) rank")
+        }
+        for (rank, number) in [101, 201, 301].enumerated() {
+            checkEqual(ClassCurriculum.course(source: source, title: "Sketch \(number)"),
+                       .init(curriculum: .sketchCore, rank: rank), "\(source) sketch \(number) rank")
+        }
+    }
+    for number in 1...4 {
+        checkEqual(ClassCurriculum.course(source: "brooklyn_cc", title:
+                   "[Sep-Oct] Improv Level \(number): Long Forms w/ Andy Junk (Tuesday)"),
+                   .init(curriculum: .improvCore, rank: number - 1), "BCC season-tagged improv \(number)")
+    }
+    for number in 1...2 {
+        checkEqual(ClassCurriculum.course(source: "brooklyn_cc", title:
+                   "[Aug-Oct] [Virtual] Sketch: Level \(number) w/ Devin Bockrath (Monday)"),
+                   .init(curriculum: .sketchCore, rank: number - 1), "BCC repeated tags sketch \(number)")
+    }
+    checkEqual(ClassCurriculum.course(source: "ucb_online", title: "ONLINE Sketch 101"),
+               .init(curriculum: .sketchCore, rank: 0), "online title prefix without level fallback")
+    checkEqual(ClassCurriculum.course(source: "ucb_ny", title: "  iMpRoV  201: Intensive"),
+               .init(curriculum: .improvCore, rank: 1), "core prefix ignores case and spacing")
+    checkEqual(ClassCurriculum.course(source: "ucb_ny", title: "Improv 101 Drop-In",
+                                     level: "Improv Workshops & Drop-Ins"),
+               .init(curriculum: .improvCore, rank: 0), "numbered drop-in stays with core course")
+    checkEqual(ClassCurriculum.course(source: "ucb_ny", title: "Renamed course",
+                                     level: "Improv 201: The Game of the Scene"),
+               .init(curriculum: .improvCore, rank: 1), "canonical level supports renamed course")
+    for title in ["Musical Improv 101", "ONLINE Musical Improv 101", "Advanced Study Improv",
+                  "Advanced Sketch 101", "Sketch 999", "Sketch 401", "Improv 1010", "Improv 101A",
+                  "Improv 0101"] {
+        checkEqual(ClassCurriculum.course(source: "ucb_ny", title: title, level: "Improv 101"), nil,
+                   "explicit non-core title defeats misleading level: \(title)")
+    }
+    for title in ["Musical Improv Level 1", "Sketch: Level 3", "Improv Level 5", "Improv Level 11",
+                  "Improv 101", "Drop-In Intro to BCC Improv", "Workshop for Improv Level 1 graduates"] {
+        checkEqual(ClassCurriculum.course(source: "brooklyn_cc", title: "[Aug-Oct] \(title)"), nil,
+                   "BCC non-core course stays out: \(title)")
+    }
+    checkEqual(ClassCurriculum.course(source: "ucb_ny", title: "Improv Drop-In"), nil,
+               "unnumbered drop-in stays outside core")
+    for source in ["magnet", "second_city", "io_chicago", "ucb_unknown", ""] {
+        checkEqual(ClassCurriculum.course(source: source, title: "Improv 101", level: "Sketch 101"), nil,
+                   "core curriculum is source-scoped: \(source)")
+    }
 }
 
 @MainActor
 func testSubjectGroups() {
-    // Core Curriculum pinned first, ordered 101→401 with a start-date tiebreak.
+    // Both core curricula lead, ordered by level with a start-date tiebreak.
     let items = [
         ucbClass("Character 101", level: "Character", start: "2026-08-01T19:00:00"),
         ucbClass("Improv 201", level: "Improv 201: The Game of the Scene", start: "2026-08-05T19:00:00"),
         ucbClass("Improv 101", level: "Improv 101: Improv Basics", start: "2026-09-01T19:00:00"),
         ucbClass("Improv 101", level: "Improv 101: Improv Basics", start: "2026-08-01T19:00:00"),
+        ucbClass("Sketch 301", level: "Sketch 301", start: "2026-08-01T19:00:00"),
+        ucbClass("Sketch 101", level: "Sketch 101", start: "2026-09-01T19:00:00"),
+        ucbClass("Sketch from Improv", level: "Featured Programs"),
     ]
     let groups = ClassesStore.subjectGroups(from: items, source: "ucb_ny")
-    checkEqual(groups.map(\.id), ["ucb_ny/core", "ucb_ny/Acting & Character"],
-               "core group pinned first, ids scoped to the school")
+    checkEqual(groups.map(\.id), ["ucb_ny/improv_core", "ucb_ny/sketch_core",
+                                  "ucb_ny/Sketch & Writing", "ucb_ny/Acting & Character"],
+               "both core groups pinned first, ids scoped to the school")
     let core = groups[0]
-    checkEqual(core.title, "Core Curriculum", "core group title")
+    checkEqual(core.title, "Improv Core", "improv core group title")
     checkEqual(core.classes.map(\.title), ["Improv 101", "Improv 101", "Improv 201"],
                "core ordered 101→401")
     check(core.classes[0].start == "2026-08-01T19:00:00", "same rank ordered by date")
+    checkEqual(groups[1].title, "Sketch Core", "sketch core group title")
+    checkEqual(groups[1].classes.map(\.title), ["Sketch 101", "Sketch 301"],
+               "sketch core rank takes precedence over date")
+    checkEqual(groups.flatMap(\.classes).count, items.count, "every UCB class appears in exactly one group")
+    checkEqual(groups[2].classes.map(\.title), ["Sketch from Improv"],
+               "core sketches are removed from the ordinary sketch bucket")
 
     let nonUCB = [classItem(["title": "Improv 101", "source": "magnet", "level": "Improv",
                              "city": "New York"])]
     checkEqual(ClassesStore.subjectGroups(from: nonUCB, source: "magnet").map(\.id),
-               ["magnet/Improv"], "no core group without UCB core classes")
+               ["magnet/Improv"], "other schools retain their existing subject groups")
+
+    let bccTitles = ["[Aug-Oct] Sketch: Level 2 w/ Teacher", "[Aug-Oct] Improv Level 4: Long Forms",
+                     "[Aug-Oct] Musical Improv Level 1: Structure", "[Aug-Oct] Improv Level 1: Intro",
+                     "[Aug-Oct] Sketch: Level 1 w/ Teacher", "Drop-In Intro to BCC Improv"]
+    let bcc = bccTitles.enumerated().map { index, title in
+        classItem(["id": String(index), "source": "brooklyn_cc", "title": title, "city": "New York"])
+    }
+    let bccGroups = ClassesStore.subjectGroups(from: bcc, source: "brooklyn_cc")
+    checkEqual(bccGroups.map(\.title), ["Improv Core", "Sketch Core", "Musical Improv", "Workshops & Drop-Ins"],
+               "BCC splits improv and sketch core ahead of remaining subjects")
+    checkEqual(bccGroups[0].classes.map(\.title), [bccTitles[3], bccTitles[1]], "BCC improv level order")
+    checkEqual(bccGroups[1].classes.map(\.title), [bccTitles[4], bccTitles[0]], "BCC sketch level order")
+    checkEqual(bccGroups.flatMap(\.classes).map(\.id).sorted(), bcc.map(\.id).sorted(),
+               "BCC core and remaining buckets neither duplicate nor lose any class")
+
+    let prerequisites = classItem(["source": "ucb_ny", "title": "Advanced Scene Workshop",
+                                  "description": "Prerequisites: Improv 101 and Sketch 101."])
+    checkEqual(ClassesStore.subjectGroups(from: [prerequisites], source: "ucb_ny").map(\.title),
+               ["Workshops & Drop-Ins"], "description prerequisites cannot promote a course to core")
 
     // Subject buckets come out in the catalog's fixed order, not input order.
     let mixed = [
@@ -516,7 +581,8 @@ func testReminderCoverage() {
 struct LogicTests {
     @MainActor
     static func main() async {
-        testCoreRank()
+        testClassCurriculum()
+        runClassAlertPreferenceTests()
         testSubjectGroups()
         testSubjectClassification()
         testClassScope()

@@ -15,8 +15,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.4"
-    CURRENT_PROJECT_VERSION: "23"
+    MARKETING_VERSION: "1.6"
+    CURRENT_PROJECT_VERSION: "26"
     DEVELOPMENT_TEAM: 8FKP6A38FJ
 packages:
   # CMS signing for Apple Wallet passes (WalletPass.swift imports X509 with

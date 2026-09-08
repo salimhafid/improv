@@ -13,9 +13,10 @@ the chain if it has died.
            New classes are bundled per (school, category set) — a record lists
            every category its classes carry, and a device's subscription
            matches on any one of them.
-  --all    every non-UCB class source; new classes alert per school as one
-           bundle (category "all"). The chain passes --all-if-stale 20 so this
-           stays a roughly daily scan rather than one per iteration.
+  --all    every non-UCB class source; BCC bundles by category set (including
+           exclusive core courses), other schools as one bundle (category
+           "all"). The chain passes --all-if-stale 20 so this stays a roughly
+           daily scan rather than one per iteration.
 
 State (known class ids per school) lives in class-watch.json at the root of
 the `class-watch-state` branch — the workflow checks it out into state-branch/
@@ -43,6 +44,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -94,6 +96,8 @@ UCB_CATEGORY_TAGS = [
 ]
 
 CATEGORY_LABEL = {
+    "improv_core": "Improv Core", "sketch_core": "Sketch Core",
+    "sketch": "Sketch",
     "improv": "Improv", "improv_electives": "Improv Electives",
     "sketch_character": "Sketch & Character", "sketch_electives": "Sketch Electives",
     "musical_improv": "Musical Improv", "standup": "Stand-Up",
@@ -103,6 +107,67 @@ CATEGORY_LABEL = {
 }
 
 UCB_LOCATIONS = [("LOC_NY", "ucb_ny"), ("LOC_LA", "ucb_la"), ("LOC_Online", "ucb_online")]
+_UCB_SCHOOLS = {school for _, school in UCB_LOCATIONS}
+_CORE_LEVELS = {
+    "ucb": {"improv": {"101", "201", "301", "401"}, "sketch": {"101", "201", "301"}},
+    "brooklyn_cc": {"improv": {"1", "2", "3", "4"}, "sketch": {"1", "2"}},
+}
+_COURSE_NUMBER_PREFIX = r"^(improv|sketch)(?:\s*:\s*|\s+)(?:level\s+)?([0-9]+)"
+_COURSE_LEVEL = re.compile(_COURSE_NUMBER_PREFIX + r"\b", re.I)
+
+
+def _course_heading(value: str) -> str:
+    """Remove listing labels, not prose: BCC seasons and UCB's ONLINE prefix."""
+    text = re.sub(r"\s+", " ", value).strip() if isinstance(value, str) else ""
+    text = re.sub(r"^(?:\[[^\]]*\]\s*)+", "", text)
+    return re.sub(r"^ONLINE\s+", "", text, flags=re.I)
+
+
+def _core_category(school: str, title: str, level: str = "") -> str | None:
+    if school not in _UCB_SCHOOLS and school != "brooklyn_cc":
+        return None
+    family = "ucb" if school in _UCB_SCHOOLS else school
+    allowed = _CORE_LEVELS.get(family)
+    if allowed is None:
+        return None
+    heading = _course_heading(title)
+    match = _COURSE_LEVEL.match(heading)
+    if match is None:
+        # A canonical course label can identify a renamed section, but cannot
+        # turn an explicitly musical/advanced class into the ordinary core.
+        if (re.match(r"^(?:musical|advanced)\b", heading, re.I)
+                or re.match(_COURSE_NUMBER_PREFIX, heading, re.I)):
+            return None
+        canonical = re.sub(r"^\d+\.\s*", "", _course_heading(level))
+        match = _COURSE_LEVEL.match(canonical)
+    if match is None:
+        return None
+    discipline, number = match.group(1).lower(), match.group(2)
+    # An explicit unsupported title level never falls back to a different
+    # canonical level (Improv 999 with a stale Improv 101 label stays noncore).
+    return f"{discipline}_core" if number in allowed[discipline] else None
+
+
+def class_categories(school: str, title: str, tags=(), level: str = "") -> list[str]:
+    """Alert categories, with numbered core courses in exclusive buckets.
+
+    Core never also carries broad genre, Featured, workshop or intensive
+    tags: a subscriber who chooses everything except core must not match it
+    through another tag. Matching reads titles/canonical labels, never course
+    descriptions or prerequisites. A numbered 'Improv 101 Drop-In' is core;
+    an unnumbered drop-in keeps its ordinary categories.
+    """
+    core = _core_category(school, title, level)
+    if core:
+        return [core]
+    if school in _UCB_SCHOOLS:
+        return _categories(tags)
+    if school == "brooklyn_cc":
+        text = f"{title} {level}"
+        matched = [key for key in ("improv", "sketch")
+                   if re.search(rf"\b{key}\b", text, re.I)]
+        return matched or ["other"]
+    return ["all"]
 
 
 def _categories(tags: list[str]) -> list[str]:
@@ -122,7 +187,7 @@ def _category(tags: list[str]) -> str:
 
 
 def scan_ucb() -> dict[str, dict[str, dict]]:
-    """Arlo catalog → {school: {class_id: {title, when, category}}}."""
+    """Arlo catalog → {school: {class_id: {title, when, categories}}}."""
     from common import clean
     from sources.ucb_classes import raw_events
 
@@ -132,17 +197,20 @@ def scan_ucb() -> dict[str, dict[str, dict]]:
         title = clean(ev.get("Name"))
         if not title or not ev.get("EventID"):
             continue
+        canonical = next((clean(c.get("Name")) for c in (ev.get("Categories") or [])
+                          if isinstance(c, dict)), "")
         for tag, school in UCB_LOCATIONS:
             if tag in tags:
                 when = (ev.get("StartDateTime") or "")[:10]
                 out[school][str(ev.get("EventID"))] = {
-                    "title": title, "when": when, "categories": _categories(tags),
+                    "title": title, "when": when,
+                    "categories": class_categories(school, title, tags, canonical),
                 }
     return out
 
 
 def scan_others() -> dict[str, dict[str, dict]]:
-    """Every non-UCB class source → {school: {class_id: {title, when}}}.
+    """Every non-UCB class source → class metadata, with categories for BCC.
     A source that raises is skipped (state untouched → retried next run)."""
     from sources import CLASS_SOURCES
 
@@ -155,10 +223,15 @@ def scan_others() -> dict[str, dict[str, dict]]:
         except Exception as e:  # noqa: BLE001 — one bad source must not kill the run
             log.warning("%s failed: %r", src["id"], e)
             continue
-        out[src["id"]] = {
-            str(c.get("id")): {"title": c.get("title") or "", "when": (c.get("start") or "")[:10]}
-            for c in items if c.get("id")
-        }
+        current = {}
+        for c in items:
+            if not c.get("id"):
+                continue
+            meta = {"title": c.get("title") or "", "when": (c.get("start") or "")[:10]}
+            if src["id"] == "brooklyn_cc":
+                meta["categories"] = class_categories(src["id"], meta["title"], level=c.get("level") or "")
+            current[str(c["id"])] = meta
+        out[src["id"]] = current
     return out
 
 
@@ -216,8 +289,9 @@ def diff_and_alert(scanned: dict[str, dict[str, dict]], state: dict, per_categor
         if not new:
             continue
         groups: dict[tuple[str, ...], list[dict]] = {}
+        categorized = per_category or school == "brooklyn_cc"
         for item in new:
-            key = tuple(item.get("categories") or ["other"]) if per_category else ("all",)
+            key = tuple(item.get("categories") or ["other"]) if categorized else ("all",)
             groups.setdefault(key, []).append(item)
         for categories, items in sorted(groups.items()):
             alerts.append(compose(school, list(categories), items))
@@ -230,7 +304,7 @@ def compose(school: str, categories: list[str], items: list[dict]) -> dict:
     name = DISPLAY.get(school, school)
     titles = [i["title"] for i in items]
     category = categories[0]
-    if school.startswith("ucb"):
+    if school in _UCB_SCHOOLS or school == "brooklyn_cc":
         label = CATEGORY_LABEL.get(category, "")
         if len(items) == 1:
             title = f"New class at {name}"

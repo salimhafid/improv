@@ -9,7 +9,8 @@ import UserNotifications
 /// The GitHub Actions watcher (watcher.py) writes a `ClassAlert` record to the
 /// app's public CloudKit database whenever a school posts new classes — UCB
 /// checked on a schedule (one record per bundle of classes sharing a category
-/// set), every other school daily (one bundled record). Each device turns its
+/// set), BCC daily with the same category bundles, and other schools daily
+/// with one bundled record. Each device turns its
 /// toggles into `CKQuerySubscription`s, so Apple's push infrastructure
 /// delivers exactly the alerts this user asked for — no server of ours involved.
 ///
@@ -24,98 +25,8 @@ import UserNotifications
 @Observable
 final class ClassAlertsStore {
 
-    struct School: Identifiable {
-        let id: String
-        let name: String
-        let city: String
-    }
-
-    /// UCB rows (customizable, per-category).
-    static let ucbSchools: [School] = [
-        School(id: "ucb_ny", name: "UCB New York", city: "New York"),
-        School(id: "ucb_la", name: "UCB Los Angeles", city: "Los Angeles"),
-        School(id: "ucb_online", name: "UCB Online", city: "Online"),
-    ]
-
-    /// Everyone else (simple on/off, checked daily).
-    static let otherSchools: [School] = [
-        School(id: "magnet", name: "Magnet Theater", city: "New York"),
-        School(id: "brooklyn_cc", name: "Brooklyn Comedy Collective", city: "New York"),
-        School(id: "wgis_ny", name: "WGIS New York", city: "New York"),
-        School(id: "wgis_la", name: "WGIS Los Angeles", city: "Los Angeles"),
-        School(id: "annoyance", name: "The Annoyance", city: "Chicago"),
-        School(id: "io_chicago", name: "iO Theater", city: "Chicago"),
-        School(id: "second_city", name: "The Second City", city: "Chicago"),
-        School(id: "logan_square", name: "Logan Square Improv", city: "Chicago"),
-    ]
-
-    /// Category keys mirror watcher.py's Arlo-tag mapping.
-    static let ucbCategories: [(key: String, label: String)] = [
-        ("improv", "Improv"),
-        ("improv_electives", "Improv Electives"),
-        ("sketch_character", "Sketch & Character"),
-        ("sketch_electives", "Sketch Electives"),
-        ("musical_improv", "Musical Improv"),
-        ("standup", "Stand-Up"),
-        ("clowning", "Clowning"),
-        ("acting", "Acting"),
-        ("writing_programs", "Writing Programs"),
-        ("featured_programs", "Featured Programs"),
-        ("workshops", "Workshops"),
-        ("intensives", "Intensives"),
-        ("other", "Everything Else"),
-    ]
-
-    /// The keys alone, for "is everything picked" checks — a subset test
-    /// against this, never a count, so a key a newer build added (arriving
-    /// via iCloud) still reads as picked instead of never adding up.
-    static let ucbCategoryKeys: Set<String> = Set(ucbCategories.map(\.key))
-
-    /// Categories switched on when a UCB school is first enabled: the core
-    /// improv track, its electives, and the marquee Featured Programs — the
-    /// last two are where one-off workshops with visiting names land, and
-    /// "Improv only" silently dropped exactly those. Everything else is opt-in
-    /// (use "Select all" in the detail view to take the lot).
-    static let defaultUCBCategories: Set<String> = ["improv", "improv_electives", "featured_programs"]
-
     // MARK: Preferences (persisted)
-
-    struct Prefs: Codable, Equatable {
-        var master = false
-        /// Enabled non-UCB school ids.
-        var schools: Set<String> = []
-        /// UCB school id → enabled category keys. A key present with an empty
-        /// set means "on, but no categories" (sends nothing).
-        var ucb: [String: Set<String>] = [:]
-        /// Schema version, so a one-time migration can run without re-running
-        /// on every launch. A fresh `Prefs()` is already current — there is
-        /// nothing to migrate — while a saved blob with no `version` key
-        /// decodes as 0: written before key-presence semantics.
-        var version = ClassAlertsStore.prefsVersion
-
-        enum CodingKeys: String, CodingKey { case master, schools, ucb, version }
-
-        init() {}
-
-        /// Field-by-field with defaults, never the synthesized decoder: that
-        /// one throws on a missing key, and `try?` at the call site turned a
-        /// blob from a build that predates `version` (or any field added
-        /// later) into a silent reset — picks gone, master Off, and the
-        /// device's live subscriptions never reconciled away.
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            master = (try c.decodeIfPresent(Bool.self, forKey: .master)) ?? false
-            schools = (try c.decodeIfPresent(Set<String>.self, forKey: .schools)) ?? []
-            ucb = (try c.decodeIfPresent([String: Set<String>].self, forKey: .ucb)) ?? [:]
-            version = (try c.decodeIfPresent(Int.self, forKey: .version)) ?? 0
-        }
-    }
-
-    /// Current `Prefs` schema version. v1 introduced key-presence semantics for
-    /// `ucb` (see `isUCBEnabled`). Nonisolated so `Prefs` can default to it.
-    private nonisolated static let prefsVersion = 1
-
-    private(set) var prefs = Prefs()
+    private(set) var prefs = ClassAlertPreferences()
     /// The `classAlertPrefs` blob as we last read or wrote it. Anything else
     /// under that key was put there by iCloud — see `adoptExternalPrefs`.
     @ObservationIgnored private var persistedData: Data?
@@ -153,7 +64,7 @@ final class ClassAlertsStore {
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.prefsKey) {
             persistedData = data
-            if let saved = try? JSONDecoder().decode(Prefs.self, from: data) {
+            if let saved = try? JSONDecoder().decode(ClassAlertPreferences.self, from: data) {
                 prefs = saved
                 migrateIfNeeded()
             }
@@ -198,15 +109,11 @@ final class ClassAlertsStore {
         }
     }
 
-    /// Pre-v1, a school was "on" only while its category set was non-empty, so
-    /// unchecking the last category was how you silenced it — leaving an empty
-    /// set behind. Key-presence semantics would read those as on again, so drop
-    /// them once. After v1 an empty set is a deliberate (silent) state and is
-    /// left alone.
+    /// Persist migrations and retain their reconcile debt even if master is
+    /// Off. In particular, BCC's old school-wide subscription must be retired.
     private func migrateIfNeeded() {
-        guard prefs.version < 1 else { return }
-        prefs.ucb = prefs.ucb.filter { !$0.value.isEmpty }
-        prefs.version = Self.prefsVersion
+        guard prefs.migrateIfNeeded() else { return }
+        UserDefaults.standard.set(true, forKey: Self.syncPendingKey)
         persist()
     }
 
@@ -216,7 +123,7 @@ final class ClassAlertsStore {
         let data = UserDefaults.standard.data(forKey: Self.prefsKey)
         guard data != persistedData else { return }
         persistedData = data
-        guard let data, let saved = try? JSONDecoder().decode(Prefs.self, from: data),
+        guard let data, let saved = try? JSONDecoder().decode(ClassAlertPreferences.self, from: data),
               saved != prefs else { return }
         prefs = saved
         migrateIfNeeded()
@@ -224,12 +131,9 @@ final class ClassAlertsStore {
     }
 
     /// Count of schools currently alerting — drives the bell badge. Deliberately
-    /// stricter than `isUCBEnabled`: this means "actually pushing", so a school
+    /// stricter than `isCategorizedSchoolEnabled`: this means "actually pushing", so a school
     /// that's on with no categories picked (which sends nothing) doesn't count.
-    var activeCount: Int {
-        guard prefs.master else { return 0 }
-        return prefs.schools.count + prefs.ucb.filter { !$0.value.isEmpty }.count
-    }
+    var activeCount: Int { prefs.activeCount }
 
     // MARK: Toggles (each persists + resyncs)
 
@@ -250,48 +154,39 @@ final class ClassAlertsStore {
     }
 
     func setSchool(_ id: String, enabled: Bool) {
-        if enabled { prefs.schools.insert(id) } else { prefs.schools.remove(id) }
+        prefs.setSchool(id, enabled: enabled)
         if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
     }
 
-    func setUCB(_ id: String, enabled: Bool) {
-        if enabled {
-            // Only seed a school that has no entry at all — an existing pick
-            // (including the deliberate on-with-nothing state) is never rewritten.
-            if prefs.ucb[id] == nil { prefs.ucb[id] = Self.defaultUCBCategories }
-            Task { await promptIfAlreadyDenied() }
-        } else {
-            prefs.ucb[id] = nil
-        }
+    func setCategorizedSchool(_ id: String, enabled: Bool) {
+        prefs.setCategorizedSchool(id, enabled: enabled)
+        if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
     }
 
-    func setUCBCategory(_ id: String, category: String, enabled: Bool) {
+    func setCategory(_ id: String, category: String, enabled: Bool) {
         // Never materialize a key for an off school — under key-presence
         // semantics that would silently switch it on.
-        guard var set = prefs.ucb[id] else { return }
-        if enabled { set.insert(category) } else { set.remove(category) }
-        prefs.ucb[id] = set
+        guard prefs.isCategorizedSchoolEnabled(id) else { return }
+        prefs.setCategory(id, category: category, enabled: enabled)
         if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
     }
 
     /// Switch every category on, or clear them all while leaving the school on.
-    func setAllUCBCategories(_ id: String, enabled: Bool) {
-        guard let set = prefs.ucb[id] else { return }
-        // Union, not replace: a key this build doesn't know (iCloud, from a
-        // newer build) survives "Select all". "Clear all" means clear.
-        prefs.ucb[id] = enabled ? set.union(Self.ucbCategoryKeys) : []
+    func setAllCategories(_ id: String, enabled: Bool) {
+        guard prefs.isCategorizedSchoolEnabled(id) else { return }
+        prefs.setAllCategories(id, enabled: enabled)
         if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
     }
 
     /// A key present means the school is on; the set says which categories.
-    /// On-with-no-categories is a legal (silent) state — see `Prefs.ucb` — so
+    /// On-with-no-categories is a legal (silent) state, so
     /// unchecking the last category can't yank the school toggle out from under
     /// the user and disable the very rows they need to recover.
-    func isUCBEnabled(_ id: String) -> Bool { prefs.ucb[id] != nil }
+    func isCategorizedSchoolEnabled(_ id: String) -> Bool { prefs.isCategorizedSchoolEnabled(id) }
 
     private func persist() {
         if let data = try? JSONEncoder().encode(prefs) {
@@ -395,22 +290,7 @@ final class ClassAlertsStore {
 
     /// Desired subscription IDs for the current prefs.
     private var desired: [String: NSPredicate] {
-        guard prefs.master else { return [:] }
-        var out: [String: NSPredicate] = [:]
-        for id in prefs.schools {
-            out["alert/\(id)/all"] = NSPredicate(format: "school == %@", id)
-        }
-        for (school, categories) in prefs.ucb {
-            for category in categories {
-                // CONTAINS on a list field is CloudKit's documented membership
-                // test ("favoriteColors CONTAINS 'red'"). The record also still
-                // carries a scalar `category`, but matching on it would recreate
-                // the one-tag-per-class bug this replaces.
-                out["alert/v2/\(school)/\(category)"] =
-                    NSPredicate(format: "school == %@ AND categories CONTAINS %@", school, category)
-            }
-        }
-        return out
+        Dictionary(uniqueKeysWithValues: prefs.subscriptionPlan.map { ($0.id, $0.predicate) })
     }
 
     /// Serialized: the reconcile is a read-modify-write (read `allSubscriptions`,

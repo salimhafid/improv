@@ -74,13 +74,18 @@ iCloud account on the device or simulator; everything else works without one.
 - **Classes tab** — browsed city-wide rather than theater-by-theater: every
   school in the selected theaters' cities gets a collapsible card (the picked
   theaters first; a "UCB Online" folder rides along with either UCB campus),
-  grouped by subject inside (UCB's Improv 101–401 as Core Curriculum). Each
+  grouped by subject inside, with separate **Improv Core** and **Sketch Core**
+  groups for UCB (Improv 101–401, Sketch 101–301) and BCC (Improv 1–4,
+  Sketch 1–2). Each
   class has a native detail page (description, instructor, schedule, price)
   with **Register** opening the registration page in an in-app Safari sheet.
-  Searching auto-expands every matching folder.
+  UCB links select the exact course session. Searching auto-expands every
+  matching folder.
 - **Class alerts** — the bell in the Classes toolbar: a master switch, per-
-  category toggles for UCB New York / Los Angeles / Online, and simple on/off
-  rows for every other school. Alerts are CloudKit push notifications
+  category toggles for UCB New York / Los Angeles / Online and BCC, and simple
+  on/off rows for every other school. Newly enabling a categorized school
+  selects everything except Improv Core and Sketch Core; existing UCB picks
+  are retained. Alerts are CloudKit push notifications
   (`CKQuerySubscription`s the device registers for itself) written by the
   repo's watcher workflow when a school posts new classes; tapping one opens
   the Classes tab.

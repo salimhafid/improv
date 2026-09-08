@@ -161,6 +161,7 @@ class UcbDetailTests(unittest.TestCase):
 
 def _arlo_event(eid: int, summary: str, tag: str = "LOC_NY") -> dict:
     return {"EventID": eid, "Name": f"Improv 101: Section {eid}", "StartDateTime": "2026-10-01T19:00:00-04:00",
+            "ViewUri": "https://ucbcomedy.com/?object_post_type=event&arlo_id=42",
             "Summary": summary, "Tags": [tag], "Categories": [{"Name": "1. Improv"}],
             "Presenters": [{"Name": "Jane Doe"}], "AdvertisedOffers": []}
 
@@ -180,7 +181,26 @@ class UcbClassesTests(unittest.TestCase):
         self.assertEqual(by_id["ucb_ny/1"]["level"], "Improv")
         url = fj.call_args[0][0]
         self.assertNotIn("Location", url)   # never read; dropped from fields/expand
-        self.assertNotIn("ViewUri", url)
+        self.assertIn("ViewUri", url)
+
+    def test_registration_targets_exact_sessions_in_the_same_course(self):
+        page = {"Items": [_arlo_event(40741, ""), _arlo_event(40742, "", "LOC_LA"),
+                          _arlo_event(40743, "", "LOC_Online")]}
+        with patch.object(ucb_classes, "fetch_json", return_value=page):
+            classes = ucb_classes.fetch_ny() + ucb_classes.fetch_la() + ucb_classes.fetch_online()
+        self.assertEqual([c["url"] for c in classes], [
+            f"https://ucbcomedy.com/courses/?eventtemplate=42&event={eid}"
+            for eid in (40741, 40742, 40743)])
+
+    def test_registration_rejects_missing_or_ambiguous_identifiers(self):
+        for changes in ({"ViewUri": None}, {"ViewUri": "https://ucbcomedy.com/"},
+                        {"ViewUri": "https://ucbcomedy.com/?arlo_id=42&arlo_id=43"},
+                        {"ViewUri": "https://ucbcomedy.com/?arlo_id=42oops"},
+                        {"EventID": "40741&event=other"}, {"EventID": 0}):
+            with self.subTest(changes=changes):
+                event = _arlo_event(40741, "") | changes
+                with self.assertRaises(ValueError):
+                    ucb_classes.registration_url(event)
 
     def test_failed_walk_is_memoised_within_a_run(self):
         # A mid-walk failure must not be re-walked by the LA and Online passes.

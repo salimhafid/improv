@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// The Class Alerts sheet: master switch, customizable UCB rows (NY / LA /
-/// Online, each with per-category toggles), and simple on/off rows for every
+/// The Class Alerts sheet: master switch, customizable UCB and BCC rows
+/// with per-category toggles, and simple on/off rows for every
 /// other school. Subscriptions work independently of which theaters are
 /// visible in the Shows/Classes feeds.
 struct ClassAlertsView: View {
@@ -51,27 +51,8 @@ struct ClassAlertsView: View {
                 }
 
                 Section {
-                    ForEach(ClassAlertsStore.ucbSchools) { school in
-                        NavigationLink {
-                            UCBAlertDetailView(school: school)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(school.name)
-                                    Text(ucbSubtitle(school.id))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                // Bell means "actually pushing", so an on-with-
-                                // nothing school doesn't get one — nor any
-                                // school while the master switch is Off.
-                                if alerts.prefs.master, !(alerts.prefs.ucb[school.id] ?? []).isEmpty {
-                                    Image(systemName: "bell.fill")
-                                        .font(.caption).foregroundStyle(Theme.accent)
-                                }
-                            }
-                        }
-                        .disabled(!alerts.prefs.master)
+                    ForEach(ClassAlertCatalog.ucbSchools) { school in
+                        categorizedSchoolRow(school)
                     }
                 } header: {
                     Text("UCB — customizable")
@@ -80,7 +61,15 @@ struct ClassAlertsView: View {
                 }
 
                 Section {
-                    ForEach(ClassAlertsStore.otherSchools) { school in
+                    categorizedSchoolRow(ClassAlertCatalog.bccSchool)
+                } header: {
+                    Text("BCC — customizable")
+                } footer: {
+                    Text("Checked daily. Pick which class categories alert you.")
+                }
+
+                Section {
+                    ForEach(ClassAlertCatalog.otherSchools) { school in
                         Toggle(isOn: Binding(
                             get: { alerts.prefs.schools.contains(school.id) },
                             set: { alerts.setSchool(school.id, enabled: $0) })) {
@@ -116,58 +105,81 @@ struct ClassAlertsView: View {
         .deniedNotificationsAlert(alerts)
     }
 
-    private func ucbSubtitle(_ id: String) -> String {
+    private func categorizedSchoolRow(_ school: ClassAlertCatalog.School) -> some View {
+        NavigationLink {
+            CategoryAlertDetailView(school: school)
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(school.name)
+                    Text(categorySubtitle(school.id))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                // The bell counts a school only while it can send alerts.
+                if alerts.prefs.master, !(alerts.prefs.categorySelections[school.id] ?? []).isEmpty {
+                    Image(systemName: "bell.fill")
+                        .font(.caption).foregroundStyle(Theme.accent)
+                }
+            }
+        }
+        .disabled(!alerts.prefs.master)
+    }
+
+    private func categorySubtitle(_ id: String) -> String {
         // Reads Off with the master switch Off, like the toolbar badge.
-        guard alerts.prefs.master, let set = alerts.prefs.ucb[id] else { return "Off" }
+        guard alerts.prefs.master, let set = alerts.prefs.categorySelections[id] else { return "Off" }
         if set.isEmpty { return "On — no categories picked" }
-        if ClassAlertsStore.ucbCategoryKeys.isSubset(of: set) { return "All categories" }
+        if ClassAlertCatalog.categoryKeys(for: id).isSubset(of: set) { return "All categories" }
         return "\(set.count) categor\(set.count == 1 ? "y" : "ies")"
     }
 }
 
-/// Per-city UCB alert customization: on/off plus one toggle per class category.
-/// Switching a school on starts at the three-category seed (see
-/// `defaultUCBCategories`), so the header carries an explicit Select all — the
-/// school toggle is no longer a bulk-select in disguise.
-struct UCBAlertDetailView: View {
-    let school: ClassAlertsStore.School
+/// UCB and BCC customization. Newly enabled schools start with every category
+/// except Improv Core and Sketch Core; existing selections stay as saved.
+struct CategoryAlertDetailView: View {
+    let school: ClassAlertCatalog.School
     @Environment(ClassAlertsStore.self) private var alerts
 
-    private var selected: Set<String> { alerts.prefs.ucb[school.id] ?? [] }
-    private var allSelected: Bool { ClassAlertsStore.ucbCategoryKeys.isSubset(of: selected) }
+    private var selected: Set<String> { alerts.prefs.categorySelections[school.id] ?? [] }
+    private var categories: [(key: String, label: String)] { ClassAlertCatalog.categories(for: school.id) }
+    private var allSelected: Bool { ClassAlertCatalog.categoryKeys(for: school.id).isSubset(of: selected) }
+    private var schedule: String {
+        school.id == ClassAlertCatalog.bccSchool.id ? "Checked daily." : "Checked every 10 minutes."
+    }
 
     var body: some View {
         List {
             Section {
-                Toggle(isOn: Binding(get: { alerts.isUCBEnabled(school.id) },
-                                     set: { alerts.setUCB(school.id, enabled: $0) })) {
+                Toggle(isOn: Binding(get: { alerts.isCategorizedSchoolEnabled(school.id) },
+                                     set: { alerts.setCategorizedSchool(school.id, enabled: $0) })) {
                     Text("Alert me about \(school.name)").font(.headline)
                 }
                 .tint(Theme.accent)
             } footer: {
-                Text("New classes are checked every 10 minutes and alert immediately. Starts with Improv, Improv Electives, and Featured Programs — add whatever else you want below.")
+                Text("\(schedule) When you enable this school, all categories start on except Improv Core and Sketch Core. Change your picks below.")
             }
 
             Section {
-                ForEach(ClassAlertsStore.ucbCategories, id: \.key) { category in
+                ForEach(categories, id: \.key) { category in
                     Toggle(isOn: Binding(
                         get: { selected.contains(category.key) },
-                        set: { alerts.setUCBCategory(school.id, category: category.key, enabled: $0) })) {
+                        set: { alerts.setCategory(school.id, category: category.key, enabled: $0) })) {
                         Text(category.label)
                     }
                     .tint(Theme.accent)
-                    .disabled(!alerts.isUCBEnabled(school.id))
+                    .disabled(!alerts.isCategorizedSchoolEnabled(school.id))
                 }
             } header: {
                 HStack {
                     Text("Categories")
                     Spacer()
                     Button(allSelected ? "Clear all" : "Select all") {
-                        alerts.setAllUCBCategories(school.id, enabled: !allSelected)
+                        alerts.setAllCategories(school.id, enabled: !allSelected)
                     }
                     .font(.caption)
                     .textCase(nil)
-                    .disabled(!alerts.isUCBEnabled(school.id))
+                    .disabled(!alerts.isCategorizedSchoolEnabled(school.id))
                 }
             }
         }
@@ -178,7 +190,7 @@ struct UCBAlertDetailView: View {
 
 /// The "you switched this on but notifications are off" alert. Attached once,
 /// to the sheet's `NavigationStack`, so it covers BOTH screens — the per-school
-/// and per-category toggles are in `UCBAlertDetailView`, where the sheet's
+/// and per-category toggles are in `CategoryAlertDetailView`, where the sheet's
 /// footer isn't, so that screen would otherwise flip a switch green and say
 /// nothing. Once, because two `alert(isPresented:)` on one binding is two
 /// presenters fighting over a single flag.
