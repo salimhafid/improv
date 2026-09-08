@@ -325,16 +325,27 @@ complete title/body configuration. After deploying those learned fields,
 [probe 34278590602](https://github.com/salimhafid/improv/actions/runs/34278590602)
 verified all three shapes' full notification settings and cleanup in both
 environments at `21:05:55Z`. No new iOS build is required. The app retries on
-foreground; registration of the user's real saved choices remains to be checked.
+foreground.
 [Final owner-only test 34278650572](https://github.com/salimhafid/improv/actions/runs/34278650572)
 validated the full title/body subscription and wrote its matching record at
 `21:06:38Z`; both temporary objects were removed successfully at `21:07:24Z`.
 Receipt of this second test is awaiting user confirmation.
 [Read-only check 34278843920](https://github.com/salimhafid/improv/actions/runs/34278843920)
 still found zero production subscriptions at `21:08:24Z`; the user has not yet
-confirmed a foreground retry after the title-field deployment. Do not mark
-regular alert recovery complete until the real `alert/v2/ucb_ny/improv`
-subscription exists and the app's error is gone.
+confirmed a foreground retry after the title-field deployment at that point.
+After the user reopened the app,
+[check 34280552493](https://github.com/salimhafid/improv/actions/runs/34280552493)
+at `21:26:08Z` found **14 persisted production app subscriptions: 13 UCB v2
+category subscriptions and one school-only subscription**, all configured for
+visible alerts on record creation. Their returned notification keys include
+the native title and body localization fields. These are real `alert/`
+subscriptions; temporary diagnostics use a different prefix and cannot inflate
+the counts. Native registration has recovered after the title-field deployment.
+The read-only diagnostic deliberately omits individual school/category choices
+and notification values, so this aggregate result does not establish the exact
+chosen preference set. The earlier physical-device test independently confirmed
+push receipt; receipt of a naturally detected new class has not been observed
+during this verification.
 Always probe all three query shapes with the full notification configuration
 in development before promoting schema. The corrected code passes 242 Python
 tests and the Swift logic harness.

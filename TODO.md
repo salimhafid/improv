@@ -95,7 +95,7 @@ to main; app 1.5 build 25 submitted for review, WAITING_FOR_REVIEW).
       wrote to production at `2026-09-08T20:32:32Z` (run `34275363613`), and
       the user confirmed receipt on their phone. Temporary test objects were
       removed; the record cleanup retry succeeded in run `34275715138`.
-- [ ] **UCB production subscription recovery (2026-09-08)**: record writes,
+- [x] **UCB production subscription recovery (2026-09-08)**: record writes,
       exact queries, and owner-only phone push receipt succeeded, but native
       registration failed with a missing `notif_title_loc_arg_0` production
       schema field. Earlier REST probes used incorrect notification-title wire
@@ -104,9 +104,12 @@ to main; app 1.5 build 25 submitted for review, WAITING_FOR_REVIEW).
       The corrected probe reproduced the exact failure; the title-bearing
       templates are now deployed. Run `34278590602` verified all three shapes'
       full title/body configuration in both environments at 21:05 UTC.
-      Remaining: confirm the app's saved UCB subscriptions reconcile on
-      foreground. Evidence and
-      diagnostic modes are in CONTEXT.md's production UCB failure runbook.
+      After the user reopened the app, read-only run `34280552493` at 21:26 UTC
+      confirmed 14 persisted production app subscriptions (13 UCB v2 categories
+      and one school-only), all with visible alerts on record creation. Native
+      registration has recovered. Individual preference values are not logged;
+      natural new-class push receipt was not observed during verification.
+      Evidence and diagnostic modes are in CONTEXT.md's failure runbook.
 
 ## Open items left by the 2026-09-07 fix pass
 
