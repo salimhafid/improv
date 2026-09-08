@@ -317,10 +317,27 @@ returned the wire names `titleLocalizedKey` / `titleLocalizedArguments`. Earlier
 probes checked only the subscription ID, so silently omitted title settings
 could pass. The corrected helpers use the observed wire names and require the
 server's returned title, body, arguments, and sound to match the app before
-reporting success or creating a test alert. Probe all three query shapes with
-the full notification configuration in development before promoting schema.
-Registration of the app's real saved choices must still be verified after the
-title-bearing templates are deployed.
+reporting success or creating a test alert. The corrected
+[probe 34278521222](https://github.com/salimhafid/improv/actions/runs/34278521222)
+reproduced the phone's exact missing-field error for production school-only
+and UCB v2 subscriptions, while all three development shapes retained the
+complete title/body configuration. After deploying those learned fields,
+[probe 34278590602](https://github.com/salimhafid/improv/actions/runs/34278590602)
+verified all three shapes' full notification settings and cleanup in both
+environments at `21:05:55Z`. No new iOS build is required. The app retries on
+foreground; registration of the user's real saved choices remains to be checked.
+[Final owner-only test 34278650572](https://github.com/salimhafid/improv/actions/runs/34278650572)
+validated the full title/body subscription and wrote its matching record at
+`21:06:38Z`; both temporary objects were removed successfully at `21:07:24Z`.
+Receipt of this second test is awaiting user confirmation.
+[Read-only check 34278843920](https://github.com/salimhafid/improv/actions/runs/34278843920)
+still found zero production subscriptions at `21:08:24Z`; the user has not yet
+confirmed a foreground retry after the title-field deployment. Do not mark
+regular alert recovery complete until the real `alert/v2/ucb_ny/improv`
+subscription exists and the app's error is gone.
+Always probe all three query shapes with the full notification configuration
+in development before promoting schema. The corrected code passes 242 Python
+tests and the Swift logic harness.
 
 The workflow exposes separate checks using the existing Actions secrets:
 

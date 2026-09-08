@@ -101,9 +101,11 @@ to main; app 1.5 build 25 submitted for review, WAITING_FOR_REVIEW).
       schema field. Earlier REST probes used incorrect notification-title wire
       names and did not check the returned settings, so query-shape acceptance
       after two schema promotions did not establish native compatibility.
-      The corrected probe validates the full notification configuration.
-      Remaining: seed and deploy the title-bearing templates, then confirm the
-      app's saved UCB subscriptions reconcile on foreground. Evidence and
+      The corrected probe reproduced the exact failure; the title-bearing
+      templates are now deployed. Run `34278590602` verified all three shapes'
+      full title/body configuration in both environments at 21:05 UTC.
+      Remaining: confirm the app's saved UCB subscriptions reconcile on
+      foreground. Evidence and
       diagnostic modes are in CONTEXT.md's production UCB failure runbook.
 
 ## Open items left by the 2026-09-07 fix pass
