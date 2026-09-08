@@ -30,11 +30,15 @@ def query_body(category: str | None = None) -> dict:
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO)
-    if not watcher.KEY_ID or not watcher.PRIVATE_KEY_PEM:
+    if not watcher.ENVIRONMENTS or not watcher.PRIVATE_KEY_PEM:
         print("ERROR: CloudKit credentials are missing; no checks performed.", file=sys.stderr)
         return 1
     failed = False
     for env in watcher.ENVIRONMENTS:
+        if not watcher._key_id(env):
+            print(f"{env}: CloudKit key ID is missing", file=sys.stderr)
+            failed = True
+            continue
         for label, category in [("school", None), ("UCB category", "improv")]:
             subpath = f"/database/1/{watcher.CONTAINER}/{env}/public/records/query"
             body = json.dumps(query_body(category)).encode()
@@ -62,6 +66,32 @@ def main() -> int:
             except Exception as error:
                 failed = True
                 print(f"{env} / {label}: FAILED: {error}", file=sys.stderr)
+        # Server keys act as their creating developer, not as every app user.
+        # Only report aggregate configuration checks; never log account IDs,
+        # device tokens, or the developer's individual notification choices.
+        subpath = f"/database/1/{watcher.CONTAINER}/{env}/public/subscriptions/list"
+        try:
+            request = urllib.request.Request(
+                "https://api.apple-cloudkit.com" + subpath,
+                headers=watcher._sign(subpath, b"", env), method="GET")
+            with urllib.request.urlopen(request, timeout=30) as response:
+                result = json.load(response)
+            subscriptions = result.get("subscriptions") if isinstance(result, dict) else None
+            if not isinstance(subscriptions, list):
+                raise ValueError("CloudKit did not return a subscriptions array")
+            ours = [sub for sub in subscriptions if sub.get("subscriptionID", "").startswith("alert/")]
+            v2 = [sub for sub in ours if sub["subscriptionID"].startswith("alert/v2/")]
+            alerts = [sub for sub in ours if
+                      (sub.get("notificationInfo") or {}).get("alertBody") or
+                      (sub.get("notificationInfo") or {}).get("alertLocalizationKey")]
+            print(f"{env} / key owner's subscriptions: total={len(subscriptions)}, "
+                  f"class_alerts={len(ours)}, ucb_v2={len(v2)}, visible_alerts={len(alerts)}")
+            print("Subscription counts belong only to the server key's owner; other users may differ.")
+        except urllib.error.HTTPError as error:
+            print(f"{env} / key owner's subscriptions: unavailable (HTTP {error.code}): "
+                  f"{error.read().decode('utf-8', errors='replace')[:1000]}", file=sys.stderr)
+        except Exception as error:
+            print(f"{env} / key owner's subscriptions: unavailable: {error}", file=sys.stderr)
     print("These checks do not verify a user's saved subscriptions, APNs registration, or push receipt.")
     return 1 if failed else 0
 

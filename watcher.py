@@ -29,8 +29,8 @@ class as new. Alerts are at-least-once: they are sent before state is saved,
 and any that a CloudKit environment failed to accept are parked under
 `_pending_alerts` and retried on the next iteration (main() exits non-zero
 so the workflow's ::warning fires). CloudKit credentials come from the
-environment; without them the watcher runs in dry-run mode and just prints
-what it would send.
+environment; missing credentials leave alerts pending rather than consuming
+them. Use --dry-run to preview a scan without sending or changing state.
 
 CloudKit auth: server-to-server key (CloudKit Console) — ECDSA P-256 over
 "<iso-date>:<sha256-b64 of body>:<subpath>" per Apple's spec.
@@ -285,18 +285,20 @@ def send_alerts(alerts: list[dict]) -> list[dict]:
     if not alerts:
         log.info("nothing new")
         return []
-    if not KEY_ID or not PRIVATE_KEY_PEM:
-        log.warning("DRY RUN (no CloudKit key configured) — would send:")
-        for a in alerts:
-            log.warning("  [%s/%s] %s — %s", a["school"], "+".join(a["categories"]),
-                        a["pushTitle"], a["pushBody"])
-        return []
+    if not ENVIRONMENTS:
+        log.error("no CloudKit environments configured; keeping %d alert(s) pending", len(alerts))
+        return alerts
 
     batch = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     unsent: dict[int, list[str]] = {}   # alert index → environments still owed
     for env in ENVIRONMENTS:
         targets = [(i, a) for i, a in enumerate(alerts) if env in (a.get("envs") or ENVIRONMENTS)]
         if not targets:
+            continue
+        if not _key_id(env) or not PRIVATE_KEY_PEM:
+            log.error("%s: CloudKit credentials missing; keeping %d alert(s) pending", env, len(targets))
+            for i, _ in targets:
+                unsent.setdefault(i, []).append(env)
             continue
         subpath = f"/database/1/{CONTAINER}/{env}/public/records/modify"
         names = {f"alert-{batch}-{a['school']}-{a['category']}-{uuid.uuid4().hex[:8]}": i
@@ -326,15 +328,27 @@ def send_alerts(alerts: list[dict]) -> list[dict]:
                 headers=_sign(subpath, body, env), method="POST")
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result = json.load(resp)
-            errors = [r for r in result.get("records", []) if r.get("serverErrorCode")]
-            log.info("%s: wrote %d alert record(s), %d error(s)",
-                     env, len(targets) - len(errors), len(errors))
-            for e in errors[:3]:
-                log.warning("  %s: %s", env, e.get("serverErrorCode"))
-            for e in errors:
-                i = names.get(e.get("recordName"))
-                if i is not None:
+            records = result.get("records") if isinstance(result, dict) else None
+            if not isinstance(records, list):
+                raise ValueError("CloudKit response has no records acknowledgement list")
+            # A 200 response is not an acknowledgement of every write. Match
+            # each requested name exactly once; omitted, malformed, duplicate,
+            # or failed entries remain pending instead of silently losing them.
+            accepted = 0
+            for name, i in names.items():
+                matches = [r for r in records if isinstance(r, dict) and r.get("recordName") == name]
+                if len(matches) != 1 or matches[0].get("serverErrorCode"):
+                    reason = (matches[0].get("serverErrorCode") if len(matches) == 1
+                              else "missing or duplicate record acknowledgement")
+                    log.warning("%s: record %s not accepted: %s", env, name, reason)
                     unsent.setdefault(i, []).append(env)
+                    continue
+                accepted += 1
+                a = alerts[i]
+                log.info("%s: accepted %s school=%s categories=%s", env, name,
+                         a["school"], "+".join(a["categories"]))
+            log.info("%s: wrote %d alert record(s), %d unacknowledged or failed", env,
+                     accepted, len(targets) - accepted)
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
             log.error("%s: CloudKit HTTP %d: %s", env, e.code, body[:500])
@@ -447,12 +461,16 @@ def main() -> int:
     ap.add_argument("--all", action="store_true", help="scan every non-UCB class source")
     ap.add_argument("--all-if-stale", type=float, metavar="HOURS",
                     help="scan the non-UCB sources only if their state is older than HOURS")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="preview alerts without CloudKit writes or state changes")
     ap.add_argument("--test", action="store_true",
                     help="send a test record to verify CloudKit auth (development only)")
     ap.add_argument("--test-prod", action="store_true",
                     help="with --test: also write (and delete) the test record in production")
     args = ap.parse_args()
 
+    if args.dry_run and args.test:
+        ap.error("--dry-run cannot be combined with --test (which writes a probe record)")
     if args.test:
         # Production is a real public DB with subscribers; a failed delete
         # would leave a __test__ record there, so it is opt-in.
@@ -470,10 +488,23 @@ def main() -> int:
     alerts: list[dict] = pending_alerts(state)
     if alerts:
         log.info("retrying %d alert(s) left pending by an earlier iteration", len(alerts))
+    scan_failed = False
     if args.ucb:
-        alerts += diff_and_alert(scan_ucb(), state, per_category=True)
+        try:
+            scanned = scan_ucb()
+        except Exception as e:  # noqa: BLE001 — still deliver previously parked alerts
+            log.error("UCB scan failed; keeping prior school state: %r", e)
+            scan_failed = True
+        else:
+            alerts += diff_and_alert(scanned, state, per_category=True)
     if args.all:
         alerts += diff_and_alert(scan_others(), state, per_category=False)
+    if args.dry_run:
+        log.info("DRY RUN: %d alert(s); no CloudKit writes or state changes", len(alerts))
+        for a in alerts:
+            log.info("  [%s/%s] %s — %s", a["school"], "+".join(a["categories"]),
+                     a["pushTitle"], a["pushBody"])
+        return 1 if scan_failed else 0
     # Send before saving: once the ids are recorded as known they are never
     # re-alerted, so anything CloudKit didn't accept is parked in the state
     # file and retried next iteration (at-least-once).
@@ -482,7 +513,7 @@ def main() -> int:
         state[PENDING_KEY] = unsent[-_MAX_PENDING:]
         log.error("%d alert(s) not accepted by CloudKit; parked for retry", len(unsent))
     save_state(state)
-    return 1 if unsent else 0
+    return 1 if unsent or scan_failed else 0
 
 
 if __name__ == "__main__":

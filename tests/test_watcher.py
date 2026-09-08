@@ -195,7 +195,8 @@ class SendAlertsRetryTests(unittest.TestCase):
         p2 = patch.object(watcher, "PRIVATE_KEY_PEM", "pem")
         p3 = patch.object(watcher, "ENVIRONMENTS", ["development", "production"])
         p4 = patch.object(watcher, "_sign", return_value={})
-        for p in (p1, p2, p3, p4):
+        p5 = patch.object(watcher, "KEY_ID_PROD", "")
+        for p in (p1, p2, p3, p4, p5):
             p.start()
             self.addCleanup(p.stop)
 
@@ -204,24 +205,26 @@ class SendAlertsRetryTests(unittest.TestCase):
         calls = []
 
         def urlopen(req, timeout=None):
+            import json
             env = req.full_url.split("/")[6]
             calls.append(env)
-            return responder(env)
+            names = [op["record"]["recordName"] for op in json.loads(req.data)["operations"]]
+            return responder(env, names)
         with patch.object(watcher.urllib.request, "urlopen", side_effect=urlopen):
             return watcher.send_alerts(alerts), calls
 
     def test_all_accepted_returns_nothing(self):
-        unsent, calls = self._run([_alert()], lambda env: _FakeResponse({"records": [{}]}))
+        unsent, calls = self._run([_alert()], self._accepted)
         self.assertEqual(unsent, [])
         self.assertEqual(calls, ["development", "production"])
 
     def test_failed_environment_is_returned_tagged_for_retry(self):
         import io, urllib.error
 
-        def responder(env):
+        def responder(env, names):
             if env == "production":
                 raise urllib.error.HTTPError("u", 401, "auth", {}, io.BytesIO(b"bad key"))
-            return _FakeResponse({"records": [{}]})
+            return self._accepted(env, names)
         unsent, _ = self._run([_alert(), _alert(cid="2")], responder)
         self.assertEqual([a["envs"] for a in unsent], [["production"], ["production"]])
         self.assertEqual([a["classIDs"] for a in unsent], ["1", "2"])
@@ -242,16 +245,61 @@ class SendAlertsRetryTests(unittest.TestCase):
 
     def test_retried_alert_only_goes_to_the_environments_it_is_owed(self):
         parked = dict(_alert(), envs=["production"])
-        unsent, calls = self._run([parked], lambda env: _FakeResponse({"records": [{}]}))
+        unsent, calls = self._run([parked], self._accepted)
         self.assertEqual(calls, ["production"])
         self.assertEqual(unsent, [])
 
     def test_bad_key_does_not_raise_out_of_send(self):
         from unittest.mock import patch
         with patch.object(watcher, "_sign", side_effect=ValueError("not a PEM")):
-            unsent, calls = self._run([_alert()], lambda env: _FakeResponse({"records": [{}]}))
+            unsent, calls = self._run([_alert()], self._accepted)
         self.assertEqual(calls, [], "signing failed before any request")
         self.assertEqual(unsent[0]["envs"], ["development", "production"])
+
+    @staticmethod
+    def _accepted(env, names):
+        return _FakeResponse({"records": [{"recordName": name} for name in names]})
+
+    def test_incomplete_or_unrelated_acknowledgements_remain_pending(self):
+        for response in ({}, [], {"records": []}, {"records": [{}]},
+                         {"records": [{"recordName": "some-other-record"}]}):
+            with self.subTest(response=response):
+                unsent, _ = self._run([_alert()], lambda env, names: _FakeResponse(response))
+                self.assertEqual(unsent[0]["envs"], ["development", "production"])
+
+    def test_only_unacknowledged_record_is_retried(self):
+        unsent, _ = self._run([_alert(cid="1"), _alert(cid="2")],
+                             lambda env, names: self._accepted(env, names[:1]))
+        self.assertEqual([(a["classIDs"], a["envs"]) for a in unsent],
+                         [("2", ["development", "production"])])
+
+    def test_duplicate_acknowledgement_is_not_accepted(self):
+        unsent, _ = self._run([_alert()],
+                             lambda env, names: self._accepted(env, names * 2))
+        self.assertEqual(unsent[0]["envs"], ["development", "production"])
+
+    def test_missing_credentials_preserve_alerts_without_network_calls(self):
+        from unittest.mock import patch
+        for setting in ("KEY_ID", "PRIVATE_KEY_PEM"):
+            with self.subTest(setting=setting), patch.object(watcher, setting, ""):
+                unsent, calls = self._run([_alert()], self._accepted)
+                self.assertEqual(calls, [])
+                self.assertEqual(unsent[0]["envs"], ["development", "production"])
+
+    def test_production_key_does_not_require_a_development_key(self):
+        from unittest.mock import patch
+        with patch.object(watcher, "KEY_ID", ""), patch.object(watcher, "KEY_ID_PROD", "production-key"):
+            unsent, calls = self._run([_alert()], self._accepted)
+        self.assertEqual(calls, ["production"])
+        self.assertEqual(unsent[0]["envs"], ["development"])
+
+    def test_missing_environment_configuration_preserves_pending(self):
+        from unittest.mock import patch
+        alerts = [_alert()]
+        with patch.object(watcher, "ENVIRONMENTS", []):
+            unsent, calls = self._run(alerts, self._accepted)
+        self.assertEqual(calls, [])
+        self.assertEqual(unsent, alerts)
 
 
 class MainAtLeastOnceTests(unittest.TestCase):
@@ -312,6 +360,58 @@ class MainAtLeastOnceTests(unittest.TestCase):
         watcher.pending_alerts(state)
         self.assertNotIn(watcher.PENDING_KEY, state, "the slot is consumed")
 
+    def test_missing_credentials_park_new_alert_and_fail_run(self):
+        from unittest.mock import patch
+        watcher.save_state({"ucb_ny": {"ids": ["1"]}})
+        scanned = {"ucb_ny": dict([_ucb("A", ["improv"], "1"), _ucb("B", ["improv"], "2")])}
+        send = watcher.send_alerts
+        with patch.object(watcher, "PRIVATE_KEY_PEM", ""), \
+             patch.object(watcher, "ENVIRONMENTS", ["development", "production"]):
+            rc, sent, state = self._main(scanned, send)
+        self.assertEqual(rc, 1)
+        self.assertEqual(state["ucb_ny"]["ids"], ["1", "2"])
+        self.assertEqual(state[watcher.PENDING_KEY][0]["classIDs"], "2")
+        self.assertEqual(state[watcher.PENDING_KEY][0]["envs"], ["development", "production"])
+
+    def test_dry_run_does_not_send_advance_state_or_consume_pending(self):
+        initial = {"ucb_ny": {"ids": ["1"], "updated": "before"},
+                   watcher.PENDING_KEY: [dict(_alert(cid="old"), envs=["production"])]}
+        watcher.save_state(initial)
+        scanned = {"ucb_ny": dict([_ucb("A", ["improv"], "1"), _ucb("B", ["improv"], "2")])}
+        rc, sent, state = self._main(scanned, lambda alerts: [], argv=("--ucb", "--dry-run"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(sent, [])
+        self.assertEqual(state, initial)
+
+    def test_first_dry_run_does_not_write_a_baseline(self):
+        import os
+        scanned = {"ucb_ny": dict([_ucb("A", ["improv"], "1")])}
+        rc, sent, state = self._main(scanned, lambda alerts: [], argv=("--ucb", "--dry-run"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(sent, [])
+        self.assertFalse(os.path.exists(watcher.STATE_PATH))
+
+    def test_failed_ucb_scan_still_retries_pending_without_changing_school_state(self):
+        from unittest.mock import patch
+        school = {"ids": ["1"], "updated": "before"}
+        pending = [dict(_alert(cid="2"), envs=["production"])]
+        watcher.save_state({"ucb_ny": school, watcher.PENDING_KEY: pending})
+        with patch.object(watcher, "scan_ucb", side_effect=RuntimeError("catalog unavailable")), \
+             patch.object(watcher, "send_alerts", return_value=[]) as send, \
+             patch.object(watcher.sys, "argv", ["watcher.py", "--ucb"]):
+            rc = watcher.main()
+        self.assertEqual(rc, 1, "the workflow must still report the failed scan")
+        send.assert_called_once_with(pending)
+        self.assertEqual(watcher.load_state(), {"ucb_ny": school})
+
+    def test_failed_first_ucb_scan_does_not_baseline_school(self):
+        from unittest.mock import patch
+        with patch.object(watcher, "scan_ucb", side_effect=RuntimeError("catalog unavailable")), \
+             patch.object(watcher, "send_alerts", return_value=[]), \
+             patch.object(watcher.sys, "argv", ["watcher.py", "--ucb"]):
+            self.assertEqual(watcher.main(), 1)
+        self.assertEqual(watcher.load_state(), {})
+
 
 class TestModeTests(unittest.TestCase):
     """--test never touches the production public DB unless --test-prod is passed."""
@@ -337,6 +437,15 @@ class TestModeTests(unittest.TestCase):
         from unittest.mock import patch
         with patch.object(watcher, "KEY_ID", "key"), patch.object(watcher, "PRIVATE_KEY_PEM", "pem"):
             self.assertEqual(watcher.test_cloudkit([]), 1)
+
+    def test_dry_run_refuses_a_writing_test_mode(self):
+        from unittest.mock import patch
+        with patch.object(watcher, "test_cloudkit") as probe, \
+             patch.object(watcher.sys, "argv", ["watcher.py", "--test", "--dry-run"]):
+            with self.assertRaises(SystemExit) as error:
+                watcher.main()
+        self.assertEqual(error.exception.code, 2)
+        probe.assert_not_called()
 
 
 if __name__ == "__main__":
