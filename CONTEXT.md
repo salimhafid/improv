@@ -24,7 +24,10 @@ key-value storage that mirrors the user's own settings, and APNs.
   when App Store Connect showed 1.4 "Ready for Distribution"). Live version
   **1.5 (25)** was verified READY_FOR_DISTRIBUTION on 2026-09-08. The project
   is now **MARKETING_VERSION 1.6, CURRENT_PROJECT_VERSION 26** for the core
-  class categories and alert defaults update; release verification is pending.
+  class categories and alert defaults update. Its signed archive and upload
+  succeeded on 2026-09-08 at 21:42 UTC; App Store Connect reports build 26
+  VALID (build ID `da247794-2bbd-4ca6-92f5-c3fbf7dd4574`).
+  Version 1.6 has not been submitted for App Store review.
 - Accounts: none of ours. The app offers an **optional UCB student sign-in**
   (ucbcomedy.com, inside a web view) for reserving free student tickets — see
   "UCB session engine" below and PRIVACY.md.
@@ -360,7 +363,7 @@ The workflow exposes separate checks using the existing Actions secrets:
 | Mode | Action | What success establishes |
 |---|---|---|
 | `diagnose` | Read-only school/category record queries and a best-effort subscription count for the server key's owner. No records, subscriptions, or state are written. | Server authentication and query support; counts do not describe every app user. |
-| `probe-subscription` | Creates and deletes uniquely named temporary subscriptions for each shipped query shape: school-only, school plus scalar category (legacy UCB), and school plus list-category membership (current UCB). All use `school == __improv_diagnostic__`. Validates the returned notification title, body, arguments, and sound. Creates no class records and sends no pushes. Development may learn the templates. | All supported app versions' query shapes and notification settings can be registered in each environment; cleanup must also succeed. |
+| `probe-subscription` | Creates and deletes uniquely named temporary subscriptions for each shipped query shape: school-only, school plus scalar category (legacy UCB), and school plus list-category membership (current UCB/BCC). All use `school == __improv_diagnostic__`. Validates the returned notification title, body, arguments, and sound. Creates no class records and sends no pushes. Development may learn the templates. | All supported app versions' query shapes and notification settings can be registered in each environment; cleanup must also succeed. |
 | `probe-subscription-matrix` | Runs the same temporary, impossible-school probes with both filter orders and all-zone/default-zone scopes. Creates no class records. | Diagnoses server sensitivity to query representation; does not prove which representation a native client sends. |
 | `test-push-owner` | Sends one real production push using a temporary subscription and matching `ClassAlert` for a UUID-specific diagnostic school. Existing school-specific subscriptions cannot match it. Both temporary objects are cleaned up. The CLI requires `--send`; selecting this workflow mode invokes it explicitly. | CloudKit accepted the test and cleanup completed. Only the server key owner's registered app devices are targeted; the person must confirm receipt. |
 | `cleanup-owner-test` | Removes only the diagnostic UUID record named by the `diagnostic_record` workflow input, using `forceDelete`. Rejects normal alert names and creates nothing. | A leftover diagnostic record is removed or already absent; no new push is sent. |
@@ -503,6 +506,17 @@ matches real subscribers.
   `/courses/improv-301-i301/?event=40741`). Do not regress to catalog search
   links or guess a slug from the class title. Missing IDs fail the source so
   aggregation retains last-good data rather than publishing a broad Register link.
+- **1.6 verification (2026-09-08)**: 254 Python tests and the full Swift logic
+  harness passed, including 51 alert-preference assertions. Simulator and
+  signed device archive builds succeeded; the simulator showed separate
+  UCB NY core groups (39 improv / 10 sketch) and BCC groups (13 / 3).
+  All 149 UCB session URLs were verified published on the raw CDN. CI
+  `34281987112` passed. CloudKit probe `34282010355` retained full title/body
+  settings for all existing query shapes in both environments; no new query
+  shape or schema promotion was needed. Watcher chain `34282087188` runs
+  `92908d4`; its first scan saved at 21:42:52 UTC (NY 67 / LA 66 / Online 16,
+  pending/deferred 0). Device receipt was previously confirmed; this release
+  does not claim a newly detected natural class push was observed.
 - **UCB session engine** (`UCBSession`): UCB has no API and sits behind
   Cloudflare Turnstile + JA3 binding, so ONE permanent off-screen `WKWebView`
   over a named `WKWebsiteDataStore` (fixed UUID) is both the login surface's

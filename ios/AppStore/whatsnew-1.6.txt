@@ -1,0 +1,1 @@
+UCB and BCC classes now have separate Improv Core and Sketch Core categories. Newly enabled class alerts include every category except core, with core courses available to opt into. BCC now supports category-specific alerts. UCB registration links open the exact class session instead of the overall catalog.
