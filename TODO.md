@@ -95,6 +95,17 @@ to main; app 1.5 build 25 submitted for review, WAITING_FOR_REVIEW).
       writes every alert to both CloudKit environments. Verify once that an
       App Store build actually receives a production alert (nothing in the
       repo proves it).
+- [ ] **UCB production subscription recovery (2026-09-08)**: record writes and
+      exact school/category queries succeeded, but creating the UCB query
+      subscription failed in production with `BAD_REQUEST: attempting to
+      create a subscription in a production container`; development accepted
+      and removed the probe. **Schema deployed; production subscription gate
+      verified repaired** by probe run `34274880391` at 20:27 UTC. Remaining:
+      foreground the signed app to reconcile and confirm actual device receipt
+      (an owner-only test is available as `mode=test-push-owner`). Field indexes
+      alone did not establish subscription readiness. Evidence and diagnostic
+      modes are in CONTEXT.md's production UCB failure runbook. Device receipt
+      remains unverified.
 
 ## Open items left by the 2026-09-07 fix pass
 

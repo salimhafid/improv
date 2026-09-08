@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "chain | ucb | all | both | test | diagnose (read-only) | probe-subscription (temporary, no push)"
+        description: "chain | ucb | all | both | test | diagnose (read-only) | probe-subscription (no push) | test-push-owner (real push to key owner only)"
         default: "chain"
 
 # One chain at a time. A second dispatch queues rather than cancels, and
@@ -120,6 +120,10 @@ jobs:
               python tools/probe_class_alert_subscriptions.py
               exit $?
               ;;
+            test-push-owner)
+              python tools/test_class_alert_push.py --send
+              exit $?
+              ;;
             test)
               python watcher.py --test
               exit $?
@@ -136,7 +140,7 @@ jobs:
               exit $rc
               ;;
             *)
-              echo "::error::unknown mode '$MODE' (chain | ucb | all | both | test | diagnose | probe-subscription)"
+              echo "::error::unknown mode '$MODE' (chain | ucb | all | both | test | diagnose | probe-subscription | test-push-owner)"
               exit 1
               ;;
           esac

@@ -327,6 +327,45 @@ class SendAlertsRetryTests(unittest.TestCase):
         self.assertEqual(calls, ["development", "production"])
         self.assertEqual(unsent, [])
 
+    def test_large_backlog_and_fresh_alerts_use_bounded_environment_batches(self):
+        parked = [dict(_alert(cid=str(i)), envs=["production"]) for i in range(201)]
+        batches = []
+
+        def responder(env, names):
+            batches.append((env, len(names)))
+            self.assertLessEqual(len(names), 200)
+            return self._accepted(env, names)
+
+        unsent, _ = self._run(parked + [_alert(cid="fresh")], responder)
+        self.assertEqual(unsent, [])
+        self.assertEqual(batches, [("development", 1), ("production", 200), ("production", 2)],
+                         "accepted environments are not resent; fresh alerts still reach both")
+
+    def test_failed_batch_does_not_block_later_batches_or_retry_their_successes(self):
+        parked = [dict(_alert(cid=str(i)), envs=["production"]) for i in range(201)]
+
+        def responder(env, names):
+            if env == "production" and len(names) == 200:
+                raise TimeoutError("batch request timed out")
+            return self._accepted(env, names)
+
+        unsent, calls = self._run(parked + [_alert(cid="fresh")], responder)
+        self.assertEqual(calls, ["development", "production", "production"])
+        self.assertEqual(unsent, parked[:200], "only the failed production batch stays pending")
+        unsent, calls = self._run(unsent, self._accepted)
+        self.assertEqual(calls, ["production"])
+        self.assertEqual(unsent, [])
+
+    def test_partial_batch_failure_preserves_only_its_unacknowledged_item(self):
+        parked = [dict(_alert(cid=str(i)), envs=["production"]) for i in range(201)]
+
+        def responder(env, names):
+            return self._accepted(env, names[:-1] if len(names) == 200 else names)
+
+        unsent, calls = self._run(parked, responder)
+        self.assertEqual(calls, ["production", "production"])
+        self.assertEqual(unsent, [parked[199]])
+
 
 class MainAtLeastOnceTests(unittest.TestCase):
     """main() with the scans and CloudKit patched: state is written after the
@@ -398,6 +437,39 @@ class MainAtLeastOnceTests(unittest.TestCase):
         self.assertEqual(state["ucb_ny"]["ids"], ["1", "2"])
         self.assertEqual(state[watcher.PENDING_KEY][0]["classIDs"], "2")
         self.assertEqual(state[watcher.PENDING_KEY][0]["envs"], ["development", "production"])
+
+    def test_more_than_fifty_failed_alerts_remain_pending_and_all_retry(self):
+        parked = [dict(_alert(cid=str(i)), envs=["production"]) for i in range(51)]
+        watcher.save_state({"ucb_ny": {"ids": [str(i) for i in range(51)]},
+                            watcher.PENDING_KEY: parked})
+        scanned = {"ucb_ny": dict(_ucb(f"Class {i}", ["improv"], str(i)) for i in range(52))}
+        with self.assertLogs("ucb.watcher", level="WARNING") as logs:
+            rc, sent, state = self._main(scanned,
+                                         lambda alerts: [dict(a, envs=["production"]) for a in alerts])
+        self.assertEqual(rc, 1)
+        self.assertEqual([a["classIDs"] for a in sent], [str(i) for i in range(52)])
+        self.assertEqual(state[watcher.PENDING_KEY], parked + [dict(sent[-1], envs=["production"])])
+        self.assertTrue(any("retaining all 52" in line for line in logs.output))
+
+        rc, sent, state = self._main(scanned, lambda alerts: [])
+        self.assertEqual(rc, 0)
+        self.assertEqual([a["classIDs"] for a in sent], [str(i) for i in range(52)])
+        self.assertNotIn(watcher.PENDING_KEY, state)
+
+    def test_large_deferred_environment_backlog_survives_repeated_runs(self):
+        from unittest.mock import patch
+        parked = [dict(_alert(cid=str(i)), envs=["production"]) for i in range(51)]
+        watcher.save_state({watcher.PENDING_KEY: parked})
+        send = watcher.send_alerts
+        with patch.object(watcher, "ENVIRONMENTS", ["development"]), \
+             patch.object(watcher.urllib.request, "urlopen") as request:
+            for _ in range(2):
+                with self.assertLogs("ucb.watcher", level="WARNING"):
+                    rc, sent, state = self._main({}, send)
+                self.assertEqual(rc, 1)
+                self.assertEqual(sent, parked)
+                self.assertEqual(state[watcher.PENDING_KEY], parked)
+            request.assert_not_called()
 
     def test_dry_run_does_not_send_advance_state_or_consume_pending(self):
         initial = {"ucb_ny": {"ids": ["1"], "updated": "before"},

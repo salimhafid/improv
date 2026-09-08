@@ -59,7 +59,8 @@ PRIVATE_KEY_PEM = os.environ.get("CLOUDKIT_PRIVATE_KEY", "")
 ENVIRONMENTS = [e.strip() for e in os.environ.get("CLOUDKIT_ENVS", "development,production").split(",")
                 if e.strip()]
 PENDING_KEY = "_pending_alerts"   # state slot for alerts CloudKit hasn't accepted yet
-_MAX_PENDING = 50                 # bound the state file if an env stays broken
+_PENDING_WARN_THRESHOLD = 50      # warn about backlog; never discard undelivered alerts
+_MAX_CLOUDKIT_OPERATIONS = 200    # CloudKit Web Services limit per request
 
 
 def _key_id(env: str) -> str:
@@ -301,72 +302,77 @@ def send_alerts(alerts: list[dict]) -> list[dict]:
             unsent[i] = deferred
             log.warning("keeping alert pending for unconfigured environment(s): %s", ",".join(deferred))
     for env in environments:
-        targets = [(i, a) for i, a in enumerate(alerts) if env in (a.get("envs") or environments)]
-        if not targets:
+        env_targets = [(i, a) for i, a in enumerate(alerts) if env in (a.get("envs") or environments)]
+        if not env_targets:
             continue
         if not _key_id(env) or not PRIVATE_KEY_PEM:
-            log.error("%s: CloudKit credentials missing; keeping %d alert(s) pending", env, len(targets))
-            for i, _ in targets:
+            log.error("%s: CloudKit credentials missing; keeping %d alert(s) pending", env, len(env_targets))
+            for i, _ in env_targets:
                 unsent.setdefault(i, []).append(env)
             continue
         subpath = f"/database/1/{CONTAINER}/{env}/public/records/modify"
-        names = {f"alert-{batch}-{a['school']}-{a['category']}-{uuid.uuid4().hex[:8]}": i
-                 for i, a in targets}
-        operations = [{
-            "operationType": "create",
-            "record": {
-                "recordType": "ClassAlert",
-                "recordName": name,
-                "fields": {
-                    "school": {"value": a["school"], "type": "STRING"},
-                    "category": {"value": a["category"], "type": "STRING"},
-                    "categories": {"value": a["categories"], "type": "STRING_LIST"},
-                    "count": {"value": a["count"], "type": "INT64"},
-                    "pushTitle": {"value": a["pushTitle"], "type": "STRING"},
-                    "pushBody": {"value": a["pushBody"], "type": "STRING"},
-                    "classIDs": {"value": a["classIDs"], "type": "STRING"},
+        # A long outage can leave more alerts than CloudKit accepts in one
+        # request. Drain bounded batches, preserving failures per environment
+        # without blocking the later batches (including newly found classes).
+        for start in range(0, len(env_targets), _MAX_CLOUDKIT_OPERATIONS):
+            targets = env_targets[start:start + _MAX_CLOUDKIT_OPERATIONS]
+            names = {f"alert-{batch}-{a['school']}-{a['category']}-{uuid.uuid4().hex[:8]}": i
+                     for i, a in targets}
+            operations = [{
+                "operationType": "create",
+                "record": {
+                    "recordType": "ClassAlert",
+                    "recordName": name,
+                    "fields": {
+                        "school": {"value": a["school"], "type": "STRING"},
+                        "category": {"value": a["category"], "type": "STRING"},
+                        "categories": {"value": a["categories"], "type": "STRING_LIST"},
+                        "count": {"value": a["count"], "type": "INT64"},
+                        "pushTitle": {"value": a["pushTitle"], "type": "STRING"},
+                        "pushBody": {"value": a["pushBody"], "type": "STRING"},
+                        "classIDs": {"value": a["classIDs"], "type": "STRING"},
+                    },
                 },
-            },
-        } for name, (i, a) in zip(names, targets)]
-        body = json.dumps({"operations": operations}).encode()
-        try:
-            # _sign is inside the try: a malformed key must not raise out of
-            # main() before the remaining environments (and state) are handled.
-            req = urllib.request.Request(
-                "https://api.apple-cloudkit.com" + subpath, data=body,
-                headers=_sign(subpath, body, env), method="POST")
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                result = json.load(resp)
-            records = result.get("records") if isinstance(result, dict) else None
-            if not isinstance(records, list):
-                raise ValueError("CloudKit response has no records acknowledgement list")
-            # A 200 response is not an acknowledgement of every write. Match
-            # each requested name exactly once; omitted, malformed, duplicate,
-            # or failed entries remain pending instead of silently losing them.
-            accepted = 0
-            for name, i in names.items():
-                matches = [r for r in records if isinstance(r, dict) and r.get("recordName") == name]
-                if len(matches) != 1 or matches[0].get("serverErrorCode"):
-                    reason = (matches[0].get("serverErrorCode") if len(matches) == 1
-                              else "missing or duplicate record acknowledgement")
-                    log.warning("%s: record %s not accepted: %s", env, name, reason)
+            } for name, (i, a) in zip(names, targets)]
+            body = json.dumps({"operations": operations}).encode()
+            try:
+                # _sign is inside the try: a malformed key must not raise out of
+                # main() before the remaining environments (and state) are handled.
+                req = urllib.request.Request(
+                    "https://api.apple-cloudkit.com" + subpath, data=body,
+                    headers=_sign(subpath, body, env), method="POST")
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    result = json.load(resp)
+                records = result.get("records") if isinstance(result, dict) else None
+                if not isinstance(records, list):
+                    raise ValueError("CloudKit response has no records acknowledgement list")
+                # A 200 response is not an acknowledgement of every write. Match
+                # each requested name exactly once; omitted, malformed, duplicate,
+                # or failed entries remain pending instead of silently losing them.
+                accepted = 0
+                for name, i in names.items():
+                    matches = [r for r in records if isinstance(r, dict) and r.get("recordName") == name]
+                    if len(matches) != 1 or matches[0].get("serverErrorCode"):
+                        reason = (matches[0].get("serverErrorCode") if len(matches) == 1
+                                  else "missing or duplicate record acknowledgement")
+                        log.warning("%s: record %s not accepted: %s", env, name, reason)
+                        unsent.setdefault(i, []).append(env)
+                        continue
+                    accepted += 1
+                    a = alerts[i]
+                    log.info("%s: accepted %s school=%s categories=%s", env, name,
+                             a["school"], "+".join(a["categories"]))
+                log.info("%s: wrote %d alert record(s), %d unacknowledged or failed", env,
+                         accepted, len(targets) - accepted)
+            except urllib.error.HTTPError as e:
+                body = e.read().decode("utf-8", errors="replace")
+                log.error("%s: CloudKit HTTP %d: %s", env, e.code, body[:500])
+                for i, _ in targets:
                     unsent.setdefault(i, []).append(env)
-                    continue
-                accepted += 1
-                a = alerts[i]
-                log.info("%s: accepted %s school=%s categories=%s", env, name,
-                         a["school"], "+".join(a["categories"]))
-            log.info("%s: wrote %d alert record(s), %d unacknowledged or failed", env,
-                     accepted, len(targets) - accepted)
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            log.error("%s: CloudKit HTTP %d: %s", env, e.code, body[:500])
-            for i, _ in targets:
-                unsent.setdefault(i, []).append(env)
-        except Exception as e:  # noqa: BLE001
-            log.error("%s: CloudKit write failed: %r", env, e)
-            for i, _ in targets:
-                unsent.setdefault(i, []).append(env)
+            except Exception as e:  # noqa: BLE001
+                log.error("%s: CloudKit write failed: %r", env, e)
+                for i, _ in targets:
+                    unsent.setdefault(i, []).append(env)
     return [dict(alerts[i], envs=envs) for i, envs in sorted(unsent.items())]
 
 
@@ -519,8 +525,11 @@ def main() -> int:
     # file and retried next iteration (at-least-once).
     unsent = send_alerts(alerts)
     if unsent:
-        state[PENDING_KEY] = unsent[-_MAX_PENDING:]
+        state[PENDING_KEY] = unsent
         log.error("%d alert(s) not accepted by CloudKit; parked for retry", len(unsent))
+        if len(unsent) > _PENDING_WARN_THRESHOLD:
+            log.warning("alert backlog exceeds %d; retaining all %d undelivered alert(s)",
+                        _PENDING_WARN_THRESHOLD, len(unsent))
     save_state(state)
     return 1 if unsent or scan_failed else 0
 

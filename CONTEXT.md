@@ -175,8 +175,8 @@ failed on every recent run.
 
 Pushes "new class posted" notifications with no server of ours: a GitHub
 Actions job scans the class sources, and new classes become records in the
-app's **CloudKit public database**; each device's `CKQuerySubscription`s turn
-those into APNs pushes.
+app's **CloudKit public database**; each iCloud user's `CKQuerySubscription`s
+turn those into APNs pushes on their registered devices.
 
 - **The chain** (`class-watch.yml`, `workflow_dispatch` only, `mode=chain`
   by default): GitHub delays *scheduled* runs by hours on a quiet repo but a
@@ -186,7 +186,7 @@ those into APNs pushes.
   iteration runs `python watcher.py --ucb --all-if-stale 20`: UCB's Arlo
   catalog every iteration, every other school only when the newest non-UCB
   state stamp is > 20 h old (so roughly daily). Concurrency group
-  `class-watch-chain` for the chain; one-shot modes (`ucb|all|both|test`) get
+  `class-watch-chain` for the chain; one-shot modes (including diagnostics) get
   a per-run group so they are not cancelled by the chain's self-dispatch.
 - **Kickers** (`class-watch-kick-{1,2,3}.yml`, crons `4,24,44` / `11,31,51`
   / `17,37,57` past the hour): restart-only. `gh run list` — if no chain run
@@ -226,16 +226,31 @@ those into APNs pushes.
 - **Secrets** (repo Actions secrets, set 2026-08-15): `CLOUDKIT_KEY_ID`
   (development key), `CLOUDKIT_KEY_ID_PROD`, `CLOUDKIT_PRIVATE_KEY` (PEM).
   Keys come from CloudKit Console → server-to-server keys; rotate by
-  uploading a new public key there and replacing the secrets. Without
-  `CLOUDKIT_KEY_ID`/`CLOUDKIT_PRIVATE_KEY` the watcher runs in **dry-run**
-  mode and logs what it would send.
-- **At-least-once delivery**: `send_alerts` runs BEFORE `save_state`; any
-  alert an environment did not accept (HTTP/auth/network error, per-record
-  `serverErrorCode`, or a malformed key) is parked under
-  `state["_pending_alerts"]` (tagged with the envs still owed, capped at 50)
-  and retried first on the next iteration — only to the envs owed. `main()`
-  then exits **non-zero, which means "alerts parked for retry"**, not
-  "crashed": the workflow logs a `::warning` and still commits the state.
+  uploading a new public key there and replacing the secrets. Missing
+  credentials leave affected alerts pending and make the run fail; they
+  never imply a successful delivery. A production-only key can serve
+  production independently of the development key.
+- **Retry and acknowledgement rules**: `send_alerts` runs BEFORE
+  `save_state`. Every requested record name needs exactly one successful
+  acknowledgement; a 200 response with missing, duplicate, unrelated, or
+  failed record acknowledgements leaves the affected alerts pending.
+  Pending alerts carry the environments still owed and only retry there.
+  Temporarily removing an environment from `CLOUDKIT_ENVS` preserves its
+  pending obligations. Missing credentials and malformed keys also preserve
+  alerts. Accepted writes log the record name, school, and categories.
+  All unacknowledged alerts stay in `_pending_alerts`; a backlog over 50
+  warns instead of discarding older alerts. Writes use batches of at most
+  200 operations per environment, so a larger backlog can drain and one
+  failed batch does not block later batches. A failed UCB scan keeps its
+  school state while still allowing pending deliveries to retry. Pending
+  deliveries or a failed scan make `main()` exit nonzero; the chain warns
+  and still commits state. Delivery remains **at least once**: uncertain
+  responses or state-push failures can produce duplicate records/pushes.
+- **Preview**: `python watcher.py --ucb --dry-run` scans and prints proposed
+  alerts without CloudKit writes or state changes, including no baseline
+  write and no consumption of pending alerts. Supply `WATCH_STATE` to preview
+  against a copy of the real state; an unknown school baselines silently.
+  `--dry-run` cannot be combined with the writing `--test` mode.
 - `--test` writes and deletes a probe record in **development only**;
   `--test-prod` opts production in. `mode=test` in the workflow therefore
   tests development only.
@@ -244,6 +259,67 @@ those into APNs pushes.
   Actions usage policy lists that kind of use as prohibited. Whether it
   would ever be enforced against this repo is unknowable from here — if the
   workflow is ever disabled by GitHub, alerts stop and this is why.
+
+### Production UCB subscription failure — 2026-09-08
+
+The failure reproduced at **subscription creation**, after record delivery
+and query checks had succeeded. [Diagnostic run 34274103807](https://github.com/salimhafid/improv/actions/runs/34274103807)
+found UCB NY class IDs `42353` and `42333` in both CloudKit environments and
+successfully queried `school == ucb_ny AND categories CONTAINS improv`.
+[Subscription probe 34274450133](https://github.com/salimhafid/improv/actions/runs/34274450133)
+then created and removed the same query shape in development, but production
+rejected creation with `BAD_REQUEST: attempting to create a subscription in
+a production container`.
+
+**A working query index does not prove that production accepts the subscription
+type.** CloudKit's schema includes subscription types as well as record types
+and security roles ([Apple's schema definition](https://developer.apple.com/library/archive/documentation/DataManagement/Conceptual/CloudKitQuickStart/Glossary/Glossary.html)).
+Creating the development subscription establishes its template; promote that
+template with the development schema to production. Checking or deploying
+field indexes alone is not sufficient evidence that this step happened.
+CloudKit Console subsequently reported **Changes Deployed**. At
+`2026-09-08T20:27:24Z`, [probe run 34274880391](https://github.com/salimhafid/improv/actions/runs/34274880391)
+accepted and removed the exact UCB subscription in **both development and
+production**, verifying that the production subscription gate was repaired.
+Actual push receipt on the user's device remains unverified.
+
+The workflow exposes separate checks using the existing Actions secrets:
+
+| Mode | Action | What success establishes |
+|---|---|---|
+| `diagnose` | Read-only school/category record queries and a best-effort subscription count for the server key's owner. No records, subscriptions, or state are written. | Server authentication and query support; counts do not describe every app user. |
+| `probe-subscription` | Creates a uniquely named temporary subscription for `school == __improv_diagnostic__` plus `categories CONTAINS improv`, then deletes only that subscription. Creates no class records and sends no pushes. Development may learn the template. | The app's UCB query shape can be registered in each environment; cleanup must also succeed. |
+| `test-push-owner` | Sends one real production push using a temporary subscription and matching `ClassAlert` for a UUID-specific diagnostic school. Existing school-specific subscriptions cannot match it. Both temporary objects are cleaned up. The CLI requires `--send`; selecting this workflow mode invokes it explicitly. | CloudKit accepted the test and cleanup completed. Only the server key owner's registered app devices are targeted; the person must confirm receipt. |
+
+Dispatch against a ref containing these modes (use `main` after merge):
+
+```bash
+ALERTS_REF=codex/fix-class-alerts
+gh workflow run class-watch.yml --ref "$ALERTS_REF" -f mode=diagnose
+gh workflow run class-watch.yml --ref "$ALERTS_REF" -f mode=probe-subscription
+```
+
+Recovery sequence: inspect both runs; in CloudKit Console select
+`iCloud.com.salimhafid.UCBShows`, review the development-to-production schema
+deployment including the learned subscription template, and deploy it. Rerun
+`probe-subscription` and require production acceptance plus cleanup. A cleanup
+failure prints the exact temporary subscription ID to remove; do not delete
+the user's `alert/` subscriptions. If production still rejects the same shape,
+preserve the error and investigate the container instead of declaring recovery.
+
+Finally foreground the signed App Store/TestFlight app, open Class Alerts,
+confirm the intended school/categories and absence of a subscription error,
+and verify receipt on that device. The app reconciles on foreground; schema
+promotion alone does not register a user's previously failed subscriptions.
+The first two modes do not test APNs receipt or replay historical `ClassAlert`
+records; the subscriptions fire on record creation. For an explicitly requested
+test to the server key owner, use `mode=test-push-owner` (or
+`python tools/test_class_alert_push.py --send` with the proper credentials).
+It creates no real-school alert, changes no preferences or watcher state, and
+reports its generated cleanup IDs. A successful run still needs human receipt
+confirmation and does not prove another user's subscriptions are configured.
+Avoid inserting a normal UCB class record merely to test delivery, because it
+matches real subscribers.
 
 ## iOS app — what's beyond ios/README.md
 
