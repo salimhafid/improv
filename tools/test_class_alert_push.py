@@ -1,6 +1,7 @@
 """Send one production push to the server key owner's registered app devices.
 
-Requires --send. A unique diagnostic school confines the alert to a temporary
+Requires --send, or --cleanup-record to remove only a previous diagnostic
+record without another push. A unique diagnostic school confines the alert to a temporary
 subscription owned by that account; existing subscribers cannot match it.
 Uses the app's exact UCB predicate and localized notification payload. Does
 not change alert preferences, scan classes, or touch the watcher's state.
@@ -10,8 +11,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -19,33 +22,61 @@ from diagnose_class_alerts import query_body, watcher
 from probe_class_alert_subscriptions import modify
 
 
+def diagnostic_record_name(value: str) -> str:
+    if not re.fullmatch(r"improv-diagnostic-[0-9a-f]{32}", value):
+        raise ValueError("expected a locally generated improv-diagnostic-<32 lowercase hex digits> record name")
+    return value
+
+
 def modify_record(operation: str, record: dict) -> dict:
+    if operation not in {"create", "forceDelete"}:
+        raise ValueError("diagnostic records support only create and forceDelete")
+    if operation == "forceDelete":
+        # These UUIDs belong only to this tool. Unlike ordinary delete,
+        # forceDelete needs no recordChangeTag, including after a lost create
+        # response. Apple's delete request dictionary contains only recordName.
+        record = {"recordName": diagnostic_record_name(record["recordName"])}
     subpath = f"/database/1/{watcher.CONTAINER}/production/public/records/modify"
     body = json.dumps({"operations": [{"operationType": operation, "record": record}]}).encode()
     request = urllib.request.Request(
         "https://api.apple-cloudkit.com" + subpath, data=body,
         headers=watcher._sign(subpath, body, "production"), method="POST")
-    with urllib.request.urlopen(request, timeout=30) as response:
-        result = json.load(response)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            result = json.load(response)
+    except urllib.error.HTTPError as error:
+        details = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"CloudKit {operation} HTTP {error.code}: {details[:1000]}") from error
     records = result.get("records") if isinstance(result, dict) else None
     matches = [r for r in (records or []) if isinstance(r, dict)
                and r.get("recordName") == record["recordName"]]
     if len(matches) != 1:
         raise ValueError("CloudKit did not acknowledge the diagnostic record")
     error = matches[0].get("serverErrorCode")
-    if error and not (operation == "delete" and error in {"NOT_FOUND", "UNKNOWN_ITEM"}):
+    if error and not (operation == "forceDelete" and error in {"NOT_FOUND", "UNKNOWN_ITEM"}):
         raise ValueError(f"{error}: {matches[0].get('reason', '')}")
     return matches[0]
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--send", action="store_true", required=True,
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--send", action="store_true",
                         help="send one real push only to the production server key owner's devices")
-    parser.parse_args(argv)
+    action.add_argument("--cleanup-record", type=diagnostic_record_name, metavar="RECORD_NAME",
+                        help="delete a previous UUID diagnostic record without sending another push")
+    args = parser.parse_args(argv)
     if not watcher._key_id("production") or not watcher.PRIVATE_KEY_PEM:
         print("Production CloudKit credentials missing", file=sys.stderr)
         return 1
+    if args.cleanup_record:
+        try:
+            modify_record("forceDelete", {"recordName": args.cleanup_record})
+        except Exception as error:
+            print(f"Cleanup FAILED for {args.cleanup_record}: {error}", file=sys.stderr, flush=True)
+            return 1
+        print(f"Diagnostic record removed or already absent: {args.cleanup_record}. No push sent.", flush=True)
+        return 0
     unique = uuid.uuid4().hex
     subscription_id = "improv-diagnostic/" + unique
     record_name = "improv-diagnostic-" + unique
@@ -87,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         # locally generated IDs even when acceptance was ambiguous.
         if attempted_record:
             try:
-                modify_record("delete", {"recordType": "ClassAlert", "recordName": record_name})
+                modify_record("forceDelete", {"recordName": record_name})
                 print("Temporary record removed", flush=True)
             except Exception as error:
                 failed = True

@@ -83,7 +83,7 @@ class OwnerPushTests(unittest.TestCase):
         self.assertTrue(all(c.args[2] == "production" for c in self._sign.call_args_list))
         sub_create, record_create, record_delete, sub_delete = self.operations()
         self.assertEqual([op["operationType"] for op in self.operations()],
-                         ["create", "create", "delete", "delete"])
+                         ["create", "create", "forceDelete", "delete"])
         subscription = sub_create["subscription"]
         record = record_create["record"]
         filters = subscription["query"]["filterBy"]
@@ -104,7 +104,7 @@ class OwnerPushTests(unittest.TestCase):
         self.assertEqual(info["alertLocalizationKey"], "CA_BODY")
         self.assertEqual(info["alertLocalizationArgs"], ["pushBody"])
         self.assertEqual(record_delete["record"],
-                         {"recordType": "ClassAlert", "recordName": record["recordName"]})
+                         {"recordName": record["recordName"]})
         self.assertEqual(sub_delete["subscription"], {"subscriptionID": subscription["subscriptionID"]})
         self.assertTrue(subscription["subscriptionID"].startswith("improv-diagnostic/"))
         self.assertEqual(self.sleep.call_args_list, [call(10), call(45)])
@@ -196,7 +196,7 @@ class OwnerPushTests(unittest.TestCase):
     def test_record_cleanup_not_found_is_already_clean(self):
         def answer(request, **kwargs):
             op = _operation(request)
-            if "record" in op and op["operationType"] == "delete":
+            if "record" in op and op["operationType"] == "forceDelete":
                 return _response({"records": [{"recordName": op["record"]["recordName"],
                                                "serverErrorCode": "NOT_FOUND"}]})
             return self.acknowledge(request, **kwargs)
@@ -208,7 +208,7 @@ class OwnerPushTests(unittest.TestCase):
     def test_record_cleanup_failure_still_attempts_subscription_cleanup(self):
         def answer(request, **kwargs):
             op = _operation(request)
-            if "record" in op and op["operationType"] == "delete":
+            if "record" in op and op["operationType"] == "forceDelete":
                 raise urllib.error.URLError("record cleanup unavailable")
             return self.acknowledge(request, **kwargs)
 
@@ -218,6 +218,66 @@ class OwnerPushTests(unittest.TestCase):
         self.assertEqual(self.operations()[-1]["operationType"], "delete")
         self.assertIn("subscription", self.operations()[-1])
         self.assertIn(self.operations()[1]["record"]["recordName"], self.errors.getvalue())
+
+    def test_cleanup_only_force_deletes_named_diagnostic_without_creating_anything(self):
+        name = "improv-diagnostic-3b4a633a69bb4e3ea1d44464bfb81bf6"
+        self.urlopen.side_effect = self.acknowledge
+        with patch.object(owner.uuid, "uuid4") as unique:
+            self.assertEqual(self.run_main(["--cleanup-record", name]), 0)
+            unique.assert_not_called()
+        self.assertEqual(self.operations(), [{"operationType": "forceDelete", "record": {"recordName": name}}])
+        request = self.urlopen.call_args.args[0]
+        self.assertTrue(request.full_url.endswith("/production/public/records/modify"))
+        self.sleep.assert_not_called()
+        self.assertIn("No push sent", self.output.getvalue())
+
+    def test_cleanup_rejects_arbitrary_or_malformed_names_before_http(self):
+        valid = "improv-diagnostic-" + "a" * 32
+        for name in ("alert-20260907T215807Z-ucb_ny-improv-real", "improv-diagnostic/" + "a" * 32,
+                     "improv-diagnostic-" + "A" * 32, valid + "\n", valid + "extra", valid[:-1], ""):
+            with self.subTest(name=name), self.assertRaises(SystemExit) as error:
+                self.run_main(["--cleanup-record", name])
+            self.assertEqual(error.exception.code, 2)
+        self.urlopen.assert_not_called()
+        self._sign.assert_not_called()
+        self.sleep.assert_not_called()
+
+    def test_force_delete_helper_itself_refuses_non_diagnostic_records(self):
+        with self.assertRaises(ValueError):
+            owner.modify_record("forceDelete", {"recordName": "alert/v2/ucb_ny/improv"})
+        self.urlopen.assert_not_called()
+        self._sign.assert_not_called()
+
+    def test_send_and_cleanup_are_mutually_exclusive(self):
+        with self.assertRaises(SystemExit) as error:
+            self.run_main(["--send", "--cleanup-record", "improv-diagnostic-" + "a" * 32])
+        self.assertEqual(error.exception.code, 2)
+        self.urlopen.assert_not_called()
+
+    def test_cleanup_missing_credentials_does_not_write(self):
+        with patch.object(owner.watcher, "PRIVATE_KEY_PEM", ""):
+            self.assertEqual(self.run_main(["--cleanup-record", "improv-diagnostic-" + "a" * 32]), 1)
+        self.urlopen.assert_not_called()
+        self.sleep.assert_not_called()
+
+    def test_cleanup_http_400_reports_server_error_body(self):
+        def answer(request, **_):
+            raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {},
+                io.BytesIO(b'{"serverErrorCode":"BAD_REQUEST","reason":"recordChangeTag required"}'))
+
+        self.urlopen.side_effect = answer
+        self.assertEqual(self.run_main(["--cleanup-record", "improv-diagnostic-" + "a" * 32]), 1)
+        self.assertEqual(self.urlopen.call_count, 1)
+        self.assertIn("HTTP 400", self.errors.getvalue())
+        self.assertIn("BAD_REQUEST", self.errors.getvalue())
+        self.assertIn("recordChangeTag required", self.errors.getvalue())
+
+    def test_cleanup_rejects_missing_acknowledgment_without_creating_anything(self):
+        self.urlopen.side_effect = lambda request, **kwargs: _response({})
+        self.assertEqual(self.run_main(["--cleanup-record", "improv-diagnostic-" + "a" * 32]), 1)
+        self.assertEqual(self.urlopen.call_count, 1)
+        self.assertEqual(self.operations()[0]["operationType"], "forceDelete")
+        self.assertIn("did not acknowledge", self.errors.getvalue())
 
 
 if __name__ == "__main__":

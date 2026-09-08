@@ -290,11 +290,12 @@ The workflow exposes separate checks using the existing Actions secrets:
 | `diagnose` | Read-only school/category record queries and a best-effort subscription count for the server key's owner. No records, subscriptions, or state are written. | Server authentication and query support; counts do not describe every app user. |
 | `probe-subscription` | Creates a uniquely named temporary subscription for `school == __improv_diagnostic__` plus `categories CONTAINS improv`, then deletes only that subscription. Creates no class records and sends no pushes. Development may learn the template. | The app's UCB query shape can be registered in each environment; cleanup must also succeed. |
 | `test-push-owner` | Sends one real production push using a temporary subscription and matching `ClassAlert` for a UUID-specific diagnostic school. Existing school-specific subscriptions cannot match it. Both temporary objects are cleaned up. The CLI requires `--send`; selecting this workflow mode invokes it explicitly. | CloudKit accepted the test and cleanup completed. Only the server key owner's registered app devices are targeted; the person must confirm receipt. |
+| `cleanup-owner-test` | Removes only the diagnostic UUID record named by the `diagnostic_record` workflow input, using `forceDelete`. Rejects normal alert names and creates nothing. | A leftover diagnostic record is removed or already absent; no new push is sent. |
 
 Dispatch against a ref containing these modes (use `main` after merge):
 
 ```bash
-ALERTS_REF=codex/fix-class-alerts
+ALERTS_REF=main
 gh workflow run class-watch.yml --ref "$ALERTS_REF" -f mode=diagnose
 gh workflow run class-watch.yml --ref "$ALERTS_REF" -f mode=probe-subscription
 ```

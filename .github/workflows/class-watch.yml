@@ -12,8 +12,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "chain | ucb | all | both | test | diagnose (read-only) | probe-subscription (no push) | test-push-owner (real push to key owner only)"
+        description: "chain | ucb | all | both | test | diagnose | probe-subscription | test-push-owner | cleanup-owner-test"
         default: "chain"
+      diagnostic_record:
+        description: "Only for cleanup-owner-test: exact improv-diagnostic-<32 hex digits> record name"
+        default: ""
 
 # One chain at a time. A second dispatch queues rather than cancels, and
 # GitHub collapses extra pending runs to one — so a kicker firing while a
@@ -90,6 +93,7 @@ jobs:
           CLOUDKIT_KEY_ID_PROD: ${{ secrets.CLOUDKIT_KEY_ID_PROD }}
           CLOUDKIT_PRIVATE_KEY: ${{ secrets.CLOUDKIT_PRIVATE_KEY }}
           MODE: ${{ github.event.inputs.mode || 'chain' }}
+          DIAGNOSTIC_RECORD: ${{ github.event.inputs.diagnostic_record }}
         run: |
           set -u
           # Commit + push the state file. Our file is the newest truth (it was
@@ -124,6 +128,10 @@ jobs:
               python tools/test_class_alert_push.py --send
               exit $?
               ;;
+            cleanup-owner-test)
+              python tools/test_class_alert_push.py --cleanup-record "$DIAGNOSTIC_RECORD"
+              exit $?
+              ;;
             test)
               python watcher.py --test
               exit $?
@@ -140,7 +148,7 @@ jobs:
               exit $rc
               ;;
             *)
-              echo "::error::unknown mode '$MODE' (chain | ucb | all | both | test | diagnose | probe-subscription | test-push-owner)"
+              echo "::error::unknown mode '$MODE' (chain | ucb | all | both | test | diagnose | probe-subscription | test-push-owner | cleanup-owner-test)"
               exit 1
               ;;
           esac
