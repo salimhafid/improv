@@ -19,7 +19,7 @@ Live comedy in NYC, LA & CHI
 Primary: Entertainment. Secondary: Lifestyle (optional).
 
 ## Promotional text (170 chars max, editable without review)
-Live value (carried over onto 1.5):
+Live value (carried over onto 1.6):
 ```
 One app for every improv scene
 ```
@@ -97,6 +97,16 @@ improv,comedy,ucb,standup,sketch,shows,tonight,magnet,annoyance,theater,tickets,
 - All "None" except: **Profanity or Crude Humor → Infrequent/Mild** (comedy
   show titles/descriptions occasionally contain strong language). Result: 12+.
 
+## What's New — 1.6 (as submitted 2026-09-08)
+
+Exact submitted text: [whatsnew-1.6.txt](whatsnew-1.6.txt).
+
+UCB and BCC classes now have separate Improv Core and Sketch Core categories.
+Newly enabled class alerts include every category except core, with core
+courses available to opt into. BCC now supports category-specific alerts.
+UCB registration links open the exact class session instead of the overall
+catalog.
+
 ## What's New — 1.5 (as submitted 2026-09-07)
 ```
 • Apple Wallet: add your UCB student ID and reserved show tickets to Wallet, with the QR code and venue on the pass.
@@ -109,7 +119,14 @@ improv,comedy,ucb,standup,sketch,shows,tonight,magnet,annoyance,theater,tickets,
 ```
 (1.4 shipped with "Bug fixes".)
 
-## App Review notes (as set on 1.5 via `tools/asc_release.py review`)
+## App Review notes
+
+Version 1.6's exact submitted notes are in
+[review-notes-1.6.txt](review-notes-1.6.txt). They retain the following 1.5
+explanation and append instructions for the new category and alert controls.
+The inherited review contact was verified complete; `demoAccountRequired`
+remains false.
+
 ```
 Improv is a listings guide for live comedy theaters. All show/class data is
 publicly available information (titles, dates, venues, descriptions) that our
@@ -153,6 +170,16 @@ Chicago additions; refresh with the simulator recipe in CONTEXT.md
 before the next listing update.
 
 ## Build
+- Bundle ID: com.salimhafid.UCBShows · Version **1.6** · Build **26**.
+  Uploaded 2026-09-08 and verified VALID with no non-exempt encryption.
+  Submitted at **2026-09-08T21:48:26.855Z**; version and submission both
+  verified **WAITING_FOR_REVIEW**, with automatic release after approval.
+  Version ID: `a0beecd9-9a84-4748-a4c6-32e38dfcc2e0`.
+  Build ID: `da247794-2bbd-4ca6-92f5-c3fbf7dd4574`.
+  Review submission: `ed477148-5b78-43d4-a963-ada1ab0d0a95`.
+  Description, keywords, URLs, review contact and screenshots were inherited
+  from approved 1.5. All inherited screenshot assets verified COMPLETE
+  (6 APP_IPHONE_67, 4 APP_IPHONE_65, 3 APP_IPAD_PRO_3GEN_129).
 - Bundle ID: com.salimhafid.UCBShows · Version 1.5 · Build 25, uploaded and
   submitted for review 2026-09-07 — the first build with Wallet pass signing
   provisioned; build 24 (same day) lacks it (pbxproj `MARKETING_VERSION` /

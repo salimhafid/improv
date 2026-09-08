@@ -1,7 +1,7 @@
 # TODO.md — open items, watchlist, and likely next steps
 
-Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-09-07 (fixes merged
-to main; app 1.5 build 25 submitted for review, WAITING_FOR_REVIEW).
+Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-09-08 (fixes merged
+to main; app 1.5 is live and 1.6 build 26 is WAITING_FOR_REVIEW).
 
 ## Release
 
@@ -9,12 +9,15 @@ to main; app 1.5 build 25 submitted for review, WAITING_FOR_REVIEW).
       created, What's New + promo text set, App Review notes rewritten, build
       **25** (the first with Wallet pass signing; 24 hides Add to Wallet)
       attached, submitted (submission `bc15d605…`, WAITING_FOR_REVIEW).
-      Anything new after that must bump CURRENT_PROJECT_VERSION (both
-      configs) past 25.
-- [ ] **Watch the 1.5 review**: it was submitted without a demo UCB student
-      login (see below). If App Review asks for one under guideline 2.1,
-      reply in the Resolution Center with credentials rather than
-      resubmitting. Once approved, the train closes — 1.6 next.
+- [x] **1.5 approved** — verified READY_FOR_DISTRIBUTION on 2026-09-08;
+      that version train is closed.
+- [x] **Submit 1.6 (26)** — submitted 2026-09-08 at 21:48:26 UTC, with
+      release notes, review notes, inherited contact and screenshots verified.
+      Version and submission both report WAITING_FOR_REVIEW; release is
+      automatic after approval. Submission: `ed477148-5b78-43d4-a963-ada1ab0d0a95`.
+      New builds must bump CURRENT_PROJECT_VERSION (both configs) past 26.
+- [ ] **Watch the 1.6 review**. It preserves the optional UCB student-login
+      explanation and adds review steps for core categories and alert defaults.
 - [x] Support / Privacy URLs confirmed 2026-09-07: the live Support and
       Marketing URL is `https://mabbles.org/improv/` (a working landing page,
       deliberately kept — not the GitHub URL metadata.md used to list);

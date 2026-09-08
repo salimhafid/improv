@@ -1,0 +1,24 @@
+Improv is a listings guide for live comedy theaters. All show/class data is
+publicly available information (titles, dates, venues, descriptions) that our
+GitHub Actions workflow scrapes from the theaters' public calendars and
+publishes as static JSON files; the app downloads those files. The app sells
+nothing: "Get Tickets" / "Register" open each theater's own website in an
+in-app Safari view, and all purchases happen there.
+
+No account is required to use the app, and every core feature (shows,
+classes, saving, reminders, filters, search) works without signing in. An
+OPTIONAL sign-in to an existing UCB (Upright Citizens Brigade) account, on
+UCB's own web page inside the app, lets current UCB students reserve free
+student tickets and see their ticket QR codes (Tickets tab, and optionally
+Apple Wallet). Reservations are free; no payment is taken anywhere in the
+app. The reservation flow is only available to enrolled UCB students, so it
+requires a real UCB student account; the rest of the app is fully reviewable
+without one.
+
+Calendar access is write-only and only used when the user taps "Add to
+Calendar". Notifications: local reminders for saved shows/tickets, plus
+optional "new classes posted" alerts delivered as CloudKit push notifications
+the user opts into (Classes tab -> bell). The app uses no location services;
+a Wallet pass carries the theater's location so Wallet can surface it nearby.
+
+Version 1.6 adds separate Improv Core and Sketch Core groups for UCB and Brooklyn Comedy Collective. In Classes -> bell, newly enabled UCB/BCC schools select every non-core category; core categories remain optional. Existing selections are preserved and independent of sidebar filters. UCB Register links open the selected class session. Class alerts use iCloud and notification permission and arrive when a school posts new classes.

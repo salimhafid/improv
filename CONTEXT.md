@@ -27,7 +27,12 @@ key-value storage that mirrors the user's own settings, and APNs.
   class categories and alert defaults update. Its signed archive and upload
   succeeded on 2026-09-08 at 21:42 UTC; App Store Connect reports build 26
   VALID (build ID `da247794-2bbd-4ca6-92f5-c3fbf7dd4574`).
-  Version 1.6 has not been submitted for App Store review.
+  Version **1.6 (26)** was submitted on 2026-09-08 at 21:48:26 UTC and both
+  the version and review submission were verified **WAITING_FOR_REVIEW**.
+  Release is automatic after approval (`AFTER_APPROVAL`). Version ID:
+  `a0beecd9-9a84-4748-a4c6-32e38dfcc2e0`; submission ID:
+  `ed477148-5b78-43d4-a963-ada1ab0d0a95`. Release and reviewer notes are in
+  `ios/AppStore/whatsnew-1.6.txt` and `ios/AppStore/review-notes-1.6.txt`.
 - Accounts: none of ours. The app offers an **optional UCB student sign-in**
   (ucbcomedy.com, inside a web view) for reserving free student tickets — see
   "UCB session engine" below and PRIVACY.md.
