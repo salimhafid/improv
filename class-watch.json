@@ -37,7 +37,7 @@
    "annoyance/workshop-drop-in-improv-classes",
    "annoyance/workshop-improv-auditions-saturday-with-lauren-rivas"
   ],
-  "updated": "2026-09-11T05:48:20.705569+00:00"
+  "updated": "2026-09-12T01:54:00.274395+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -78,7 +78,7 @@
    "brooklyn_cc/stand-up-2-shalewa-aug-oct-26",
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-sep"
   ],
-  "updated": "2026-09-11T05:48:20.705569+00:00"
+  "updated": "2026-09-12T01:54:00.274395+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -123,16 +123,15 @@
    "io_chicago/summer-intensive-2027",
    "io_chicago/summer-one-week-intensive-august-2027",
    "io_chicago/summer-one-week-intensive-june-2027",
-   "io_chicago/teen-sketch-fall-2026",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-09-11T05:48:20.705569+00:00"
+  "updated": "2026-09-12T01:54:00.274395+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/clowning-fundamentals-with-ian-ornstein-668bf1f7-82ab-4e32-98a5-f1783368a920"
   ],
-  "updated": "2026-09-11T05:48:20.705569+00:00"
+  "updated": "2026-09-12T01:54:00.274395+00:00"
  },
  "magnet": {
   "ids": [
@@ -187,7 +186,7 @@
    "magnet/12044",
    "magnet/12045"
   ],
-  "updated": "2026-09-11T05:48:20.705569+00:00"
+  "updated": "2026-09-12T01:54:00.274395+00:00"
  },
  "second_city": {
   "ids": [
@@ -241,7 +240,7 @@
    "second_city/46307",
    "second_city/46338"
   ],
-  "updated": "2026-09-11T05:48:20.705569+00:00"
+  "updated": "2026-09-12T01:54:00.274395+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -314,7 +313,7 @@
    "42483",
    "42492"
   ],
-  "updated": "2026-09-12T01:43:51.263407+00:00"
+  "updated": "2026-09-12T01:53:53.326936+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -382,7 +381,7 @@
    "42439",
    "42449"
   ],
-  "updated": "2026-09-12T01:43:51.263407+00:00"
+  "updated": "2026-09-12T01:53:53.326936+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -402,7 +401,7 @@
    "42305",
    "42459"
   ],
-  "updated": "2026-09-12T01:43:51.263407+00:00"
+  "updated": "2026-09-12T01:53:53.326936+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -444,12 +443,12 @@
    "wgis_la/1855",
    "wgis_la/1858"
   ],
-  "updated": "2026-09-11T05:48:20.705569+00:00"
+  "updated": "2026-09-12T01:54:00.274395+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-09-11T05:48:20.705569+00:00"
+  "updated": "2026-09-12T01:54:00.274395+00:00"
  }
 }
