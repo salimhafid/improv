@@ -33,6 +33,8 @@ key-value storage that mirrors the user's own settings, and APNs.
   `a0beecd9-9a84-4748-a4c6-32e38dfcc2e0`; submission ID:
   `ed477148-5b78-43d4-a963-ada1ab0d0a95`. Release and reviewer notes are in
   `ios/AppStore/whatsnew-1.6.txt` and `ios/AppStore/review-notes-1.6.txt`.
+  On 2026-09-17, version **1.6** was verified **READY_FOR_DISTRIBUTION**.
+  Notification-delivery settings diagnostics added afterward are unreleased.
 - Accounts: none of ours. The app offers an **optional UCB student sign-in**
   (ucbcomedy.com, inside a web view) for reserving free student tickets — see
   "UCB session engine" below and PRIVACY.md.
@@ -272,6 +274,33 @@ turn those into APNs pushes on their registered devices.
   Actions usage policy lists that kind of use as prohibited. Whether it
   would ever be enforced against this repo is unknowable from here — if the
   workflow is ever disabled by GitHub, alerts stop and this is why.
+
+### Class pushes present in Notification Center but no banner — 2026-09-17
+
+The user reports this with Improv backgrounded or the phone locked. Receipt
+in Notification Center confirms a notification reached iOS; it does not prove
+an interrupting banner was shown. Subscriptions already request visible
+title/body plus default sound, and `NotificationRouter.willPresent` returns
+`[.banner, .list, .sound]` for foreground delivery. There is no passive/silent
+configuration in the current class-alert path. The device's exact suppressing
+setting and successful physical-device banner display remain unverified.
+
+Previously the app read only `authorizationStatus`, which could look healthy
+even with banners disabled or Scheduled Summary enabled. The unreleased
+`NotificationDeliveryStatus` model and Class Alerts delivery section now show
+denied/provisional permission, disabled banners/Lock Screen, and Scheduled
+Summary separately, with a direct notification-settings link. Settings refresh
+when opening the sheet, granting permission and foregrounding the app. These
+are device-local diagnostics, not synced preferences or guarantees of display.
+Focus and temporary notification muting can still silence permitted banners.
+Validation: 254 Python tests, the full Swift logic harness (including 26 new
+delivery-settings assertions), and the Xcode 27 iOS simulator build passed.
+
+For the installed app, check **Settings → Notifications → Improv → Banners,
+Lock Screen, Immediate Delivery**, and allow Improv through any active Focus.
+The app cannot change these iOS choices. Validate an actual background banner
+on the phone after checking them; server writes and simulator builds do not
+establish that result.
 
 ### Production UCB subscription failure — 2026-09-08
 

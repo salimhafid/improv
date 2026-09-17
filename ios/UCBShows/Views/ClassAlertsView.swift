@@ -24,18 +24,6 @@ struct ClassAlertsView: View {
                     .tint(Theme.accent)
                 } footer: {
                     VStack(alignment: .leading, spacing: 8) {
-                        // A green switch and silence is the worst outcome: say
-                        // what's wrong and hand over a way to fix it.
-                        if alerts.authorizationDenied {
-                            Text("Notifications are turned off for Improv, so class alerts can’t reach you.")
-                                .foregroundStyle(.red)
-                            Button("Open Settings") {
-                                if let url = URL(string: UIApplication.openSettingsURLString) {
-                                    UIApplication.shared.open(url)
-                                }
-                            }
-                            .font(.footnote)
-                        }
                         // Only while alerts are on: a failed switch-off
                         // retries on its own, and a red line under an Off
                         // switch reads as a problem the user can't act on.
@@ -47,6 +35,30 @@ struct ClassAlertsView: View {
                                 Text(alerts.syncIssue).foregroundStyle(.red)
                             }
                         }
+                    }
+                }
+
+                if alerts.prefs.master {
+                    Section {
+                        if let delivery = alerts.deliveryStatus {
+                            ForEach(delivery.issues) { issue in
+                                Label(issue.message, systemImage: "exclamationmark.bubble")
+                                    .font(.subheadline)
+                            }
+                            if delivery.issues.isEmpty {
+                                Text("Banners and Lock Screen alerts are enabled.")
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        } else {
+                            ProgressView("Checking notification settings…")
+                        }
+                        Button("Open Notification Settings") {
+                            openNotificationSettings()
+                        }
+                    } header: {
+                        Text("Notification Delivery")
+                    } footer: {
+                        Text("To see class alerts as they arrive, enable Banners and Immediate Delivery in Settings. If you use a Focus, allow notifications from Improv in that Focus.")
                     }
                 }
 
@@ -200,14 +212,19 @@ private struct DeniedNotificationsAlert: ViewModifier {
     func body(content: Content) -> some View {
         content.alert("Turn On Notifications", isPresented: $alerts.deniedPromptVisible) {
             Button("Open Settings") {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
-                }
+                openNotificationSettings()
             }
             Button("Not Now", role: .cancel) {}
         } message: {
             Text("Notifications are turned off for Improv, so class alerts can\u{2019}t reach you. Turn them on in Settings and your picks here will start arriving.")
         }
+    }
+}
+
+/// Open the actual notification controls, rather than the app's generic page.
+private func openNotificationSettings() {
+    if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+        UIApplication.shared.open(url)
     }
 }
 

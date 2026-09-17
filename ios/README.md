@@ -205,3 +205,11 @@ logic, `DateUtils`, `SearchText`, `ReminderPlan`, `Ticket`, `Venue`…) with
 `tests/ios/LogicTests.swift` into a command-line binary and runs its asserts —
 no Xcode test target, no simulator. UIKit/WebKit/CloudKit-dependent files are
 not covered there; they are verified by the app build.
+
+`NotificationDeliveryTests.swift` checks the device-settings status policy:
+permission/provisional warnings, disabled banners and Lock Screen alerts,
+Scheduled Summary, and clearing restrictions after a fresh settings snapshot.
+Class Alerts reads these settings on launch/foreground and links directly to
+iOS notification settings. This diagnoses presentation restrictions; only an
+observed notification on a physical device verifies a push actually appeared
+as a banner, since Focus or temporary muting can still suppress it.

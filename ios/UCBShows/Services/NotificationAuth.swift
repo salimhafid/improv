@@ -20,6 +20,28 @@ enum NotificationAuth {
         await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
+    /// Permission alone does not mean a notification can interrupt: iOS can
+    /// allow Notification Center while disabling banners or delaying delivery.
+    /// These settings are device-local, so read them again after Settings closes.
+    static func deliveryStatus() async -> NotificationDeliveryStatus {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let authorization: NotificationDeliveryStatus.Authorization
+        switch settings.authorizationStatus {
+        case .notDetermined: authorization = .notDetermined
+        case .denied: authorization = .denied
+        case .provisional: authorization = .provisional
+        case .authorized, .ephemeral: authorization = .allowed
+        @unknown default: authorization = .notDetermined
+        }
+        return NotificationDeliveryStatus(
+            authorization: authorization,
+            alertsEnabled: settings.alertSetting == .enabled,
+            bannersEnabled: settings.alertStyle != .none,
+            lockScreenEnabled: settings.lockScreenSetting == .enabled,
+            scheduledDelivery: settings.scheduledDeliverySetting == .enabled
+        )
+    }
+
     /// Prompts if the user has never been asked; reports whether the app may
     /// post notifications now.
     @discardableResult

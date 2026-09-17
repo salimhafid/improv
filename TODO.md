@@ -1,7 +1,7 @@
 # TODO.md — open items, watchlist, and likely next steps
 
-Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-09-08 (fixes merged
-to main; app 1.5 is live and 1.6 build 26 is WAITING_FOR_REVIEW).
+Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-09-17 (app 1.6 is
+READY_FOR_DISTRIBUTION; notification-delivery diagnostics are unreleased).
 
 ## Release
 
@@ -16,8 +16,12 @@ to main; app 1.5 is live and 1.6 build 26 is WAITING_FOR_REVIEW).
       Version and submission both report WAITING_FOR_REVIEW; release is
       automatic after approval. Submission: `ed477148-5b78-43d4-a963-ada1ab0d0a95`.
       New builds must bump CURRENT_PROJECT_VERSION (both configs) past 26.
-- [ ] **Watch the 1.6 review**. It preserves the optional UCB student-login
-      explanation and adds review steps for core categories and alert defaults.
+- [x] **1.6 approved** — verified READY_FOR_DISTRIBUTION on 2026-09-17.
+- [ ] **Verify physical-device class banners**. Pushes arrive in Notification
+      Center, but the user reports no banner while backgrounded/locked. Check
+      Banners, Lock Screen, Immediate Delivery and Focus on the phone, then
+      observe actual delivery. New app diagnostics expose restricted settings
+      and link directly to notification settings; they are not yet released.
 - [x] Support / Privacy URLs confirmed 2026-09-07: the live Support and
       Marketing URL is `https://mabbles.org/improv/` (a working landing page,
       deliberately kept — not the GitHub URL metadata.md used to list);

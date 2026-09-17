@@ -37,6 +37,9 @@ final class ClassAlertsStore {
     /// The user turned notifications off for the app, so alerts are switched on
     /// and going nowhere. Surfaced in the sheet with a route to Settings.
     private(set) var authorizationDenied = false
+    /// What this device actually permits, independently of iCloud preferences
+    /// and successful push registration. Nil until the first settings read.
+    private(set) var deliveryStatus: NotificationDeliveryStatus?
     /// Raised when the user switches something on while notifications are
     /// denied. The footer states the condition, but a switch that flips green
     /// and can never deliver needs saying at the moment of the tap — and the
@@ -91,7 +94,10 @@ final class ClassAlertsStore {
                 guard let self, self.prefs.master else { return }
                 self.authorizationDenied = false
                 UIApplication.shared.registerForRemoteNotifications()
-                Task { await self.syncSubscriptions() }
+                Task {
+                    await self.refreshDeliveryStatus()
+                    await self.syncSubscriptions()
+                }
             }
         }
         NotificationCenter.default.addObserver(
@@ -217,10 +223,16 @@ final class ClassAlertsStore {
     /// footer covers that case.
     @discardableResult
     private func promptIfAlreadyDenied() async -> Bool {
-        guard await NotificationAuth.status() == .denied else { return false }
-        authorizationDenied = true
+        await refreshDeliveryStatus()
+        guard authorizationDenied else { return false }
         deniedPromptVisible = true
         return true
+    }
+
+    private func refreshDeliveryStatus() async {
+        let status = await NotificationAuth.deliveryStatus()
+        deliveryStatus = status
+        authorizationDenied = prefs.master && status.authorization == .denied
     }
 
     /// Prompt, then register — the toggle is the notifiable moment. Honors the
@@ -228,7 +240,7 @@ final class ClassAlertsStore {
     /// switch has to stop claiming otherwise.
     private func requestPushAuthorization() async {
         let granted = await NotificationAuth.ensure()
-        authorizationDenied = !granted
+        await refreshDeliveryStatus()
         guard granted else { return }
         // APNs registration is specific to class alerts: these arrive as
         // CloudKit pushes, unlike the on-device ticket/show reminders.
@@ -244,6 +256,7 @@ final class ClassAlertsStore {
     /// and nothing here used to run. Apple also documents registering on every
     /// launch, because the device token rotates.
     func armOnLaunch() async {
+        await refreshDeliveryStatus()
         guard prefs.master else {
             // Off can still owe a reconcile: a switch-off that failed offline
             // left every subscription live, and with master Off nothing else
@@ -253,14 +266,14 @@ final class ClassAlertsStore {
             }
             return
         }
-        switch await NotificationAuth.status() {
+        switch deliveryStatus?.authorization {
         case .denied:
             authorizationDenied = true
-        case .notDetermined:
+        case .notDetermined, nil:
             // Not our moment to ask — `armIfNeeded` handles it when the user
             // opens the sheet.
             break
-        default:
+        case .allowed, .provisional:
             authorizationDenied = false
             UIApplication.shared.registerForRemoteNotifications()
             // Idempotent (it diffs against CloudKit's own list), and the only

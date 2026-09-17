@@ -583,6 +583,7 @@ struct LogicTests {
     static func main() async {
         testClassCurriculum()
         runClassAlertPreferenceTests()
+        runNotificationDeliveryTests()
         testSubjectGroups()
         testSubjectClassification()
         testClassScope()
