@@ -38,7 +38,7 @@
    "annoyance/workshop-drop-in-improv-classes",
    "annoyance/workshop-improv-auditions-saturday-with-lauren-rivas"
   ],
-  "updated": "2026-09-17T02:28:35.466320+00:00"
+  "updated": "2026-09-17T22:34:29.256966+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -50,6 +50,7 @@
    "brooklyn_cc/clown-2-chris-manley-oct-dec-2026",
    "brooklyn_cc/clown-2-chris-manley-oct-dec-2026-thurs",
    "brooklyn_cc/clown-3-tallie-oct-dec-2026",
+   "brooklyn_cc/clown-town-level-up",
    "brooklyn_cc/crafting-characters-nick-mestad-0oct-dec-2026",
    "brooklyn_cc/drop-in-anya-september-26th",
    "brooklyn_cc/drop-in-september-19th",
@@ -67,7 +68,6 @@
    "brooklyn_cc/improv-4-andy-junk-oct-dec-2026-sunday",
    "brooklyn_cc/improv-level-2-miranda-rozas-oct-dec-2026",
    "brooklyn_cc/improv-level-3-colin-oct-dec-2026",
-   "brooklyn_cc/marrying-game-and-deal-sept-oct-26",
    "brooklyn_cc/musical-improv-1-oct-dec-2026",
    "brooklyn_cc/musical-improv-2-oct-dec-2026",
    "brooklyn_cc/musical-improv-3-oct-dec-2026",
@@ -83,7 +83,7 @@
    "brooklyn_cc/stand-up-2-shalewa-oct-dec-2026",
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-sep"
   ],
-  "updated": "2026-09-17T02:28:35.466320+00:00"
+  "updated": "2026-09-17T22:34:29.256966+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -121,6 +121,7 @@
    "io_chicago/music-improv-3-m-wednesday-from-7-10pm-2733f8e6-fa08-435c-8fd0-2cf8121fd517",
    "io_chicago/music-improv-drop-in",
    "io_chicago/music-improv-one-week-spring-intensive-march-2027",
+   "io_chicago/music-improv-one-week-summer-intensive-august-2027",
    "io_chicago/music-improv-one-week-summer-intensive-june-2027",
    "io_chicago/new-year-one-week-intensive-2027",
    "io_chicago/solo-character-weekend-intensive-january-9th-10th",
@@ -131,17 +132,16 @@
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-09-17T02:28:35.466320+00:00"
+  "updated": "2026-09-17T22:34:29.256966+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/clowning-fundamentals-with-ian-ornstein-668bf1f7-82ab-4e32-98a5-f1783368a920"
   ],
-  "updated": "2026-09-17T02:28:35.466320+00:00"
+  "updated": "2026-09-17T22:34:29.256966+00:00"
  },
  "magnet": {
   "ids": [
-   "magnet/11986",
    "magnet/11989",
    "magnet/11990",
    "magnet/11991",
@@ -194,7 +194,7 @@
    "magnet/12048",
    "magnet/12049"
   ],
-  "updated": "2026-09-17T02:28:35.466320+00:00"
+  "updated": "2026-09-17T22:34:29.256966+00:00"
  },
  "second_city": {
   "ids": [
@@ -258,9 +258,10 @@
    "second_city/46372",
    "second_city/46373",
    "second_city/46384",
-   "second_city/46386"
+   "second_city/46386",
+   "second_city/46437"
   ],
-  "updated": "2026-09-17T02:28:35.466320+00:00"
+  "updated": "2026-09-17T22:34:29.256966+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -326,7 +327,7 @@
    "42514",
    "42590"
   ],
-  "updated": "2026-09-17T22:24:07.785325+00:00"
+  "updated": "2026-09-17T22:34:09.786183+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -390,7 +391,7 @@
    "42449",
    "42589"
   ],
-  "updated": "2026-09-17T22:24:07.785325+00:00"
+  "updated": "2026-09-17T22:34:09.786183+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -410,7 +411,7 @@
    "42305",
    "42459"
   ],
-  "updated": "2026-09-17T22:24:07.785325+00:00"
+  "updated": "2026-09-17T22:34:09.786183+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -449,14 +450,15 @@
    "wgis_la/1851",
    "wgis_la/1855",
    "wgis_la/1858",
-   "wgis_la/1861"
+   "wgis_la/1861",
+   "wgis_la/1862"
   ],
-  "updated": "2026-09-17T02:28:35.466320+00:00"
+  "updated": "2026-09-17T22:34:29.256966+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-09-17T02:28:35.466320+00:00"
+  "updated": "2026-09-17T22:34:29.256966+00:00"
  }
 }
