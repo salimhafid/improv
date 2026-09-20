@@ -180,7 +180,7 @@ class UcbClassesTests(unittest.TestCase):
         self.assertEqual(by_id["ucb_ny/2"]["description"], "Learn the Harold.")
         self.assertEqual(by_id["ucb_ny/1"]["level"], "Improv")
         url = fj.call_args[0][0]
-        self.assertNotIn("Location", url)   # never read; dropped from fields/expand
+        self.assertIn("Location", url)   # routes published sessions before LOC tags are assigned
         self.assertIn("ViewUri", url)
 
     def test_registration_targets_exact_sessions_in_the_same_course(self):

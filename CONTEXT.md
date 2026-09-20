@@ -52,7 +52,7 @@ GitHub Actions cron (.github/workflows/scrape.yml, "23 * * * *" — hourly)
     60-day-inactivity auto-disable)
 
 Class-alert watcher (.github/workflows/class-watch.yml + 3 kicker crons)
-  → watcher.py scans class sources every ~10 min, writes CloudKit `ClassAlert`
+  → watcher.py scans UCB every ~2 min (other schools daily), writes CloudKit `ClassAlert`
     records; devices receive them as pushes via their CKQuerySubscriptions.
     State on the orphan branch `class-watch-state`. (Section below.)
 
@@ -188,14 +188,18 @@ turn those into APNs pushes on their registered devices.
 
 - **The chain** (`class-watch.yml`, `workflow_dispatch` only, `mode=chain`
   by default): GitHub delays *scheduled* runs by hours on a quiet repo but a
-  running job keeps its clock, so one job loops "scan, commit state, sleep
-  600 s" for `CHAIN_BUDGET_MIN=330` minutes (job `timeout-minutes: 355`) and
+  running job keeps its clock, so one job loops "scan, commit state, wait
+  until 120 s since iteration start" for `CHAIN_BUDGET_MIN=330` minutes
+  (job `timeout-minutes: 355`) and
   then, `if: always()`, dispatches its own successor (3 attempts). Each
-  iteration runs `python watcher.py --ucb --all-if-stale 20`: UCB's Arlo
+  iteration runs `python watcher.py --ucb` first, delivering and persisting
+  UCB alerts before `python watcher.py --all-if-stale 20`: UCB's Arlo
   catalog every iteration, every other school only when the newest non-UCB
   state stamp is > 20 h old (so roughly daily). Concurrency group
   `class-watch-chain` for the chain; one-shot modes (including diagnostics) get
   a per-run group so they are not cancelled by the chain's self-dispatch.
+  Two minutes is a target, not a guarantee: daily scans, source outages and
+  runner handoffs can extend a gap; overrunning iterations log a warning.
 - **Kickers** (`class-watch-kick-{1,2,3}.yml`, crons `4,24,44` / `11,31,51`
   / `17,37,57` past the hour): restart-only. `gh run list` — if no chain run
   is in progress/queued, `gh workflow run class-watch.yml -f mode=chain`;
@@ -206,11 +210,12 @@ turn those into APNs pushes on their registered devices.
   at it; the bare default `state/class-watch.json` is for local runs).
   `{ "<school>": {"ids": [...], "updated": iso}, "_pending_alerts": [...] }`.
   Committed after every iteration by `class-watch-bot` (rebase-on-top on a
-  rejected push) — ~144 commits/day on that branch. If the state checkout
+  rejected push) — up to ~720 commits/day on that branch. If the state checkout
   fails, the job baselines from scratch ONLY when `git ls-remote` positively
   reports no such branch (exit 2); any other failure aborts, because an empty
   state would silently baseline every school and then overwrite the real one.
-- **Scan → diff**: `scan_ucb()` = one Arlo pull split by `LOC_*` tag into
+- **Scan → diff**: `scan_ucb()` = one Arlo pull split by `LOC_*` tag, or the
+  public `Location` when no location tag exists, into
   `ucb_ny / ucb_la / ucb_online`, each noncore class tagged with EVERY matching
   `CTG_*`/`FRQ_*` category (`UCB_CATEGORY_TAGS`; first match = primary
   `category`); `scan_others()` = every non-UCB `CLASS_SOURCES` adapter (a
@@ -274,6 +279,36 @@ turn those into APNs pushes on their registered devices.
   Actions usage policy lists that kind of use as prohibited. Whether it
   would ever be enforced against this repo is unknowable from here — if the
   workflow is ever disabled by GitHub, alerts stop and this is why.
+
+### Elf Lyons detection timing and untagged sessions — 2026-09-20
+
+The user reports the September 30 Elf Lyons intensive (Arlo event `42589`,
+template `353`) was posted Thursday morning, September 17, and its alert was
+late/missed. The state branch has 147 distinct UCB NY scans that Thursday,
+with a maximum gap of 10m23s and no pending alert backlog. Event `42589`
+first entered the NY results at `2026-09-17T22:04:03.178Z` (6:04 p.m. EDT);
+production CloudKit accepted the alert at `22:04:04Z` in run `35268501345`.
+It was absent from NY at `21:54:01.383Z`. The October 14 session `42708`
+was a different addition, Friday at `22:30:49.853Z`.
+
+This rules out an hours-long watcher outage or pending CloudKit retry on
+Thursday. Historical snapshots contain matched IDs, not raw catalog entries,
+so they cannot distinguish an upstream publication delay from a class present
+without the required `LOC_*` tag. Current source inspection found a real
+example: Online Sketch 101 `41946` has `Location.Name=Online` and no tags,
+and the old adapter/watch both excluded it. UCB's website can render sessions
+using their public venue. Both paths now request/expand `Location` and share
+conservative venue routing when no location tag exists. Explicit unsupported
+city tags remain excluded; titles never guess a location. Logs record venue
+fallbacks, unassigned sessions, and newly detected IDs/titles/start dates.
+
+The watcher target was reduced from 10 minutes to 2 minutes, and UCB alerts
+are sent before slower non-UCB scans. Arlo's current `private,max-age=1800`
+response policy is not a local cache in our stateless HTTP client; a live
+cache-buster comparison returned the same data. No speculative cache-buster
+was added. Exact cause of the historical Elf Lyons delay, and physical-device
+delivery time after CloudKit acceptance, remain unverified. The separate app
+class feed still follows its daily publication cadence.
 
 ### Class pushes present in Notification Center but no banner — 2026-09-17
 

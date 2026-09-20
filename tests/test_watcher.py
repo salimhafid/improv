@@ -115,6 +115,30 @@ class CoreCategoryTests(unittest.TestCase):
 
 
 class CategoryScanTests(unittest.TestCase):
+    def test_public_venue_routes_a_new_class_before_city_tags_are_assigned(self):
+        events = [{"EventID": 42589, "Name": "Intensive: Elf Lyons - Animal Eyes",
+                   "StartDateTime": "2026-09-30T11:00:00-04:00",
+                   "Location": {"Name": "NY: 14th Street Campus", "City": "New York City"},
+                   "Tags": ["CTG_Clowning", "FRQ_Intensive"]},
+                  {"EventID": 41946, "Name": "ONLINE Sketch 101",
+                   "Location": {"Name": "Online"}}]
+        state = {school: {"ids": [], "updated": "2026-09-17T12:00:00+00:00"}
+                 for _, school in watcher.UCB_LOCATIONS}
+        with patch("sources.ucb_classes.raw_events", return_value=events):
+            scanned = watcher.scan_ucb()
+        alerts = watcher.diff_and_alert(scanned, state, per_category=True)
+        self.assertEqual({a["school"]: a["classIDs"] for a in alerts},
+                         {"ucb_ny": "42589", "ucb_online": "41946"})
+        self.assertEqual(next(a for a in alerts if a["school"] == "ucb_ny")["categories"],
+                         ["clowning", "intensives"])
+        self.assertEqual(next(a for a in alerts if a["school"] == "ucb_online")["categories"],
+                         ["sketch_core"])
+        # Tags added later must not cause a second alert for the same session.
+        events[0]["Tags"].append("LOC_NY")
+        events[1]["Tags"] = ["LOC_Online"]
+        with patch("sources.ucb_classes.raw_events", return_value=events):
+            self.assertEqual(watcher.diff_and_alert(watcher.scan_ucb(), state, per_category=True), [])
+
     def test_ucb_scan_applies_exclusive_core_and_reads_only_canonical_category_for_fallback(self):
         events = [
             {"EventID": 1, "Name": "ONLINE Improv 101", "Tags": ["LOC_Online", "CTG_Improv", "FRQ_Intensive"]},

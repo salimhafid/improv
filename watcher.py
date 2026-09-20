@@ -3,13 +3,14 @@ records that fan out as push notifications (via each device's
 CKQuerySubscriptions — see the app's ClassAlertsStore).
 
 Two modes, run by .github/workflows/class-watch.yml — a self-perpetuating
-job that loops "run, sleep 10 min" for ~5.5 h and then dispatches its own
+job that scans UCB roughly every 2 min for ~5.5 h and then dispatches its own
 successor, because GitHub delays *scheduled* runs by hours but not running
 ones. Three staggered odd-minute crons (class-watch-kick-*.yml) only restart
 the chain if it has died.
 
   --ucb    every iteration: one Arlo catalog pull, split into
-           ucb_ny / ucb_la / ucb_online by LOC_* tag, categorized by CTG_* tag.
+           ucb_ny / ucb_la / ucb_online by LOC_* tag or public venue when the
+           location tag is missing, categorized by CTG_* tag.
            New classes are bundled per (school, category set) — a record lists
            every category its classes carry, and a device's subscription
            matches on any one of them.
@@ -189,18 +190,19 @@ def _category(tags: list[str]) -> str:
 def scan_ucb() -> dict[str, dict[str, dict]]:
     """Arlo catalog → {school: {class_id: {title, when, categories}}}."""
     from common import clean
-    from sources.ucb_classes import raw_events
+    from sources.ucb_classes import event_location_tags, raw_events
 
     out: dict[str, dict[str, dict]] = {s: {} for _, s in UCB_LOCATIONS}
     for ev in raw_events():
         tags = ev.get("Tags") or []
+        locations = event_location_tags(ev)
         title = clean(ev.get("Name"))
         if not title or not ev.get("EventID"):
             continue
         canonical = next((clean(c.get("Name")) for c in (ev.get("Categories") or [])
                           if isinstance(c, dict)), "")
         for tag, school in UCB_LOCATIONS:
-            if tag in tags:
+            if tag in locations:
                 when = (ev.get("StartDateTime") or "")[:10]
                 out[school][str(ev.get("EventID"))] = {
                     "title": title, "when": when,
@@ -237,7 +239,7 @@ def scan_others() -> dict[str, dict[str, dict]]:
 
 def others_stale(state: dict, hours: float) -> bool:
     """True when the non-UCB schools haven't been scanned within `hours` — or
-    never have. Lets a job that runs every 10 minutes keep the other schools on
+    never have. Lets a job that runs every 2 minutes keep the other schools on
     a daily cadence without a second workflow racing it for the state branch."""
     stamps = [v.get("updated") for k, v in state.items()
               if not k.startswith("ucb") and isinstance(v, dict)]
@@ -288,6 +290,9 @@ def diff_and_alert(scanned: dict[str, dict[str, dict]], state: dict, per_categor
         new = [meta | {"id": cid} for cid, meta in current.items() if cid not in known]
         if not new:
             continue
+        for item in new:
+            log.info("detected school=%s class_id=%s start=%s title=%r",
+                     school, item["id"], item.get("when", ""), item["title"])
         groups: dict[tuple[str, ...], list[dict]] = {}
         categorized = per_category or school == "brooklyn_cc"
         for item in new:

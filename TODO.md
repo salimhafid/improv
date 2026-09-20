@@ -87,11 +87,17 @@ READY_FOR_DISTRIBUTION; notification-delivery diagnostics are unreleased).
       and re-dispatches itself ~24 h/day is a serverless cron, which GitHub's
       Actions usage policy lists as prohibited. Never enforced so far; if the
       workflow is ever disabled, alerts stop. A real host (or accepting a
-      slower scheduled cadence) is the fallback plan. Related: ~144
+      slower scheduled cadence) is the fallback plan. Related: up to ~720
       `class-watch-state` commits/day because `updated` is rewritten every
       scan (it doubles as the `--all-if-stale` stamp — a second "last scanned"
       stamp would let it commit only on id changes); a one-shot `ucb|all|both`
       dispatched while a chain is live runs concurrently and can double-alert.
+- [x] **UCB location-tag blind spot** — public sessions without a `LOC_*` tag
+      now use their venue metadata in the feed and watcher. Live event `41946`
+      demonstrated the old exclusion. UCB's polling target is now two minutes,
+      and its alerts are sent before the daily non-UCB crawl. Elf Lyons `42589`
+      was detected and accepted by CloudKit Thursday at 6:04 p.m. EDT; preserved
+      data cannot prove why the reported morning listing wasn't detected then.
 - [ ] ASC screenshots predate the Second City / Logan Square / Playground
       additions, the Classes redesign (school folders) and the **Tickets** tab
       (no set has a wallet shot), and the iPad shot still shows the retired

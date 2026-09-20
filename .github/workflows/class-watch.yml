@@ -1,10 +1,10 @@
 name: Class alert watcher
 
-# The watcher runs as a self-perpetuating chain: one job loops "scan, sleep
-# 10 min" for ~5.5 h (under the 6 h job cap), then dispatches its own
+# The watcher runs as a self-perpetuating chain: one job scans every
+# 2 min for ~5.5 h (under the 6 h job cap), then dispatches its own
 # successor. GitHub delays *scheduled* runs by hours on a quiet repo, but a
 # running job keeps its clock — so this is the only way to get a real
-# 10-minute cadence out of Actions alone. Three staggered odd-minute crons
+# 2-minute target cadence out of Actions alone. Three staggered odd-minute crons
 # (class-watch-kick-*.yml) restart the chain if it ever dies; they never run
 # the scan themselves. New classes become CloudKit ClassAlert records, which
 # fan out as pushes to every device whose in-app alert toggles subscribe.
@@ -35,7 +35,7 @@ env:
   # Loop budget. 330 min of iterations + setup + the final dispatch stays
   # comfortably inside the 355-minute job timeout below.
   CHAIN_BUDGET_MIN: "330"
-  ITERATION_SLEEP_SEC: "600"
+  ITERATION_SLEEP_SEC: "120"
   ALL_IF_STALE_HOURS: "20"
 
 jobs:
@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Known-class state lives on its own branch so 10-minute commits never
+      # Known-class state lives on its own branch so frequent scan commits never
       # touch main's history.
       - uses: actions/checkout@v4
         id: state
@@ -166,14 +166,26 @@ jobs:
           n=0
           while [ $(( SECONDS - START )) -lt "$BUDGET" ]; do
             n=$(( n + 1 ))
+            ITERATION_START=$SECONDS
             echo "::group::iteration $n ($(date -u +%H:%M:%SZ), $(( (SECONDS - START) / 60 )) min in)"
-            python watcher.py --ucb --all-if-stale "$ALL_IF_STALE_HOURS" \
+            # Deliver UCB alerts before any slower, daily non-UCB crawl.
+            # Each invocation saves state, so the second sees acknowledgements
+            # and only retries alerts that CloudKit did not accept.
+            python watcher.py --ucb \
               || echo "::warning::watcher failed on iteration $n (exit $?)"
+            python watcher.py --all-if-stale "$ALL_IF_STALE_HOURS" \
+              || echo "::warning::non-UCB watcher failed on iteration $n (exit $?)"
             commit_state || echo "::warning::state commit failed on iteration $n"
             echo "::endgroup::"
+            # Start-to-start target; don't add two minutes after scrape time.
+            REMAINING=$(( ITERATION_SLEEP_SEC - (SECONDS - ITERATION_START) ))
+            if [ "$REMAINING" -lt 1 ]; then
+              echo "::warning::iteration exceeded ${ITERATION_SLEEP_SEC}s target"
+              REMAINING=1
+            fi
             # Don't sleep into the timeout: stop if the next scan wouldn't fit.
-            if [ $(( SECONDS - START + ITERATION_SLEEP_SEC + 120 )) -ge "$BUDGET" ]; then break; fi
-            sleep "$ITERATION_SLEEP_SEC"
+            if [ $(( SECONDS - START + REMAINING + 120 )) -ge "$BUDGET" ]; then break; fi
+            sleep "$REMAINING"
           done
           echo "chain complete after $n iteration(s), $(( (SECONDS - START) / 60 )) min"
 
