@@ -35,10 +35,9 @@
    "annoyance/mi1-thursdays-with-tbd",
    "annoyance/standup-sundays-with-st-james-jackson",
    "annoyance/voice-for-improv-acting-saturdays-with-seth-k-lowery",
-   "annoyance/workshop-drop-in-improv-classes",
-   "annoyance/workshop-improv-auditions-saturday-with-lauren-rivas"
+   "annoyance/workshop-drop-in-improv-classes"
   ],
-  "updated": "2026-09-19T14:45:30.573437+00:00"
+  "updated": "2026-09-20T10:50:42.663992+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -83,7 +82,7 @@
    "brooklyn_cc/stand-up-2-shalewa-oct-dec-2026",
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-sep"
   ],
-  "updated": "2026-09-19T14:45:30.573437+00:00"
+  "updated": "2026-09-20T10:50:42.663992+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -133,7 +132,7 @@
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-09-19T14:45:30.573437+00:00"
+  "updated": "2026-09-20T10:50:42.663992+00:00"
  },
  "logan_square": {
   "ids": [
@@ -177,7 +176,6 @@
    "magnet/12025",
    "magnet/12026",
    "magnet/12027",
-   "magnet/12028",
    "magnet/12029",
    "magnet/12032",
    "magnet/12033",
@@ -188,6 +186,7 @@
    "magnet/12039",
    "magnet/12040",
    "magnet/12041",
+   "magnet/12042",
    "magnet/12044",
    "magnet/12045",
    "magnet/12046",
@@ -195,7 +194,7 @@
    "magnet/12048",
    "magnet/12049"
   ],
-  "updated": "2026-09-19T14:45:30.573437+00:00"
+  "updated": "2026-09-20T10:50:42.663992+00:00"
  },
  "second_city": {
   "ids": [
@@ -265,7 +264,7 @@
    "second_city/46386",
    "second_city/46437"
   ],
-  "updated": "2026-09-19T14:45:30.573437+00:00"
+  "updated": "2026-09-20T10:50:42.663992+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -334,7 +333,7 @@
    "42760",
    "42770"
   ],
-  "updated": "2026-09-20T10:40:28.136503+00:00"
+  "updated": "2026-09-20T10:50:29.861967+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -397,7 +396,7 @@
    "42708",
    "42721"
   ],
-  "updated": "2026-09-20T10:40:28.136503+00:00"
+  "updated": "2026-09-20T10:50:29.861967+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -417,7 +416,7 @@
    "42305",
    "42459"
   ],
-  "updated": "2026-09-20T10:40:28.136503+00:00"
+  "updated": "2026-09-20T10:50:29.861967+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -437,10 +436,10 @@
    "wgis_la/1817",
    "wgis_la/1818",
    "wgis_la/1820",
-   "wgis_la/1823",
    "wgis_la/1824",
    "wgis_la/1825",
    "wgis_la/1826",
+   "wgis_la/1827",
    "wgis_la/1832",
    "wgis_la/1833",
    "wgis_la/1834",
@@ -459,12 +458,12 @@
    "wgis_la/1861",
    "wgis_la/1862"
   ],
-  "updated": "2026-09-19T14:45:30.573437+00:00"
+  "updated": "2026-09-20T10:50:42.663992+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-09-19T14:45:30.573437+00:00"
+  "updated": "2026-09-20T10:50:42.663992+00:00"
  }
 }
