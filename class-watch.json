@@ -37,11 +37,12 @@
    "annoyance/voice-for-improv-acting-saturdays-with-seth-k-lowery",
    "annoyance/workshop-drop-in-improv-classes"
   ],
-  "updated": "2026-09-20T10:50:42.663992+00:00"
+  "updated": "2026-09-21T06:51:13.980503+00:00"
  },
  "brooklyn_cc": {
   "ids": [
    "brooklyn_cc/anya-clownpworkshop-oct-dec-2026",
+   "brooklyn_cc/broken-box-mime-nov-dec",
    "brooklyn_cc/clown-1-hannah-oct-dec-2026",
    "brooklyn_cc/clown-1-hannah-oct-dec-2026-thurs",
    "brooklyn_cc/clown-1-jeff-seal-oct-dec-2026",
@@ -52,7 +53,8 @@
    "brooklyn_cc/clown-town-level-up",
    "brooklyn_cc/crafting-characters-nick-mestad-0oct-dec-2026",
    "brooklyn_cc/drop-in-anya-september-26th",
-   "brooklyn_cc/drop-in-september-19th",
+   "brooklyn_cc/drop-in-october-24th",
+   "brooklyn_cc/drop-in-october-3rd",
    "brooklyn_cc/improv-1-kenny-oct-dec-2026",
    "brooklyn_cc/improv-1-molly-oct-dec-26-mon",
    "brooklyn_cc/improv-1-molly-oct-dec-26-sunday",
@@ -65,6 +67,8 @@
    "brooklyn_cc/improv-3-tej-khanna-oct-dec-2026-sunday",
    "brooklyn_cc/improv-4-andy-junk-oct-dec-2026",
    "brooklyn_cc/improv-4-andy-junk-oct-dec-2026-sunday",
+   "brooklyn_cc/improv-drop-in-andy-bcc-october-10th",
+   "brooklyn_cc/improv-drop-in-andy-bcc-october-17th",
    "brooklyn_cc/improv-level-2-miranda-rozas-oct-dec-2026",
    "brooklyn_cc/improv-level-3-colin-oct-dec-2026",
    "brooklyn_cc/musical-improv-1-oct-dec-2026",
@@ -82,7 +86,7 @@
    "brooklyn_cc/stand-up-2-shalewa-oct-dec-2026",
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-sep"
   ],
-  "updated": "2026-09-20T10:50:42.663992+00:00"
+  "updated": "2026-09-21T06:51:13.980503+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -132,7 +136,7 @@
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-09-20T10:50:42.663992+00:00"
+  "updated": "2026-09-21T06:51:13.980503+00:00"
  },
  "logan_square": {
   "ids": [
@@ -176,6 +180,7 @@
    "magnet/12025",
    "magnet/12026",
    "magnet/12027",
+   "magnet/12028",
    "magnet/12029",
    "magnet/12032",
    "magnet/12033",
@@ -194,7 +199,7 @@
    "magnet/12048",
    "magnet/12049"
   ],
-  "updated": "2026-09-20T10:50:42.663992+00:00"
+  "updated": "2026-09-21T06:51:13.980503+00:00"
  },
  "second_city": {
   "ids": [
@@ -228,7 +233,6 @@
    "second_city/46275",
    "second_city/46281",
    "second_city/46284",
-   "second_city/46290",
    "second_city/46300",
    "second_city/46301",
    "second_city/46302",
@@ -264,7 +268,7 @@
    "second_city/46386",
    "second_city/46437"
   ],
-  "updated": "2026-09-20T10:50:42.663992+00:00"
+  "updated": "2026-09-21T06:51:13.980503+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -334,7 +338,7 @@
    "42760",
    "42770"
   ],
-  "updated": "2026-09-21T06:49:03.599916+00:00"
+  "updated": "2026-09-21T06:51:04.623993+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -406,7 +410,7 @@
    "42795",
    "42805"
   ],
-  "updated": "2026-09-21T06:49:03.599916+00:00"
+  "updated": "2026-09-21T06:51:04.623993+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -429,7 +433,7 @@
    "42676",
    "42686"
   ],
-  "updated": "2026-09-21T06:49:03.599916+00:00"
+  "updated": "2026-09-21T06:51:04.623993+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -440,7 +444,6 @@
    "wgis_la/1806",
    "wgis_la/1807",
    "wgis_la/1808",
-   "wgis_la/1809",
    "wgis_la/1810",
    "wgis_la/1812",
    "wgis_la/1813",
@@ -453,10 +456,10 @@
    "wgis_la/1825",
    "wgis_la/1826",
    "wgis_la/1827",
-   "wgis_la/1832",
    "wgis_la/1833",
    "wgis_la/1834",
    "wgis_la/1835",
+   "wgis_la/1836",
    "wgis_la/1840",
    "wgis_la/1842",
    "wgis_la/1845",
@@ -471,12 +474,12 @@
    "wgis_la/1861",
    "wgis_la/1862"
   ],
-  "updated": "2026-09-20T10:50:42.663992+00:00"
+  "updated": "2026-09-21T06:51:13.980503+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-09-20T10:50:42.663992+00:00"
+  "updated": "2026-09-21T06:51:13.980503+00:00"
  }
 }
