@@ -37,7 +37,7 @@
    "annoyance/voice-for-improv-acting-saturdays-with-seth-k-lowery",
    "annoyance/workshop-drop-in-improv-classes"
   ],
-  "updated": "2026-09-22T02:52:34.463618+00:00"
+  "updated": "2026-09-22T22:53:43.887366+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -88,7 +88,7 @@
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-sep",
    "brooklyn_cc/tony-stop-fighting-improv"
   ],
-  "updated": "2026-09-22T02:52:34.463618+00:00"
+  "updated": "2026-09-22T22:53:43.887366+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -138,7 +138,7 @@
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-09-22T02:52:34.463618+00:00"
+  "updated": "2026-09-22T22:53:43.887366+00:00"
  },
  "logan_square": {
   "ids": [
@@ -157,6 +157,7 @@
    "magnet/11998",
    "magnet/11999",
    "magnet/12000",
+   "magnet/12002",
    "magnet/12003",
    "magnet/12004",
    "magnet/12005",
@@ -202,7 +203,7 @@
    "magnet/12049",
    "magnet/12050"
   ],
-  "updated": "2026-09-22T02:52:34.463618+00:00"
+  "updated": "2026-09-22T22:53:43.887366+00:00"
  },
  "second_city": {
   "ids": [
@@ -274,9 +275,10 @@
    "second_city/46382",
    "second_city/46384",
    "second_city/46386",
-   "second_city/46437"
+   "second_city/46437",
+   "second_city/46530"
   ],
-  "updated": "2026-09-22T02:52:34.463618+00:00"
+  "updated": "2026-09-22T22:53:43.887366+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -345,7 +347,7 @@
    "42760",
    "42770"
   ],
-  "updated": "2026-09-22T22:51:29.714852+00:00"
+  "updated": "2026-09-22T22:53:29.682570+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -415,7 +417,7 @@
    "42795",
    "42805"
   ],
-  "updated": "2026-09-22T22:51:29.714852+00:00"
+  "updated": "2026-09-22T22:53:29.682570+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -438,7 +440,7 @@
    "42676",
    "42686"
   ],
-  "updated": "2026-09-22T22:51:29.714852+00:00"
+  "updated": "2026-09-22T22:53:29.682570+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -479,12 +481,12 @@
    "wgis_la/1861",
    "wgis_la/1862"
   ],
-  "updated": "2026-09-22T02:52:34.463618+00:00"
+  "updated": "2026-09-22T22:53:43.887366+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-09-22T02:52:34.463618+00:00"
+  "updated": "2026-09-22T22:53:43.887366+00:00"
  }
 }
