@@ -37,7 +37,7 @@
    "annoyance/voice-for-improv-acting-saturdays-with-seth-k-lowery",
    "annoyance/workshop-drop-in-improv-classes"
   ],
-  "updated": "2026-09-22T22:53:43.887366+00:00"
+  "updated": "2026-09-23T18:54:57.792357+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -85,10 +85,11 @@
    "brooklyn_cc/stand-up-1-sara-oct-dec-2026-sunday",
    "brooklyn_cc/stand-up-2-joann-oct-dec-2026",
    "brooklyn_cc/stand-up-2-shalewa-oct-dec-2026",
+   "brooklyn_cc/start-with-nothing-natasha-vaynblat-oct",
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-sep",
    "brooklyn_cc/tony-stop-fighting-improv"
   ],
-  "updated": "2026-09-22T22:53:43.887366+00:00"
+  "updated": "2026-09-23T18:54:57.792357+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -138,7 +139,7 @@
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-09-22T22:53:43.887366+00:00"
+  "updated": "2026-09-23T18:54:57.792357+00:00"
  },
  "logan_square": {
   "ids": [
@@ -203,7 +204,7 @@
    "magnet/12049",
    "magnet/12050"
   ],
-  "updated": "2026-09-22T22:53:43.887366+00:00"
+  "updated": "2026-09-23T18:54:57.792357+00:00"
  },
  "second_city": {
   "ids": [
@@ -275,10 +276,50 @@
    "second_city/46382",
    "second_city/46384",
    "second_city/46386",
+   "second_city/46388",
+   "second_city/46389",
+   "second_city/46390",
+   "second_city/46391",
+   "second_city/46392",
+   "second_city/46393",
+   "second_city/46394",
+   "second_city/46395",
+   "second_city/46396",
+   "second_city/46398",
+   "second_city/46399",
+   "second_city/46400",
+   "second_city/46401",
+   "second_city/46402",
+   "second_city/46404",
+   "second_city/46405",
+   "second_city/46407",
+   "second_city/46409",
+   "second_city/46411",
    "second_city/46437",
+   "second_city/46448",
+   "second_city/46449",
+   "second_city/46450",
+   "second_city/46451",
+   "second_city/46452",
+   "second_city/46453",
+   "second_city/46454",
+   "second_city/46455",
+   "second_city/46456",
+   "second_city/46458",
+   "second_city/46459",
+   "second_city/46460",
+   "second_city/46461",
+   "second_city/46462",
+   "second_city/46464",
+   "second_city/46465",
+   "second_city/46466",
+   "second_city/46467",
+   "second_city/46468",
+   "second_city/46469",
+   "second_city/46470",
    "second_city/46530"
   ],
-  "updated": "2026-09-22T22:53:43.887366+00:00"
+  "updated": "2026-09-23T18:54:57.792357+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -345,7 +386,7 @@
    "42760",
    "42770"
   ],
-  "updated": "2026-09-23T18:52:49.184337+00:00"
+  "updated": "2026-09-23T18:54:49.194824+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -413,7 +454,7 @@
    "42795",
    "42805"
   ],
-  "updated": "2026-09-23T18:52:49.184337+00:00"
+  "updated": "2026-09-23T18:54:49.194824+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -435,7 +476,7 @@
    "42676",
    "42686"
   ],
-  "updated": "2026-09-23T18:52:49.184337+00:00"
+  "updated": "2026-09-23T18:54:49.194824+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -476,12 +517,12 @@
    "wgis_la/1861",
    "wgis_la/1862"
   ],
-  "updated": "2026-09-22T22:53:43.887366+00:00"
+  "updated": "2026-09-23T18:54:57.792357+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-09-22T22:53:43.887366+00:00"
+  "updated": "2026-09-23T18:54:57.792357+00:00"
  }
 }
