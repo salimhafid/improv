@@ -36,7 +36,7 @@
    "annoyance/standup-sundays-with-st-james-jackson",
    "annoyance/workshop-drop-in-improv-classes"
   ],
-  "updated": "2026-10-02T23:09:52.227908+00:00"
+  "updated": "2026-10-03T19:11:05.227807+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -88,7 +88,7 @@
    "brooklyn_cc/tony-stop-fighting-improv",
    "brooklyn_cc/use-your-dang-voice-noelle-cbjsg"
   ],
-  "updated": "2026-10-02T23:09:52.227908+00:00"
+  "updated": "2026-10-03T19:11:05.227807+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -138,7 +138,7 @@
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-10-02T23:09:52.227908+00:00"
+  "updated": "2026-10-03T19:11:05.227807+00:00"
  },
  "logan_square": {
   "ids": [
@@ -203,6 +203,7 @@
    "magnet/12048",
    "magnet/12049",
    "magnet/12050",
+   "magnet/12051",
    "magnet/12052",
    "magnet/12053",
    "magnet/12054",
@@ -210,7 +211,7 @@
    "magnet/12056",
    "magnet/12057"
   ],
-  "updated": "2026-10-02T23:09:52.227908+00:00"
+  "updated": "2026-10-03T19:11:05.227807+00:00"
  },
  "second_city": {
   "ids": [
@@ -313,13 +314,12 @@
    "second_city/46468",
    "second_city/46469",
    "second_city/46470",
-   "second_city/46530",
    "second_city/46532",
    "second_city/46534",
    "second_city/46542",
    "second_city/46543"
   ],
-  "updated": "2026-10-02T23:09:52.227908+00:00"
+  "updated": "2026-10-03T19:11:05.227807+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -385,7 +385,7 @@
    "43140",
    "43149"
   ],
-  "updated": "2026-10-03T19:08:56.877018+00:00"
+  "updated": "2026-10-03T19:10:55.835380+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -452,7 +452,7 @@
    "42919",
    "43038"
   ],
-  "updated": "2026-10-03T19:08:56.877018+00:00"
+  "updated": "2026-10-03T19:10:55.835380+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -472,7 +472,7 @@
    "42686",
    "42864"
   ],
-  "updated": "2026-10-03T19:08:56.877018+00:00"
+  "updated": "2026-10-03T19:10:55.835380+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -490,6 +490,7 @@
    "wgis_la/1826",
    "wgis_la/1827",
    "wgis_la/1828",
+   "wgis_la/1829",
    "wgis_la/1834",
    "wgis_la/1835",
    "wgis_la/1836",
@@ -508,12 +509,12 @@
    "wgis_la/1862",
    "wgis_la/1868"
   ],
-  "updated": "2026-10-02T23:09:52.227908+00:00"
+  "updated": "2026-10-03T19:11:05.227807+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-10-02T23:09:52.227908+00:00"
+  "updated": "2026-10-03T19:11:05.227807+00:00"
  }
 }
