@@ -36,7 +36,7 @@
    "annoyance/standup-sundays-with-st-james-jackson",
    "annoyance/workshop-drop-in-improv-classes"
   ],
-  "updated": "2026-10-03T19:11:05.227807+00:00"
+  "updated": "2026-10-04T15:12:24.679585+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -88,7 +88,7 @@
    "brooklyn_cc/tony-stop-fighting-improv",
    "brooklyn_cc/use-your-dang-voice-noelle-cbjsg"
   ],
-  "updated": "2026-10-03T19:11:05.227807+00:00"
+  "updated": "2026-10-04T15:12:24.679585+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -138,7 +138,7 @@
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-10-03T19:11:05.227807+00:00"
+  "updated": "2026-10-04T15:12:24.679585+00:00"
  },
  "logan_square": {
   "ids": [
@@ -211,7 +211,7 @@
    "magnet/12056",
    "magnet/12057"
   ],
-  "updated": "2026-10-03T19:11:05.227807+00:00"
+  "updated": "2026-10-04T15:12:24.679585+00:00"
  },
  "second_city": {
   "ids": [
@@ -319,7 +319,7 @@
    "second_city/46542",
    "second_city/46543"
   ],
-  "updated": "2026-10-03T19:11:05.227807+00:00"
+  "updated": "2026-10-04T15:12:24.679585+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -384,7 +384,7 @@
    "43140",
    "43149"
   ],
-  "updated": "2026-10-04T15:10:12.806476+00:00"
+  "updated": "2026-10-04T15:12:13.570463+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -451,9 +451,10 @@
    "43038",
    "43179",
    "43190",
-   "43200"
+   "43200",
+   "43210"
   ],
-  "updated": "2026-10-04T15:10:12.806476+00:00"
+  "updated": "2026-10-04T15:12:13.570463+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -473,7 +474,7 @@
    "42686",
    "42864"
   ],
-  "updated": "2026-10-04T15:10:12.806476+00:00"
+  "updated": "2026-10-04T15:12:13.570463+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -487,7 +488,6 @@
    "wgis_la/1812",
    "wgis_la/1813",
    "wgis_la/1820",
-   "wgis_la/1825",
    "wgis_la/1826",
    "wgis_la/1827",
    "wgis_la/1828",
@@ -510,12 +510,12 @@
    "wgis_la/1862",
    "wgis_la/1868"
   ],
-  "updated": "2026-10-03T19:11:05.227807+00:00"
+  "updated": "2026-10-04T15:12:24.679585+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-10-03T19:11:05.227807+00:00"
+  "updated": "2026-10-04T15:12:24.679585+00:00"
  }
 }
