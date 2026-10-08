@@ -1,37 +1,31 @@
 {
  "annoyance": {
   "ids": [
+   "annoyance/ap1-mondays-with-jillian-mueller",
    "annoyance/ap1-mondays-with-lily-ludwig-cd760137-4c11-4cf0-b780-e8915d68ad9a",
    "annoyance/ap1-sundays-with-jillian-mueller-12cb3b2c-cbb3-4918-b033-e7be5555bf0d",
    "annoyance/ap1-thursdays-with-greg-lovelace",
-   "annoyance/ap1-tuesdays-with-jeff-quintana",
    "annoyance/ap1-wednesdays-with-jeff-quintana",
    "annoyance/ap2-mondays-with-jen-connor-4569961c-859b-4594-94dc-81248aa75907",
-   "annoyance/ap2-sundays-with-justin-swinson-8d63c8b3-2189-4266-9ec9-4a31d402f21b",
    "annoyance/ap2-thursdays-with-chris-kervick-90f8732e-52d1-46fe-b49a-7f99eb1f5cbf",
    "annoyance/ap2-tuesdays-with-megan-johns-b08079a4-b41f-4c81-8dab-07a634a1b8ec",
    "annoyance/ap2-wednesdays-with-casey-alltop-37470518-d940-491a-91a2-38f8538f517f",
    "annoyance/ap3-mondays-with-johanna-medrano",
    "annoyance/ap3-sundays-with-johanna-medrano",
-   "annoyance/ap3-thursdays-with-cassidy-russell",
-   "annoyance/ap3-tuesdays-with-maria-sharps",
    "annoyance/ap3-wednesdays-with-chris-kervick-05182ad6-b2bb-437f-bba3-c2429258eb3b",
    "annoyance/ap4-thursdays-with-ross-taylor-5c2fd96d-495a-420e-81d1-22de6aa9e1e8",
    "annoyance/ap4-wednesdays-with-bruce-phillips-5a43f4ce-3762-4215-a196-aa2637b81272",
-   "annoyance/ap5-sundays-with-tbd-a684c218-1be1-46bf-b584-b6f443a27817",
    "annoyance/ap5-thursdays-with-keenan-camp",
-   "annoyance/ap5-wednesdays-with-lauren-rivas-0bba9343-a518-41d6-b454-e225ec235182",
    "annoyance/crass1-tuesdays-with-hails-reeves",
    "annoyance/crass2-mondays-with-sam-locke",
    "annoyance/creating-characters-crafting-a-5-minute-solo-set-tuesdays-with-max-kantor",
    "annoyance/fall-intensive-part-1-november-9-13",
    "annoyance/ig2-wednesdays-with-face-off-unlimited-698986e5-1933-497b-a781-ed601a4970c8",
    "annoyance/mi1-sundays-with-lily-ludwig",
-   "annoyance/mi1-thursdays-with-tbd",
    "annoyance/standup-sundays-with-st-james-jackson",
    "annoyance/workshop-drop-in-improv-classes"
   ],
-  "updated": "2026-10-07T23:17:48.575557+00:00"
+  "updated": "2026-10-08T19:19:10.888427+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -81,7 +75,7 @@
    "brooklyn_cc/tony-stop-fighting-improv",
    "brooklyn_cc/use-your-dang-voice-noelle-cbjsg"
   ],
-  "updated": "2026-10-07T23:17:48.575557+00:00"
+  "updated": "2026-10-08T19:19:10.888427+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -130,7 +124,7 @@
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-10-07T23:17:48.575557+00:00"
+  "updated": "2026-10-08T19:19:10.888427+00:00"
  },
  "logan_square": {
   "ids": [
@@ -191,9 +185,7 @@
    "magnet/12044",
    "magnet/12045",
    "magnet/12046",
-   "magnet/12047",
    "magnet/12048",
-   "magnet/12049",
    "magnet/12050",
    "magnet/12051",
    "magnet/12052",
@@ -202,9 +194,10 @@
    "magnet/12055",
    "magnet/12056",
    "magnet/12057",
-   "magnet/12058"
+   "magnet/12058",
+   "magnet/12059"
   ],
-  "updated": "2026-10-07T23:17:48.575557+00:00"
+  "updated": "2026-10-08T19:19:10.888427+00:00"
  },
  "second_city": {
   "ids": [
@@ -242,7 +235,6 @@
    "second_city/46251",
    "second_city/46281",
    "second_city/46284",
-   "second_city/46302",
    "second_city/46303",
    "second_city/46348",
    "second_city/46349",
@@ -310,7 +302,7 @@
    "second_city/46542",
    "second_city/46543"
   ],
-  "updated": "2026-10-07T23:17:48.575557+00:00"
+  "updated": "2026-10-08T19:19:10.888427+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -372,7 +364,7 @@
    "43263",
    "43273"
   ],
-  "updated": "2026-10-08T19:16:41.356148+00:00"
+  "updated": "2026-10-08T19:18:41.402143+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -437,7 +429,7 @@
    "43294",
    "43304"
   ],
-  "updated": "2026-10-08T19:16:41.356148+00:00"
+  "updated": "2026-10-08T19:18:41.402143+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -455,7 +447,7 @@
    "42686",
    "42864"
   ],
-  "updated": "2026-10-08T19:16:41.356148+00:00"
+  "updated": "2026-10-08T19:18:41.402143+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -493,12 +485,12 @@
    "wgis_la/1871",
    "wgis_la/1876"
   ],
-  "updated": "2026-10-07T23:17:48.575557+00:00"
+  "updated": "2026-10-08T19:19:10.888427+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1819"
   ],
-  "updated": "2026-10-07T23:17:48.575557+00:00"
+  "updated": "2026-10-08T19:19:10.888427+00:00"
  }
 }
