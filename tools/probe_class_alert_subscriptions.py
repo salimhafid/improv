@@ -23,7 +23,18 @@ QUERY_SHAPES = (
     ("school-only", None, None),
     ("ucb-legacy", "category", "EQUALS"),
     ("ucb-v2", "categories", "LIST_CONTAINS"),
+    # 1.7+: one subscription per school, `ANY categories IN picks`, which the
+    # native client sends as listContainsAny — one push per class however many
+    # of the user's categories it carries.
+    ("ucb-v3", "categories", "LIST_CONTAINS_ANY"),
 )
+
+
+def category_filter_value(comparator: str) -> dict:
+    """LIST_CONTAINS_ANY takes the user's picks as a list; the others one value."""
+    if comparator == "LIST_CONTAINS_ANY":
+        return {"value": ["improv", "standup"], "type": "STRING_LIST"}
+    return {"value": "improv", "type": "STRING"}
 
 
 def class_alert_notification_info() -> dict:
@@ -92,6 +103,35 @@ def modify(env: str, operation: str, subscription: dict) -> dict:
     return matches[0]
 
 
+def check_contains_any_query(env: str) -> bool:
+    """Read-only: does the server evaluate LIST_CONTAINS_ANY as "shares any
+    value"? Queries real UCB NY alert records; writes nothing."""
+    picks = ["standup", "writing_programs"]
+    body = query_body()
+    body["query"]["filterBy"].append({"fieldName": "categories", "comparator": "LIST_CONTAINS_ANY",
+                                      "fieldValue": {"value": picks, "type": "STRING_LIST"}})
+    body["resultsLimit"] = 50
+    subpath = f"/database/1/{watcher.CONTAINER}/{env}/public/records/query"
+    raw = json.dumps(body).encode()
+    request = urllib.request.Request("https://api.apple-cloudkit.com" + subpath, data=raw,
+                                     headers=watcher._sign(subpath, raw, env), method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            records = json.load(response).get("records", [])
+    except urllib.error.HTTPError as error:
+        print(f"{env} / contains-any query: HTTP {error.code}: "
+              f"{error.read().decode('utf-8', errors='replace')[:600]}", file=sys.stderr)
+        return False
+    except Exception as error:  # noqa: BLE001
+        print(f"{env} / contains-any query FAILED: {error}", file=sys.stderr)
+        return False
+    sets = [((r.get("fields") or {}).get("categories") or {}).get("value") or [] for r in records]
+    stray = [c for c in sets if not set(c) & set(picks)]
+    print(f"{env} / contains-any query: {len(records)} record(s) for {picks}; "
+          f"{len(stray)} without a matching category; e.g. {sets[:3]}")
+    return not stray
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matrix", action="store_true",
@@ -116,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             query["filterBy"][0]["fieldValue"]["value"] = "__improv_diagnostic__"
             if category_field is not None:
                 query["filterBy"].append({"fieldName": category_field, "comparator": comparator,
-                                          "fieldValue": {"value": "improv", "type": "STRING"}})
+                                          "fieldValue": category_filter_value(comparator)})
             if reverse:
                 query["filterBy"].reverse()
             subscription = {
@@ -154,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception as error:
                     failed = True
                     print(f"{label}: cleanup FAILED for {subscription_id}: {error}", file=sys.stderr)
+        if not args.matrix and not check_contains_any_query(env):
+            failed = True
     print("No class records were created. Device push receipt remains a separate check.")
     return 1 if failed else 0
 
