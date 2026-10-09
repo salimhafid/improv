@@ -101,7 +101,14 @@ migrated off. Lessons:
    serverless cron on Actions and sits close to GitHub's usage policy. Know
    that going in. Send alerts *before* saving state and park anything a
    backend didn't accept for retry (at-least-once), and never treat an empty
-   scan as "everything was removed".
+   scan as "everything was removed". CloudKit pushes once per *matching
+   subscription*, so give each device one subscription per interest set
+   (`ANY field IN picks`, not one per pick — a record in three picked
+   categories otherwise pushes three times), and remember that every new
+   query shape needs a production schema deploy before production accepts it.
+   If a push names something a slower feed publishes, have the alerting job
+   trigger that publish, and decide what to refresh from durable state rather
+   than from the trigger itself.
 
 ## iOS app
 

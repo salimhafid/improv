@@ -22,9 +22,9 @@ key-value storage that mirrors the user's own settings, and APNs.
   team `8FKP6A38FJ`. v1.1 approved and live July 2026; the 1.2, 1.3 and
   1.4 trains closed on approval (2026-08-08, 2026-08-27, and by 2026-09-07
   when App Store Connect showed 1.4 "Ready for Distribution"). Live version
-  **1.5 (25)** was verified READY_FOR_DISTRIBUTION on 2026-09-08. The project
-  is now **MARKETING_VERSION 1.6, CURRENT_PROJECT_VERSION 26** for the core
-  class categories and alert defaults update. Its signed archive and upload
+  **1.5 (25)** was verified READY_FOR_DISTRIBUTION on 2026-09-08.
+  **1.6 (26)** carried the core class categories and alert defaults update.
+  Its signed archive and upload
   succeeded on 2026-09-08 at 21:42 UTC; App Store Connect reports build 26
   VALID (build ID `da247794-2bbd-4ca6-92f5-c3fbf7dd4574`).
   Version **1.6 (26)** was submitted on 2026-09-08 at 21:48:26 UTC and both
@@ -35,6 +35,9 @@ key-value storage that mirrors the user's own settings, and APNs.
   `ios/AppStore/whatsnew-1.6.txt` and `ios/AppStore/review-notes-1.6.txt`.
   On 2026-09-17, version **1.6** was verified **READY_FOR_DISTRIBUTION**.
   Notification-delivery settings diagnostics added afterward are unreleased.
+  The project is now **MARKETING_VERSION 1.7, CURRENT_PROJECT_VERSION 27**
+  (not yet uploaded): those diagnostics plus the 2026-10-09 class-alert fixes
+  (one push per class, taps open the class, foreground class-feed refresh).
 - Accounts: none of ours. The app offers an **optional UCB student sign-in**
   (ucbcomedy.com, inside a web view) for reserving free student tickets — see
   "UCB session engine" below and PRIVACY.md.
@@ -50,11 +53,15 @@ GitHub Actions cron (.github/workflows/scrape.yml, "23 * * * *" — hourly)
       talent.py     → docs/talent.json   (UCB directory; 1,735 people, 1,585 bios)
   → commits changed feeds (bot commits also keep the cron alive past GitHub's
     60-day-inactivity auto-disable)
+  Also dispatched with classes_only=true by the class watcher right after a
+  detection (publish_static.py --classes-only → docs/classes.json only).
 
 Class-alert watcher (.github/workflows/class-watch.yml + 3 kicker crons)
-  → watcher.py scans UCB every ~2 min (other schools daily), writes CloudKit `ClassAlert`
-    records; devices receive them as pushes via their CKQuerySubscriptions.
-    State on the orphan branch `class-watch-state`. (Section below.)
+  → watcher.py scans UCB every ~2 min (other schools daily), writes one CloudKit
+    `ClassAlert` record per new class; devices receive them as pushes via their
+    CKQuerySubscriptions (one per school). After a detection it dispatches the
+    classes-only feed publish above. State on the orphan branch
+    `class-watch-state`. (Section below.)
 
 tests.yml: push to main (ignoring docs/**) → Python unit tests only.
            The Swift harness (./run_tests.sh) runs locally only.
@@ -73,7 +80,9 @@ isn't due.
 Key pipeline behaviors (aggregation.py shared loop + scraper.py / classes.py /
 talent.py):
 - **Per-source cadence**: `_SCRAPE_INTERVALS` — ucb_ny every 3h, every other
-  show source 24h (`scraper.py`); every class source daily (`classes.py`);
+  show source 24h (`scraper.py`); every class source daily (`classes.py`),
+  except that a source at which the class watcher has detected new classes
+  since its last scrape is forced due (see "Feed refresh after a detection");
   each talent group daily (`talent.py`). All with a 30-minute early-tick
   grace. Sources not due carry last-good data from the previous payload;
   failures carry stale data (flagged `stale: true`) instead of wiping a
@@ -134,7 +143,9 @@ talent.py):
   is *healthy* (`ok` AND `count > 0` — a legitimately empty `wgis_ny` cannot
   vouch for an empty feed), or if any feed could not be written (including an
   unset `LOCAL_STORE_DIR`). An empty classes or talent payload keeps the
-  previous file rather than failing the run.
+  previous file rather than failing the run. `--classes-only` aggregates and
+  writes only classes.json (shows and talent and their cadences untouched);
+  only a failed classes write makes it exit nonzero.
 - **Tests**: `./run_tests.sh` = offline Python suite (tests/, synthetic
   fixtures, no network; `REFRESH_DETAILS` unset) + Swift logic harness
   (tests/ios/LogicTests.swift, compiled straight against the Foundation-only
@@ -208,7 +219,12 @@ turn those into APNs pushes on their registered devices.
 - **State**: `class-watch.json` at the root of the orphan branch
   `class-watch-state` (checked out into `state-branch/`, `WATCH_STATE` points
   at it; the bare default `state/class-watch.json` is for local runs).
-  `{ "<school>": {"ids": [...], "updated": iso}, "_pending_alerts": [...] }`.
+  `{ "<school>": {"ids": [...], "updated": iso, "new_at": iso}, "_pending_alerts": [...] }`.
+  `new_at` (present once a school has had a detection) is when new classes
+  were last found there: set on a detection, carried forward unchanged
+  otherwise, never set by a baseline or a failed (empty) scan. UCB `ids` are
+  bare Arlo EventIDs and must stay so — re-keying them (to feed ids, say)
+  would re-alert every class.
   Committed after every iteration by `class-watch-bot` (rebase-on-top on a
   rejected push) — up to ~720 commits/day on that branch. If the state checkout
   fails, the job baselines from scratch ONLY when `git ls-remote` positively
@@ -223,22 +239,51 @@ turn those into APNs pushes on their registered devices.
   with no prior state is **baselined silently**; a scan that comes back
   **empty for a school that had classes is treated as a failed scan** (prior
   ids kept, nothing alerted, `updated` not bumped) so the next good scan
-  doesn't alert on every class; a corrupt state entry is re-baselined. New
-  UCB and BCC classes are bundled per (school, category set); other schools get
-  one bundle per school (`category "all"`). UCB Improv 101/201/301/401 and
+  doesn't alert on every class; a corrupt state entry is re-baselined. Each
+  new class becomes **one record** (`count` 1) carrying every category it has
+  (UCB/BCC; `["other"]` when untagged) or `["all"]` (other schools), so a
+  device's one subscription per school fires once for it. Until 2026-10-09
+  new classes were bundled per (school, category set). A school with more than
+  `MAX_INDIVIDUAL_ALERTS` = 5 new classes in one scan gets one summary record
+  instead (a new-term drop or an adapter re-id must not become dozens of
+  pushes): the union of their categories, `count` N, title "N new classes at
+  <School>", body the first three class names (one line each) + "and N more". UCB Improv 101/201/301/401 and
   Sketch 101/201/301, plus BCC Improv 1–4 and Sketch 1–2, carry only
   `improv_core` or `sketch_core`. Core classes must never retain overlapping
   Featured/Intensive/etc. tags: that would leak core alerts into noncore picks.
   BCC noncore categories are `improv`, `sketch`, and `other`. Matching uses
   source-scoped course prefixes (including ONLINE and BCC seasonal labels),
   never prerequisites or descriptions; numbered drop-ins stay with their
-  course. `compose()` builds `pushTitle`
-  ("New Improv classes at UCB New York") and `pushBody` (up to three titles,
-  capped at 170 chars).
+  course. `compose()` builds `pushTitle` ("New class at UCB New York") and a
+  `pushBody` of up to three lines, in the order the owner set on
+  2026-10-09: the class name, the instructor, the category; a missing one
+  is left out. **Every line is cut with "…" so it never wraps** — `_fit_line`
+  measures it against SF Pro 15 pt glyph widths (CoreText-measured, ASCII
+  table in watcher.py; iOS renders ~5% narrower) with a 250 pt budget, the
+  narrowest body line seen on a 360 pt iPhone mini. iOS itself keeps the
+  title to one line. A collapsed banner shows two body lines (name and
+  instructor); the Lock Screen and Notification Center show all three.
+  Larger Dynamic Type sizes can still wrap. Category: for UCB, Arlo's
+  canonical course name (numbering stripped, as in the feed's `level`) plus
+  "workshop"/"intensive" when the name doesn't say so, else the first
+  subject category's label (never Workshops, Intensives or Other); elsewhere
+  the adapter's `level`, except WGIS LA's "Currently Running" status;
+  dropped when it repeats the class name. Instructor: Arlo `Presenters`
+  joined as in the feed, or the adapter's `instructor`.
 - **CloudKit record**: `POST https://api.apple-cloudkit.com/database/1/
   iCloud.com.salimhafid.UCBShows/<env>/public/records/modify`, record type
   `ClassAlert`, fields `school`, `category`, `categories` (STRING_LIST),
-  `count`, `pushTitle`, `pushBody`, `classIDs`. Written to BOTH
+  `count`, `pushTitle`, `pushBody`, `classIDs` — the production schema is
+  fixed, so new information rides in these fields rather than new ones.
+  `category` is the first of
+  `categories` (kept for first-generation `category ==` subscribers).
+  `classIDs` holds class-feed ids (the `id` a class has in
+  docs/classes.json, which the app reads as `ClassItem.rawID`): UCB
+  `<school>/<EventID>` (`ucb_ny/43407`), every other school the adapter's own
+  source-prefixed id (`magnet/12061`). A per-class record has exactly one; a
+  summary record comma-joins whole ids up to 900 chars. Records from before
+  2026-10-09 carry bare UCB EventIDs (`43407`), comma-joined for a bundle.
+  Written to BOTH
   environments by default (`CLOUDKIT_ENVS=development,production`) so dev
   and App Store builds both hear it. Signed per Apple's server-to-server
   spec: ECDSA P-256 over `"<ISO date>:<base64 sha256(body)>:<subpath>"`
@@ -266,6 +311,29 @@ turn those into APNs pushes on their registered devices.
   deliveries or a failed scan make `main()` exit nonzero; the chain warns
   and still commits state. Delivery remains **at least once**: uncertain
   responses or state-push failures can produce duplicate records/pushes.
+- **Feed refresh after a detection**: the push goes out within ~2 minutes,
+  but class sources publish daily, so an alert could name a class the
+  Classes tab would not show for up to a day. With `WATCH_NEW_CLASSES_FILE`
+  set (the workflow sets it), `watcher.py` appends each school with newly
+  detected classes after `save_state` — whether or not CloudKit accepted the
+  alerts; never in `--dry-run`; pending-alert retries don't count. Only once
+  `commit_state` has pushed that state does the workflow's
+  `refresh_class_feed` run `gh workflow run scrape.yml -f classes_only=true`
+  and truncate the file; a failed dispatch keeps it for the next iteration.
+  scrape.yml copies `class-watch.json` off the state branch into
+  `WATCH_STATE_FILE` (unreadable, missing or corrupt → a warning and normal
+  cadence), and `classes.aggregate_classes` forces due (interval 0, not
+  `force=True`, which would refetch everything) every class source whose
+  `new_at` is later than its previous `scraped_at`, or that has none.
+  Watcher school ids are the class source ids. The decision rides on those
+  durable stamps, not on the dispatch: scrape.yml's `scrape` concurrency
+  group holds one pending run, so a cron tick can replace the watcher's
+  pending dispatch (or the reverse), and whichever run starts forces the
+  same sources; a failed fetch leaves `scraped_at` behind `new_at`, so the
+  next run tries again; a landed scrape moves `scraped_at` past `new_at` and
+  the source returns to its daily cadence. scrape.yml checks out `github.ref`
+  (the branch tip at job start) rather than the event SHA, so a run that
+  queued behind another can't rebuild classes.json from the older payload.
 - **Preview**: `python watcher.py --ucb --dry-run` scans and prints proposed
   alerts without CloudKit writes or state changes, including no baseline
   write and no consumption of pending alerts. Supply `WATCH_STATE` to preview
@@ -279,6 +347,56 @@ turn those into APNs pushes on their registered devices.
   Actions usage policy lists that kind of use as prohibited. Whether it
   would ever be enforced against this repo is unknowable from here — if the
   workflow is ever disabled by GitHub, alerts stop and this is why.
+
+### Duplicate class pushes, alerted classes missing from Classes — 2026-10-09
+
+The user reported four problems: several notifications for one new class;
+an alerted class absent from the Classes tab; a tap that only switched to the
+Classes tab; and no instructor or class type in the notification.
+
+**The duplicates came from the subscriptions, not the watcher.** Across the
+~13,600 `class-watch-state` snapshots since 2026-09-20 no class was detected
+twice, and the watcher logs show exactly one accepted record per class per
+environment: UCB NY `43395` (detected `2026-10-08T20:16:40Z`, run
+`37798806562`) with `categories=standup+featured_programs+workshops`, and
+`43407` (`2026-10-09T14:10:05Z`, run `37933509854`) with
+`writing_programs+featured_programs`. The app, however, registered one
+`alert/v2/<school>/<category>` subscription per pick, the owner had all 13
+default UCB NY categories on, and CloudKit pushes once per matching
+subscription: `43395` arrived three times, `43407` twice.
+
+**The class feed lagged the push by up to a day.** Class sources publish on
+a 24-hour cadence via scrape.yml's hourly cron, which GitHub starved to four
+feed commits on 2026-10-09 (02:18, 09:16, 16:20, 21:02Z). `43407` entered the
+watcher state at `14:10Z`, yet every one of those commits still had `ucb_ny`
+`scraped_at` `2026-10-08T22:12:22Z` and no `ucb_ny/43407`. The app also
+refetched the class feed only at launch or on pull-to-refresh.
+
+Fixes (1.7 (27) plus the watcher and workflows): one `ANY categories IN`
+subscription per categorized school (see "Class alerts (app side)"); one
+record per new class with the flood cap of 5; `classIDs` as feed ids and
+taps that open the class; class name, instructor and category in `pushBody`; the
+`new_at` stamp and the chain's classes-only publish ("Feed refresh after a
+detection"); a foreground class-feed refresh in the app.
+
+`ANY categories IN` is a new query shape (iOS's CloudKit sends it as
+`listContainsAny`, checked locally). [Probe run 38000890535](https://github.com/salimhafid/improv/actions/runs/38000890535)
+at `22:45Z` had development accept `ucb-v3` with the full title/body
+configuration and clean it up, while production rejected creation with the
+same `BAD_REQUEST: attempting to create a subscription in a production
+container` as on 2026-09-08. In both environments its read-only
+`LIST_CONTAINS_ANY` query for `[standup, writing_programs]` returned 6 real
+UCB NY records, none without one of those categories. After the development
+schema was deployed to production in CloudKit Console,
+[probe run 38002232662](https://github.com/salimhafid/improv/actions/runs/38002232662)
+accepted, verified and removed `ucb-v3` in production at `23:00:54Z`.
+
+Rollout: the chain keeps the code it started with and dispatches its
+successor on `main`, so watcher and workflow changes take effect up to ~5.5 h
+after they merge. 1.6 devices keep their v2 subscriptions (a per-class record
+still pushes once per matching pick there) and ignore `classIDs`. Not yet
+observed: a single banner per new class on the phone from 1.7, a tap landing
+on the class, and a classes-only publish on `main` after a natural detection.
 
 ### Elf Lyons detection timing and untagged sessions — 2026-09-20
 
@@ -308,7 +426,8 @@ response policy is not a local cache in our stateless HTTP client; a live
 cache-buster comparison returned the same data. No speculative cache-buster
 was added. Exact cause of the historical Elf Lyons delay, and physical-device
 delivery time after CloudKit acceptance, remain unverified. The separate app
-class feed still follows its daily publication cadence.
+class feed still followed its daily publication cadence (until 2026-10-09;
+see above).
 
 ### Class pushes present in Notification Center but no banner — 2026-09-17
 
@@ -423,16 +542,16 @@ and notification values, so this aggregate result does not establish the exact
 chosen preference set. The earlier physical-device test independently confirmed
 push receipt; receipt of a naturally detected new class has not been observed
 during this verification.
-Always probe all three query shapes with the full notification configuration
-in development before promoting schema. The corrected code passes 242 Python
-tests and the Swift logic harness.
+Always probe every shipped query shape (four since 1.7) with the full
+notification configuration in development before promoting schema. The
+corrected code passes 242 Python tests and the Swift logic harness.
 
 The workflow exposes separate checks using the existing Actions secrets:
 
 | Mode | Action | What success establishes |
 |---|---|---|
 | `diagnose` | Read-only school/category record queries and a best-effort subscription count for the server key's owner. No records, subscriptions, or state are written. | Server authentication and query support; counts do not describe every app user. |
-| `probe-subscription` | Creates and deletes uniquely named temporary subscriptions for each shipped query shape: school-only, school plus scalar category (legacy UCB), and school plus list-category membership (current UCB/BCC). All use `school == __improv_diagnostic__`. Validates the returned notification title, body, arguments, and sound. Creates no class records and sends no pushes. Development may learn the templates. | All supported app versions' query shapes and notification settings can be registered in each environment; cleanup must also succeed. |
+| `probe-subscription` | Creates and deletes uniquely named temporary subscriptions for each shipped query shape: school-only, school plus scalar category (`ucb-legacy`), school plus one-category list membership (`ucb-v2`, `LIST_CONTAINS`, app ≤ 1.6), and school plus any of the picks (`ucb-v3`, `LIST_CONTAINS_ANY` with a `STRING_LIST`, app 1.7+). All use `school == __improv_diagnostic__`. Validates the returned notification title, body, arguments, and sound. Then runs one read-only `LIST_CONTAINS_ANY` query per environment against real UCB NY alert records and fails if any returned record shares none of the queried categories. Creates no class records and sends no pushes. Development may learn the templates. | All supported app versions' query shapes and notification settings can be registered in each environment, cleanup succeeds, and the server evaluates contains-any as "shares any". |
 | `probe-subscription-matrix` | Runs the same temporary, impossible-school probes with both filter orders and all-zone/default-zone scopes. Creates no class records. | Diagnoses server sensitivity to query representation; does not prove which representation a native client sends. |
 | `test-push-owner` | Sends one real production push using a temporary subscription and matching `ClassAlert` for a UUID-specific diagnostic school. Existing school-specific subscriptions cannot match it. Both temporary objects are cleaned up. The CLI requires `--send`; selecting this workflow mode invokes it explicitly. | CloudKit accepted the test and cleanup completed. Only the server key owner's registered app devices are targeted; the person must confirm receipt. |
 | `cleanup-owner-test` | Removes only the diagnostic UUID record named by the `diagnostic_record` workflow input, using `forceDelete`. Rejects normal alert names and creates nothing. | A leftover diagnostic record is removed or already absent; no new push is sent. |
@@ -515,7 +634,8 @@ matches real subscribers.
   opens the QR). Ids that vanish from `going.json` (iCloud reload) have
   their pending notifications cancelled. Tapping a heart reminder deep-links
   to the show in the Tickets tab (`AppState.openShowID`); a ticket reminder
-  opens that ticket (`openTicketID`); a class alert opens the Classes tab.
+  opens that ticket (`openTicketID`); a class alert opens its class
+  (`classAlertTarget` — see "Class-alert taps").
 - **Onboarding**: none. A fresh install opens on UCB New York; theaters are
   picked in the sidebar and the city is always inferred from that selection.
 - **Filters**: persisted as JSON under `filters` (lenient decoder, unknown
@@ -551,15 +671,29 @@ matches real subscribers.
   Sidebar theater selection does not enable alerts. Existing UCB category
   picks and deliberate empty sets are preserved; an enabled legacy BCC
   school-wide flag migrates to noncore category defaults. A restored BCC flag
-  from an older iCloud client is normalized again even at v2. Desired subscriptions:
-  `alert/<school>/all` (`school == %@`) for other schools,
-  `alert/v2/<school>/<category>` (`school == %@ AND categories CONTAINS %@`)
-  per UCB/BCC category; `CKQuerySubscription(recordType: "ClassAlert",
+  from an older iCloud client is normalized again even at v2. Desired
+  subscriptions (1.7+): `alert/<school>/all` (`school == %@`) for other
+  schools, and exactly ONE `alert/v3/<school>/<digest>` per UCB/BCC school
+  with a non-empty pick set (`school == %@ AND ANY categories IN %@` over the
+  sorted picks; iOS sends it as the server's `listContainsAny`; no picks →
+  no subscription). The digest is FNV-1a 64-bit, 16 hex chars, over the
+  sorted picks joined by ",": the same on every device and launch, and new
+  whenever the picks change, which is what lets the ID-keyed reconcile
+  replace the old predicate. Through 1.6 the plan was one
+  `alert/v2/<school>/<category>` (`categories CONTAINS %@`) per pick, and
+  CloudKit pushes once per matching subscription, so a class in three picked
+  categories pushed three times (see the 2026-10-09 incident). Each is a
+  `CKQuerySubscription(recordType: "ClassAlert",
   firesOnRecordCreation)` with `titleLocalizationKey CA_TITLE` /
   `alertLocalizationKey CA_BODY` bound to `pushTitle`/`pushBody`
   (`Localizable.strings` at the bundle root holds the `"%@"` passthroughs —
-  the first real `en.lproj` localisation must migrate it). Reconcile
-  (`syncSubscriptions`) is coalesced, loops until prefs stop moving,
+  the first real `en.lproj` localisation must migrate it); no desiredKeys,
+  collapse id or content-available. Reconcile
+  (`syncSubscriptions`) is coalesced, loops until prefs stop moving, saves
+  missing subscriptions first and deletes stale `alert/` IDs (retired v2 and
+  first-generation ones included) only once every save succeeded — a
+  production rejection of a new query shape keeps the old set (duplicate
+  pushes at worst, never silence) and the reconcile retries —
   surfaces per-item CloudKit failures as `syncIssue`, and a persisted dirty
   flag (`classAlertSyncPending`) makes `armOnLaunch` retry a reconcile that
   failed offline — including the delete-everything reconcile after the
@@ -567,6 +701,35 @@ matches real subscribers.
   prompts; `armIfNeeded` (sheet open) does. `PushRegistrationDelegate`
   surfaces APNs registration failures. Entitlements: `aps-environment`,
   iCloud container `iCloud.com.salimhafid.UCBShows`, CloudKit, KVS.
+  Subscriptions belong to the iCloud account, and every version deletes
+  `alert/` IDs it doesn't plan: a 1.6 and a 1.7 device on one account swap
+  the v2 and v3 sets on each foreground until both run 1.7.
+- **Class-alert taps** (`NotificationRouter`, `ClassAlertTarget`,
+  `ClassesView.followAlert`): the push carries only the record and
+  subscription ids (notification info is fixed, the record schema too), so a
+  tap first lands provisionally on the school the subscription id names
+  (`alert/v3|v2/<school>/…`, `alert/<school>/all`) while it fetches the
+  `ClassAlert` record from the public database (10 s request/resource
+  timeout; any failure → the school's folder). One `classIDs` entry → that
+  class, matched against `ClassItem.rawID` (a bare legacy id is retried as
+  `<school>/<id>`), pushed onto the Classes stack with its folder and subject
+  group expanded when the theater selection shows that school (the selection
+  is never changed). Several ids (a flood summary) or none → the school's
+  folder. A class not in the feed yet gets one forced refresh; then, if the
+  record's `creationDate` is within 30 minutes, a dismissible "Just posted:
+  <first body line>" card and a forced refresh every 30 s for up to 10
+  minutes (an older alert's class has usually started and left the feed, so
+  it lands on the school's folder instead) —
+  the raw CDN serves its cached copy for its 5-minute max-age and ignores
+  query-string busters, so polling is the only way to see it land. A newer
+  tap supersedes an older one; leaving the tab and coming back resumes the
+  same 10-minute budget.
+- **Foreground class-feed refresh**: `ClassesStore.refreshIfStale` (every
+  foreground) refetches the class feed when the last successful fetch is
+  more than 5 minutes old or never happened, skips while a fetch is in
+  flight, and uses the protocol cache policy (usually a 304). Before 1.7 the
+  launch fetch was the only automatic one, so a long-running app never showed
+  a newly alerted class.
 - **UCB registration links**: Arlo's `ViewUri` supplies `arlo_id`, the course
   template ID; `EventID` identifies the exact session. The class feed uses
   `https://ucbcomedy.com/courses/?eventtemplate=<template>&event=<session>`.
@@ -686,8 +849,8 @@ xcodebuild -exportArchive -archivePath <path>/Improv.xcarchive \
   produced by default), `manageAppVersionAndBuildNumber` false (the build
   number is bumped by hand; Xcode must not rewrite it at upload).
 - **Version rule**: a train closes once approved — 1.2, 1.3 and 1.4 are
-  closed (builds 19 and 20 were uploaded into 1.3 and are stranded); new
-  1.5 is also approved; new uploads use MARKETING_VERSION 1.6. The upload fails at
+  closed (builds 19 and 20 were uploaded into 1.3 and are stranded); 1.5
+  and 1.6 are also approved; new uploads use MARKETING_VERSION 1.7. The upload fails at
   the very END of a ~15 min export with "Invalid Pre-Release Train", so
   check the train before archiving, not after. Both settings appear twice in
   the pbxproj (Debug+Release) — sed with /g.

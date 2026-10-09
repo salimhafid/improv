@@ -21,8 +21,11 @@ GitHub Actions cron (hourly; each source has its own 3h/24h cadence)
   → commits changed feeds
 
 Class alerts: a second Actions workflow (watcher.py) scans UCB every ~2 minutes
-(other schools daily) and writes CloudKit records; devices that opted in receive
-them as push notifications. State lives on the `class-watch-state` branch.
+(other schools daily) and writes one CloudKit record per new class; devices that
+opted in receive them as push notifications (one subscription per school, so one
+push per class). After a detection it dispatches a classes-only publish, so the
+class reaches the feed within minutes. State lives on the `class-watch-state`
+branch.
 
 iOS app (ios/) fetches the raw-CDN JSON (URLSession's default cache policy →
 ETag/304 revalidation).

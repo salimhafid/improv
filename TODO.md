@@ -1,7 +1,8 @@
 # TODO.md — open items, watchlist, and likely next steps
 
-Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-09-17 (app 1.6 is
-READY_FOR_DISTRIBUTION; notification-delivery diagnostics are unreleased).
+Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-10-09 (app 1.6 is
+READY_FOR_DISTRIBUTION; 1.7 (27) carries the class-alert fixes below plus the
+unreleased notification-delivery diagnostics).
 
 ## Release
 
@@ -17,6 +18,18 @@ READY_FOR_DISTRIBUTION; notification-delivery diagnostics are unreleased).
       automatic after approval. Submission: `ed477148-5b78-43d4-a963-ada1ab0d0a95`.
       New builds must bump CURRENT_PROJECT_VERSION (both configs) past 26.
 - [x] **1.6 approved** — verified READY_FOR_DISTRIBUTION on 2026-09-17.
+- [x] **v3 class-alert subscription template deployed to production** —
+      2026-10-09: development learned it on probe run 38000890535 (school
+      EQUALS + categories LIST_CONTAINS_ANY); CloudKit Console → Deploy Schema
+      Changes (diff showed no record type, index or role changes) → "Changes
+      Deployed"; probe run 38002232662 then reported `production / ucb-v3:
+      subscription type accepted; title/body payload verified`.
+- [ ] **Ship 1.7 (27)**: one push
+      per class (one `ANY categories IN` subscription per school), taps open
+      the class, foreground class-feed refresh. Then confirm on the phone:
+      one banner per new UCB class ("New class at …" / name / instructor /
+      category, no wrapped lines), tap lands
+      on the class.
 - [ ] **Verify physical-device class banners**. Pushes arrive in Notification
       Center, but the user reports no banner while backgrounded/locked. Check
       Banners, Lock Screen, Immediate Delivery and Focus on the phone, then
@@ -217,9 +230,8 @@ that break the build.
       (`git log --all -- 'ios/UCBWidget/*'`), not by old hashes.
 - [ ] Talent directory: the PAGES list in sources/ucb_talent.py is the
       extension point if UCB adds rosters (e.g. touring companies).
-- [ ] Watcher payload: `count`/`classIDs` are written but never read by the
-      app (only `pushTitle`/`pushBody` are). Either use them (deep-link to
-      the class) or drop them.
+- [x] Watcher payload: `classIDs` now carries feed ids and the app opens
+      the tapped class from it (1.7). `count` is still unread.
 
 ## Docs debt
 

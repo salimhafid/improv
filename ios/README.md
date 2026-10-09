@@ -86,9 +86,14 @@ iCloud account on the device or simulator; everything else works without one.
   on/off rows for every other school. Newly enabling a categorized school
   selects everything except Improv Core and Sketch Core; existing UCB picks
   are retained. Alerts are CloudKit push notifications
-  (`CKQuerySubscription`s the device registers for itself) written by the
-  repo's watcher workflow when a school posts new classes; tapping one opens
-  the Classes tab.
+  (`CKQuerySubscription`s the device registers for itself — one per school,
+  matching any of its picked categories, so a class in several of them
+  alerts once) written by the repo's watcher workflow, one per new class,
+  titled "New class at <school>" with the class name, instructor and
+  category on their own lines. Tapping one opens that class
+  (a summary of many new classes opens the school's folder); if a fresh
+  alert's class hasn't reached the class feed yet, a "Just posted" card holds
+  its place while the tab checks for it every 30 seconds for up to 10 minutes.
 - **Talent** — UCB show pages list the cast as chips; a matched performer opens
   a bio page (headshot, city, scraped bio, their upcoming shows), an unmatched
   name opens the directory pre-searched. The directory filters All / New York /
@@ -108,7 +113,9 @@ iCloud account on the device or simulator; everything else works without one.
   and reinstalls.
 - **Pull to refresh** (Shows, Classes, Talent) — re-fetches the published feed.
   It never triggers a scrape; scraping happens on the backend's schedule, and
-  refresh surfaces whatever the last run stored.
+  refresh surfaces whatever the last run stored. The class feed also
+  refreshes itself on foreground once its last fetch is 5 minutes old (the
+  backend republishes a school's classes within minutes of alerting on one).
 - **Offline** — the last successful payloads are cached to disk, so the app
   opens instantly and shows saved data (with a banner) when the network is
   unavailable.
@@ -132,7 +139,8 @@ UCBShows/
   UCBShowsApp.swift          @main; CloudSync.bootstrap() first, URLCache sizing,
                              notification delegate, APNs registration delegate,
                              builds + injects the eight stores, wires tickets/
-                             account/alerts, deep-links, 5-min ticket sync on foreground
+                             account/alerts, deep-links, 5-min ticket sync + class-feed
+                             refresh on foreground
   UCBShows.entitlements      aps-environment, iCloud container + CloudKit, KVS
   Localizable.strings        CA_TITLE / CA_BODY passthroughs for CloudKit pushes
   Models/
@@ -146,7 +154,8 @@ UCBShows/
   Services/
     FeedService.swift        generic fetch + on-disk last-good cache (all feeds)
     ShowsStore.swift         @MainActor @Observable source of truth for shows; filters; sections
-    ClassesStore.swift       same for classes; school folders + subject groups
+    ClassesStore.swift       same for classes; school folders + subject groups;
+                             class-alert tap targets (ClassAlertTarget) + id lookup
     TalentStore.swift        talent directory + name/slug index; phase
     GoingStore.swift         saved "I'm Going" shows + pre-show reminders
     TicketStore.swift        Student ID + reserved tickets (tickets.json), joins, reminders
@@ -154,10 +163,11 @@ UCBShows/
     UCBSession.swift         the UCB "session engine": one WKWebView as cookie jar + API client
     WalletPass.swift         builds + CMS-signs .pkpass on device (swift-certificates)
     QRRender.swift           SVG QR → cached UIImage via off-screen WKWebView
-    ClassAlertsStore.swift   class-alert prefs + CloudKit subscription reconcile
+    ClassAlertsStore.swift   class-alert prefs + CloudKit subscription reconcile (one per school)
     CloudSync.swift          iCloud key-value mirror of settings + going.json/tickets.json
     NotificationAuth.swift   one place to ask for notification permission
-    NotificationRouter.swift UNUserNotificationCenter delegate; routes taps to tickets/shows/classes
+    NotificationRouter.swift UNUserNotificationCenter delegate; routes taps to tickets/shows/classes;
+                             fetches a tapped class alert's CloudKit record for its class id
     ReminderPlan.swift       shared reminder math (lead time, one-per-show joins)
     CalendarService.swift    Apple (write-only EventKit) / Google (template URL) Add to Calendar
     Keychain.swift           minimal Keychain wrapper (session marker, this device only)
@@ -205,6 +215,15 @@ logic, `DateUtils`, `SearchText`, `ReminderPlan`, `Ticket`, `Venue`…) with
 `tests/ios/LogicTests.swift` into a command-line binary and runs its asserts —
 no Xcode test target, no simulator. UIKit/WebKit/CloudKit-dependent files are
 not covered there; they are verified by the app build.
+
+`ClassAlertPreferenceTests.swift` pins the subscription plan: one
+`alert/v3/<school>/<digest>` per categorized school with an
+`ANY categories IN` predicate (a class in three picked categories matches
+exactly one subscription), and the FNV-1a digest against independently
+computed values. `LogicTests.swift` covers class-alert tap targets (school
+from the subscription id, resolution from the record, recency, finding the
+class by feed id or a legacy bare id) and the class feed's foreground
+staleness rule.
 
 `NotificationDeliveryTests.swift` checks the device-settings status policy:
 permission/provisional warnings, disabled banners and Lock Screen alerts,
