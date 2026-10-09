@@ -478,6 +478,9 @@ class ComposeTests(unittest.TestCase):
     def test_summary_body_caps_at_three_titles(self):
         items = [_item(str(i), f"T{i}") for i in range(6)]
         self.assertEqual(compose_summary("ucb_ny", items)["pushBody"], "T0\nT1\nT2\nand 3 more")
+        blank_first = [_item("0", "")] + items[1:]
+        self.assertEqual(compose_summary("ucb_ny", blank_first)["pushBody"], "T1\nT2\nT3\nand 3 more",
+                         "every class is accounted for")
 
     def test_every_category_key_has_a_label(self):
         for _, key in watcher.UCB_CATEGORY_TAGS:
@@ -507,12 +510,18 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(compose("ucb_ny", _item(title="Improv 101"))["pushBody"], "Improv 101")
         self.assertEqual(compose("ucb_ny", _item(title="Improv 101", type="improv 101"))["pushBody"],
                          "Improv 101", "a category equal to the name is dropped")
+        self.assertEqual(compose("ucb_ny", _item(title="Improv  101", type="Improv 101"))["pushBody"],
+                         "Improv 101", "...whatever its spacing")
         self.assertEqual(compose("ucb_ny", _item(title="Improv 101", type="Improv", instructor=" "))["pushBody"],
                          "Improv 101\nImprov")
 
     def test_line_width_measures_accents_and_unknown_glyphs_safely(self):
         self.assertEqual(watcher._line_width("é"), watcher._line_width("e"))
-        self.assertEqual(watcher._line_width("漢"), watcher._NON_ASCII_WIDTH)
+        self.assertEqual(watcher._line_width("漢"), watcher._WIDE_WIDTH)
+        self.assertEqual(watcher._line_width("🎃"), watcher._WIDE_WIDTH)
+        self.assertEqual(watcher._line_width("Ж"), watcher._NON_ASCII_WIDTH)
+        # Measured 288 pt with CoreText: must be cut, not left to wrap.
+        self.assertTrue(watcher._fit_line("🎃🎃🎃 Halloween Improv Jam 🎃🎃🎃").endswith("…"))
         self.assertGreater(watcher._line_width("WWW"), watcher._line_width("iii"))
         # All capitals are wider than mixed case: they must be cut earlier.
         caps = watcher._fit_line("WRITE TO SHOOT: WRITING THE SHORT FILM SCRIPT")

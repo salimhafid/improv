@@ -89,7 +89,8 @@ NEW_CLASSES_FILE_ENV = "WATCH_NEW_CLASSES_FILE"  # marker: schools with new clas
 # sizes can still wrap — the server can't know the reader's text size.
 _BODY_LINE_BUDGET = 250.0
 _ELLIPSIS_WIDTH = 11.84
-_NON_ASCII_WIDTH = 12.9  # an "M": wide enough that an unknown glyph never overflows
+_NON_ASCII_WIDTH = 17.0  # other scripts and symbols (Ж 15.1, Œ 16.8, ★ 15.0 measured)
+_WIDE_WIDTH = 21.0       # East Asian wide/fullwidth and most emoji (🎃 21.0, 漢 14.9)
 _GLYPH_WIDTHS = [float(w) for w in (
     "3.98,4.43,6.93,9.21,9.21,13.65,10.44,4.22,5.49,5.49,6.84,9.21,4.22,6.84,4.22,4.34,"
     "9.21,6.72,8.82,9.17,9.42,9.04,9.32,8.31,9.35,9.32,4.22,4.22,9.21,9.21,9.21,7.46,"
@@ -449,6 +450,8 @@ def _line_width(text: str) -> float:
             total += _GLYPH_WIDTHS[code - 32]
         elif ch in _EXTRA_WIDTHS:
             total += _EXTRA_WIDTHS[ch]
+        elif unicodedata.east_asian_width(ch) in ("W", "F"):
+            total += _WIDE_WIDTH
         else:
             base = unicodedata.normalize("NFKD", ch)[:1]
             total += (_GLYPH_WIDTHS[ord(base) - 32] if base and 32 <= ord(base) <= 126
@@ -481,16 +484,17 @@ def _class_body(item: dict) -> str:
     three. The category is dropped when it only repeats the class name."""
     title = item.get("title") or ""
     kind = item.get("type") or ""
-    lines = [title, item.get("instructor") or "",
-             kind if kind.casefold() != title.casefold() else ""]
+    same = " ".join(kind.split()).casefold() == " ".join(title.split()).casefold()
+    lines = [title, item.get("instructor") or "", "" if same else kind]
     return "\n".join(_fit_line(line) for line in lines if line.strip())
 
 
 def _list_body(titles: list[str]) -> str:
     """A summary record's body: the first three class names, one fitted line
     each, then "and N more"."""
-    shown = [_fit_line(t) for t in titles[:3] if t.strip()]
-    more = len(titles) - min(len(titles), 3)
+    named = [t for t in titles if t.strip()]
+    shown = [_fit_line(t) for t in named[:3]]
+    more = len(titles) - len(shown)
     if more > 0:
         shown.append(f"and {more} more")
     return "\n".join(shown)
