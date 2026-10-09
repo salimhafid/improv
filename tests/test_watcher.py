@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import watcher
-from watcher import _categories, _category, compose, diff_and_alert
+from watcher import _categories, _category, compose, compose_summary, diff_and_alert
 
 # Arlo tags on UCB event 42057, "Sketch from Improv" with Kevin McDonald —
 # the class that went out as `improv_electives` alone and reached nobody.
@@ -128,7 +128,9 @@ class CategoryScanTests(unittest.TestCase):
             scanned = watcher.scan_ucb()
         alerts = watcher.diff_and_alert(scanned, state, per_category=True)
         self.assertEqual({a["school"]: a["classIDs"] for a in alerts},
-                         {"ucb_ny": "42589", "ucb_online": "41946"})
+                         {"ucb_ny": "ucb_ny/42589", "ucb_online": "ucb_online/41946"},
+                         "classIDs are class-feed ids; state keeps bare EventIDs")
+        self.assertEqual(state["ucb_ny"]["ids"], ["42589"])
         self.assertEqual(next(a for a in alerts if a["school"] == "ucb_ny")["categories"],
                          ["clowning", "intensives"])
         self.assertEqual(next(a for a in alerts if a["school"] == "ucb_online")["categories"],
@@ -156,7 +158,7 @@ class CategoryScanTests(unittest.TestCase):
         self.assertEqual(scanned["ucb_la"]["3"]["categories"], ["musical_improv"])
         self.assertEqual(scanned["ucb_ny"]["4"]["categories"], ["improv_electives"])
 
-    def test_bcc_scan_and_non_ucb_diff_keep_core_out_of_every_noncore_bundle(self):
+    def test_bcc_scan_and_non_ucb_diff_keep_core_out_of_every_noncore_record(self):
         bcc = [
             {"id": "bcc/1", "title": "[Aug-Oct] Improv Level 1: Intro", "level": "Improv"},
             {"id": "bcc/2", "title": "[Sep-Oct] Improv Level 4: Long Forms", "level": "Improv"},
@@ -172,27 +174,94 @@ class CategoryScanTests(unittest.TestCase):
         ]
         with patch("sources.CLASS_SOURCES", sources):
             scanned = watcher.scan_others()
-        state = {source["id"]: {"ids": []} for source in sources}
+        self.assertEqual(scanned["brooklyn_cc"]["bcc/2"]["categories"], ["improv_core"])
+        # bcc/2 is already known, so five classes are new: under the flood cap,
+        # each gets its own record with only its own categories.
+        state = {"brooklyn_cc": {"ids": ["bcc/2"]}, "magnet": {"ids": []}}
         alerts = diff_and_alert(scanned, state, per_category=False)
-        bcc_alerts = [a for a in alerts if a["school"] == "brooklyn_cc"]
-        self.assertEqual(len(bcc_alerts), 5)
-        by_category = {a["category"]: a for a in bcc_alerts}
-        self.assertEqual(by_category["improv_core"]["classIDs"], "bcc/1,bcc/2")
-        self.assertEqual(by_category["improv_core"]["categories"], ["improv_core"])
-        self.assertEqual(by_category["sketch_core"]["categories"], ["sketch_core"])
-        self.assertEqual(by_category["improv_core"]["pushTitle"],
-                         "New Improv Core classes at Brooklyn Comedy Collective")
-        noncore_ids = {a["classIDs"] for a in bcc_alerts if set(a["categories"]) & {"improv", "sketch", "other"}}
-        self.assertEqual(noncore_ids, {"bcc/4", "bcc/5", "bcc/6"})
-        # The source is unchanged, so existing school-only subscriptions still
-        # match every BCC bundle while category subscriptions can exclude core.
-        self.assertTrue(all(a["school"] == "brooklyn_cc" for a in by_category.values()))
+        bcc_alerts = {a["classIDs"]: a for a in alerts if a["school"] == "brooklyn_cc"}
+        self.assertEqual(set(bcc_alerts), {"bcc/1", "bcc/3", "bcc/4", "bcc/5", "bcc/6"})
+        self.assertEqual(bcc_alerts["bcc/1"]["categories"], ["improv_core"])
+        self.assertEqual(bcc_alerts["bcc/3"]["categories"], ["sketch_core"])
+        self.assertEqual(bcc_alerts["bcc/1"]["pushTitle"], "New class at Brooklyn Comedy Collective")
+        for cid in ("bcc/4", "bcc/5", "bcc/6"):
+            with self.subTest(cid=cid):
+                self.assertFalse({"improv_core", "sketch_core"} & set(bcc_alerts[cid]["categories"]))
+        self.assertEqual(bcc_alerts["bcc/6"]["categories"], ["other"])
+        self.assertTrue(all(a["count"] == 1 for a in alerts))
         self.assertEqual(next(a for a in alerts if a["school"] == "magnet")["categories"], ["all"])
         self.assertEqual(diff_and_alert(scanned, state, per_category=False), [])
 
+    def test_ucb_record_names_class_instructor_and_category(self):
+        events = [
+            # A numbered canonical name loses its "3. " like the feed's level.
+            {"EventID": 43407, "Name": "Saturday Afternoon Section",
+             "StartDateTime": "2026-12-01T19:00:00-05:00", "Tags": ["LOC_NY", "CTG_Improv"],
+             "Categories": [{"Name": "3. Improv 201: The Game of the Scene"}],
+             "Presenters": [{"Name": "Lou  Gonzalez Jr"}, {"Name": "Monika Smith"}, {"Name": ""}]},
+            # Kevin McDonald's workshop: the canonical name doesn't say
+            # "workshop", so the FRQ_Workshop tag adds it.
+            {"EventID": 42057, "Name": "Sketch from Improv",
+             "StartDateTime": "2026-11-01T14:00:00-04:00", "Tags": MCDONALD_TAGS,
+             "Categories": [{"Name": "Improv Electives"}], "Presenters": [{"Name": "Kevin McDonald"}]},
+            # Already named a workshop: no second "workshop".
+            {"EventID": 3, "Name": "Writing Lab", "StartDateTime": "2026-10-13T19:00:00-04:00",
+             "Tags": ["LOC_Online", "CTG_Writing_Programs", "FRQ_Workshop", "FRQ_Intensive"],
+             "Categories": [{"Name": "Writing Workshop"}]},
+            # No canonical name: the first subject category's label stands in.
+            {"EventID": 4, "Name": "Clown Jam", "Tags": ["LOC_LA", "FRQ_Intensive", "CTG_Clowning"]},
+            # Neither a canonical name nor a subject category: no type, no date.
+            {"EventID": 5, "Name": "Mystery Session", "Tags": ["LOC_LA", "FRQ_Workshop"]},
+        ]
+        state = {school: {"ids": []} for _, school in watcher.UCB_LOCATIONS}
+        with patch("sources.ucb_classes.raw_events", return_value=events):
+            alerts = diff_and_alert(watcher.scan_ucb(), state, per_category=True)
+        by_id = {a["classIDs"]: a for a in alerts}
+        self.assertEqual(set(by_id), {"ucb_ny/43407", "ucb_ny/42057", "ucb_online/3", "ucb_la/4", "ucb_la/5"})
+        self.assertEqual(by_id["ucb_ny/43407"]["pushBody"],
+                         "Saturday Afternoon Section\nLou Gonzalez Jr, Monika Smith\n"
+                         "Improv 201: The Game of the Scene")
+        self.assertEqual(by_id["ucb_ny/43407"]["categories"], ["improv_core"])
+        mcdonald = by_id["ucb_ny/42057"]
+        self.assertEqual(mcdonald["pushBody"],
+                         "Sketch from Improv\nKevin McDonald\nImprov Electives workshop")
+        self.assertEqual(mcdonald["pushTitle"], "New class at UCB New York")
+        self.assertEqual(by_id["ucb_online/3"]["pushBody"], "Writing Lab\nWriting Workshop intensive")
+        self.assertEqual(by_id["ucb_la/4"]["pushBody"], "Clown Jam\nClowning intensive")
+        self.assertEqual(by_id["ucb_la/5"]["pushBody"], "Mystery Session", "missing lines are left out")
+        self.assertTrue(all(a["count"] == 1 for a in alerts))
 
-def _ucb(title, categories, cid, when="2026-11-01"):
-    return cid, {"title": title, "when": when, "categories": categories}
+    def test_non_ucb_record_uses_adapter_level_and_instructor(self):
+        sources = [
+            {"id": "wgis_la", "fetch": lambda: [
+                {"id": "wgis_la/1826", "title": "Level 2", "level": "Currently Running",
+                 "instructor": "Carla Cackowski", "start": "2026-10-10T10:00:00"},
+                {"id": "wgis_la/1900", "title": "Drop Ins", "level": "Drop Ins", "instructor": ""},
+            ]},
+            {"id": "magnet", "fetch": lambda: [
+                {"id": "magnet/12061", "title": "Level One", "level": "Improv",
+                 "instructor": "Jason Farr", "start": "2026-10-13"},
+                {"id": "magnet/12062", "title": "Musical Level One", "level": "Musical Improv",
+                 "instructor": "", "start": None},
+            ]},
+        ]
+        with patch("sources.CLASS_SOURCES", sources):
+            scanned = watcher.scan_others()
+        state = {"wgis_la": {"ids": []}, "magnet": {"ids": []}}
+        alerts = {a["classIDs"]: a for a in diff_and_alert(scanned, state, per_category=False)}
+        self.assertEqual(alerts["magnet/12061"]["pushBody"], "Level One\nJason Farr\nImprov")
+        self.assertEqual(alerts["magnet/12062"]["pushBody"], "Musical Level One\nMusical Improv")
+        self.assertEqual(alerts["wgis_la/1826"]["pushBody"], "Level 2\nCarla Cackowski",
+                         "a status bucket is not a class type")
+        self.assertEqual(alerts["wgis_la/1900"]["pushBody"], "Drop Ins", "a type equal to the title is dropped")
+        self.assertEqual(alerts["magnet/12061"]["pushTitle"], "New class at Magnet Theater")
+        self.assertTrue(all(a["categories"] == ["all"] and a["category"] == "all" for a in alerts.values()))
+
+
+def _ucb(title, categories, cid, when="2026-11-01", school="ucb_ny", **extra):
+    """A scanned UCB class as scan_ucb() shapes it: bare EventID key, feed id."""
+    return cid, {"title": title, "when": when, "categories": categories,
+                 "feed_id": f"{school}/{cid}", **extra}
 
 
 class DiffAndAlertTests(unittest.TestCase):
@@ -215,11 +284,14 @@ class DiffAndAlertTests(unittest.TestCase):
         self.assertEqual(a["categories"],
                          ["improv_electives", "sketch_electives", "featured_programs", "workshops"])
         self.assertEqual(a["category"], "improv_electives", "scalar stays the primary")
-        self.assertEqual(a["classIDs"], "42057")
+        self.assertEqual(a["classIDs"], "ucb_ny/42057")
+        self.assertEqual(a["count"], 1)
         self.assertEqual(a["pushTitle"], "New class at UCB New York")
-        self.assertEqual(a["pushBody"], "Sketch from Improv · starts 2026-11-01")
+        self.assertEqual(a["pushBody"], "Sketch from Improv")
 
-    def test_bundles_only_classes_sharing_the_same_category_set(self):
+    def test_one_record_per_new_class_even_when_categories_match(self):
+        # One record per class: a device's single any-of-my-picks subscription
+        # then fires exactly once per class, whatever its category overlap.
         state = {"ucb_ny": {"ids": []}}
         scanned = {"ucb_ny": dict([
             _ucb("Improv 101", ["improv"], "1"),
@@ -227,22 +299,22 @@ class DiffAndAlertTests(unittest.TestCase):
             _ucb("Sketch from Improv", ["improv_electives", "sketch_electives"], "3"),
         ])}
         alerts = diff_and_alert(scanned, state, per_category=True)
-        by_ids = {a["classIDs"]: a for a in alerts}
-        self.assertEqual(set(by_ids), {"1,2", "3"},
-                         "identical sets bundle; a different set is its own record")
-        self.assertEqual(by_ids["1,2"]["categories"], ["improv"])
-        self.assertEqual(by_ids["1,2"]["pushTitle"], "New Improv classes at UCB New York")
-        self.assertEqual(by_ids["3"]["categories"], ["improv_electives", "sketch_electives"])
+        self.assertEqual([a["classIDs"] for a in alerts], ["ucb_ny/1", "ucb_ny/2", "ucb_ny/3"])
+        self.assertEqual([a["categories"] for a in alerts],
+                         [["improv"], ["improv"], ["improv_electives", "sketch_electives"]])
+        self.assertEqual({a["pushTitle"] for a in alerts}, {"New class at UCB New York"})
+        self.assertEqual({a["count"] for a in alerts}, {1})
 
-    def test_non_ucb_schools_bundle_as_all(self):
+    def test_non_ucb_schools_get_per_class_all_records(self):
         state = {"magnet": {"ids": []}}
-        scanned = {"magnet": {"a": {"title": "Level One", "when": "2026-10-01"},
-                              "b": {"title": "Level Two", "when": "2026-10-02"}}}
+        scanned = {"magnet": {"magnet/a": {"title": "Level One", "when": "2026-10-01"},
+                              "magnet/b": {"title": "Level Two", "when": "2026-10-02"}}}
         alerts = diff_and_alert(scanned, state, per_category=False)
-        self.assertEqual(len(alerts), 1)
-        self.assertEqual(alerts[0]["categories"], ["all"])
-        self.assertEqual(alerts[0]["category"], "all")
-        self.assertEqual(alerts[0]["pushTitle"], "New classes at Magnet Theater")
+        self.assertEqual([a["classIDs"] for a in alerts], ["magnet/a", "magnet/b"],
+                         "a non-UCB state key is already the feed id")
+        self.assertTrue(all(a["categories"] == ["all"] and a["category"] == "all" for a in alerts))
+        self.assertEqual(alerts[0]["pushTitle"], "New class at Magnet Theater")
+        self.assertEqual(alerts[0]["pushBody"], "Level One")
 
     def test_state_always_advances_to_current_ids(self):
         state = {"ucb_ny": {"ids": ["old"]}}
@@ -253,18 +325,20 @@ class DiffAndAlertTests(unittest.TestCase):
     def test_empty_scan_keeps_prior_state_and_alerts_nothing(self):
         # A 200-OK-but-empty scrape (markup change, transient empty body) must
         # not wipe the known ids — the next good scan would alert on all of them.
-        state = {"ucb_ny": {"ids": ["1", "2"], "updated": "t0"}, "magnet": {"ids": ["a"], "updated": "t0"}}
+        state = {"ucb_ny": {"ids": ["1", "2"], "updated": "t0", "new_at": "t-1"},
+                 "magnet": {"ids": ["a"], "updated": "t0"}}
         with self.assertLogs("ucb.watcher", level="WARNING"):
             alerts = diff_and_alert({"ucb_ny": {}}, state, per_category=True)
             alerts += diff_and_alert({"magnet": {}}, state, per_category=False)
         self.assertEqual(alerts, [])
-        self.assertEqual(state["ucb_ny"], {"ids": ["1", "2"], "updated": "t0"})
+        self.assertEqual(state["ucb_ny"], {"ids": ["1", "2"], "updated": "t0", "new_at": "t-1"},
+                         "new_at is untouched too")
         self.assertEqual(state["magnet"], {"ids": ["a"], "updated": "t0"})
         # ...and the following good scan alerts only on what is genuinely new.
         alerts = diff_and_alert({"ucb_ny": dict([_ucb("A", ["improv"], "1"),
                                                  _ucb("B", ["improv"], "2"),
                                                  _ucb("C", ["improv"], "3")])}, state, per_category=True)
-        self.assertEqual([a["classIDs"] for a in alerts], ["3"])
+        self.assertEqual([a["classIDs"] for a in alerts], ["ucb_ny/3"])
 
     def test_empty_scan_of_a_school_that_was_empty_is_fine(self):
         state = {"ucb_la": {"ids": [], "updated": "t0"}}
@@ -277,7 +351,86 @@ class DiffAndAlertTests(unittest.TestCase):
             alerts = diff_and_alert({"ucb_ny": dict([_ucb("X", ["improv"], "1")])}, state, per_category=True)
         self.assertEqual(alerts, [])
         self.assertEqual(state["ucb_ny"]["ids"], ["1"])
+        self.assertNotIn("new_at", state["ucb_ny"])
 
+
+class NewAtStateTests(unittest.TestCase):
+    """`new_at` tells the feed publisher a school had a detection its class
+    feed may not show yet."""
+
+    def test_detection_sets_new_at_to_the_scan_time(self):
+        state = {"ucb_ny": {"ids": ["1"], "updated": "t0"}, "ucb_la": {"ids": ["9"], "updated": "t0"}}
+        diff_and_alert({"ucb_ny": dict([_ucb("A", ["improv"], "1"), _ucb("B", ["improv"], "2")]),
+                        "ucb_la": dict([_ucb("Z", ["improv"], "9", school="ucb_la")])},
+                       state, per_category=True)
+        self.assertEqual(state["ucb_ny"]["new_at"], state["ucb_ny"]["updated"])
+        self.assertNotIn("new_at", state["ucb_la"], "a school with no detection never gains one")
+        from datetime import datetime
+        self.assertIsNotNone(datetime.fromisoformat(state["ucb_ny"]["new_at"]).tzinfo)
+
+    def test_new_at_is_carried_until_the_next_detection(self):
+        state = {"magnet": {"ids": ["magnet/1"], "updated": "t0", "new_at": "2026-10-01T00:00:00+00:00"}}
+        scanned = {"magnet": {"magnet/1": {"title": "A"}}}
+        diff_and_alert(scanned, state, per_category=False)
+        self.assertEqual(state["magnet"]["new_at"], "2026-10-01T00:00:00+00:00")
+        self.assertNotEqual(state["magnet"]["updated"], "t0")
+        # A class leaving the catalog is not a detection either.
+        diff_and_alert({"magnet": {"magnet/2": {"title": "B"}}}, state, per_category=False)
+        self.assertNotEqual(state["magnet"]["new_at"], "2026-10-01T00:00:00+00:00", "magnet/2 is new")
+        stamp = state["magnet"]["new_at"]
+        diff_and_alert({"magnet": {"magnet/2": {"title": "B"}}}, state, per_category=False)
+        self.assertEqual(state["magnet"]["new_at"], stamp)
+
+    def test_baseline_does_not_set_new_at(self):
+        state = {}
+        diff_and_alert({"ucb_ny": dict([_ucb("A", ["improv"], "1")])}, state, per_category=True)
+        self.assertEqual(set(state["ucb_ny"]), {"ids", "updated"})
+
+
+class FloodCapTests(unittest.TestCase):
+    """Up to MAX_INDIVIDUAL_ALERTS new classes at a school are per-class
+    records; more become one summary record for that school."""
+
+    def _scan(self, n, categories=lambda i: ["improv"]):
+        return {"ucb_ny": dict(_ucb(f"Class {i}", categories(i), str(i)) for i in range(n))}
+
+    def test_five_new_classes_are_five_records(self):
+        self.assertEqual(watcher.MAX_INDIVIDUAL_ALERTS, 5)
+        alerts = diff_and_alert(self._scan(5), {"ucb_ny": {"ids": []}}, per_category=True)
+        self.assertEqual([a["count"] for a in alerts], [1] * 5)
+
+    def test_six_new_classes_are_one_summary_with_union_categories(self):
+        cats = [["improv"], ["sketch_electives", "featured_programs"], ["improv"],
+                ["standup", "improv"], ["workshops"], ["featured_programs"]]
+        state = {"ucb_ny": {"ids": []}, "ucb_la": {"ids": []}}
+        scanned = self._scan(6, lambda i: cats[i])
+        scanned["ucb_la"] = dict([_ucb("Solo", ["acting"], "99", school="ucb_la")])
+        with self.assertLogs("ucb.watcher", level="WARNING") as logs:
+            alerts = diff_and_alert(scanned, state, per_category=True)
+        self.assertTrue(any("6 new classes exceed 5" in line for line in logs.output))
+        summary = next(a for a in alerts if a["school"] == "ucb_ny")
+        self.assertEqual(len([a for a in alerts if a["school"] == "ucb_ny"]), 1)
+        self.assertEqual(summary["count"], 6)
+        self.assertEqual(summary["pushTitle"], "6 new classes at UCB New York")
+        self.assertEqual(summary["pushBody"], "Class 0\nClass 1\nClass 2\nand 3 more")
+        self.assertEqual(summary["categories"],
+                         ["improv", "sketch_electives", "featured_programs", "standup", "workshops"],
+                         "union in first-seen order")
+        self.assertEqual(summary["category"], "improv")
+        self.assertEqual(summary["classIDs"], ",".join(f"ucb_ny/{i}" for i in range(6)))
+        self.assertEqual(state["ucb_ny"]["new_at"], state["ucb_ny"]["updated"])
+        # The cap is per school: another school's single class is still its own record.
+        self.assertEqual(next(a for a in alerts if a["school"] == "ucb_la")["classIDs"], "ucb_la/99")
+
+    def test_summary_class_ids_keep_whole_ids_within_900_chars(self):
+        items = [{"id": str(i), "title": f"T{i}", "categories": ["all"],
+                  "feed_id": f"io_chicago/{'x' * 40}-{i:03d}"} for i in range(40)]
+        ids = compose_summary("io_chicago", items)["classIDs"]
+        self.assertLessEqual(len(ids), 900)
+        kept = ids.split(",")
+        self.assertEqual(kept, [i["feed_id"] for i in items[:len(kept)]], "a prefix of whole ids")
+        self.assertGreater(len(ids) + 1 + len(items[len(kept)]["feed_id"]), 900, "the next id did not fit")
+        self.assertEqual(compose_summary("io_chicago", items)["count"], 40)
 
 class OthersStaleTests(unittest.TestCase):
     def _state(self, hours_ago):
@@ -305,25 +458,67 @@ class OthersStaleTests(unittest.TestCase):
         self.assertTrue(watcher.others_stale(state, 20), "a fresh UCB scan must not mask stale others")
 
 
-class ComposeTests(unittest.TestCase):
-    def test_primary_drives_the_multi_class_label(self):
-        a = compose("ucb_la", ["sketch_electives", "featured_programs"],
-                    [{"id": "1", "title": "A", "when": ""}, {"id": "2", "title": "B", "when": ""}])
-        self.assertEqual(a["pushTitle"], "New Sketch Electives classes at UCB Los Angeles")
-        self.assertEqual(a["pushBody"], "A · B")
-        self.assertEqual(a["category"], "sketch_electives")
+def _item(cid="1", title="Improv 101", categories=("improv",), **extra):
+    return {"id": cid, "title": title, "when": "", "categories": list(categories), **extra}
 
-    def test_body_caps_at_three_titles(self):
-        items = [{"id": str(i), "title": f"T{i}", "when": ""} for i in range(5)]
-        self.assertEqual(compose("ucb_ny", ["improv"], items)["pushBody"], "T0 · T1 · T2 and 2 more")
+
+class ComposeTests(unittest.TestCase):
+    def test_per_class_record_shape(self):
+        a = compose("ucb_la", _item("41719", "Sketch Lab", ["sketch_electives", "featured_programs"],
+                                    feed_id="ucb_la/41719", type="Sketch Electives",
+                                    instructor="Monika Smith", when="2026-12-01"))
+        self.assertEqual(a, {
+            "school": "ucb_la", "category": "sketch_electives",
+            "categories": ["sketch_electives", "featured_programs"], "count": 1,
+            "pushTitle": "New class at UCB Los Angeles",
+            "pushBody": "Sketch Lab\nMonika Smith\nSketch Electives",
+            "classIDs": "ucb_la/41719",
+        })
+
+    def test_summary_body_caps_at_three_titles(self):
+        items = [_item(str(i), f"T{i}") for i in range(6)]
+        self.assertEqual(compose_summary("ucb_ny", items)["pushBody"], "T0\nT1\nT2\nand 3 more")
 
     def test_every_category_key_has_a_label(self):
         for _, key in watcher.UCB_CATEGORY_TAGS:
             self.assertIn(key, watcher.CATEGORY_LABEL)
 
-    def test_single_class_body_is_capped_like_the_list_body(self):
-        a = compose("ucb_ny", ["improv"], [{"id": "1", "title": "T" * 300, "when": "2026-11-01"}])
-        self.assertEqual(len(a["pushBody"]), 170)
+    def test_each_line_is_cut_to_fit_never_wrapped(self):
+        body = compose("ucb_ny", _item(title="Generating Ideas For Stand Up Comedy: Going from Nothing to Something",
+                                       instructor=", ".join(["Kevin McDonald"] * 5),
+                                       type="W" * 60))["pushBody"]
+        lines = body.split("\n")
+        self.assertEqual(len(lines), 3, "one line per field, however long")
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertTrue(line.endswith("…"))
+                self.assertLessEqual(watcher._line_width(line), watcher._BODY_LINE_BUDGET)
+        self.assertTrue(lines[0].startswith("Generating Ideas For Stand Up"))
+        self.assertTrue(lines[1].startswith("Kevin McDonald, "))
+
+    def test_short_lines_are_untouched_and_inner_whitespace_collapses(self):
+        self.assertEqual(compose("ucb_ny", _item(title="Improv 101", instructor="Monika Smith",
+                                                 type="Improv 101: Improv Basics"))["pushBody"],
+                         "Improv 101\nMonika Smith\nImprov 101: Improv Basics")
+        self.assertEqual(compose("magnet", _item(title="Level\nOne  Two", categories=["all"]))["pushBody"],
+                         "Level One Two", "a newline inside a value must not start a new line")
+
+    def test_missing_or_repeated_lines_are_left_out(self):
+        self.assertEqual(compose("ucb_ny", _item(title="Improv 101"))["pushBody"], "Improv 101")
+        self.assertEqual(compose("ucb_ny", _item(title="Improv 101", type="improv 101"))["pushBody"],
+                         "Improv 101", "a category equal to the name is dropped")
+        self.assertEqual(compose("ucb_ny", _item(title="Improv 101", type="Improv", instructor=" "))["pushBody"],
+                         "Improv 101\nImprov")
+
+    def test_line_width_measures_accents_and_unknown_glyphs_safely(self):
+        self.assertEqual(watcher._line_width("é"), watcher._line_width("e"))
+        self.assertEqual(watcher._line_width("漢"), watcher._NON_ASCII_WIDTH)
+        self.assertGreater(watcher._line_width("WWW"), watcher._line_width("iii"))
+        # All capitals are wider than mixed case: they must be cut earlier.
+        caps = watcher._fit_line("WRITE TO SHOOT: WRITING THE SHORT FILM SCRIPT")
+        mixed = watcher._fit_line("Write to Shoot: Writing the Short Film Script")
+        self.assertLess(len(caps), len(mixed))
+
 
 
 class _FakeResponse:
@@ -342,7 +537,16 @@ class _FakeResponse:
 
 
 def _alert(school="ucb_ny", cid="1"):
-    return compose(school, ["improv"], [{"id": cid, "title": "Improv 101", "when": ""}])
+    return compose(school, _item(cid))
+
+
+# A record composed before per-class alerts: a (school, category set) bundle
+# with bare UCB EventIDs. One parked in _pending_alerts must still send as is.
+_OLD_BUNDLED_ALERT = {
+    "school": "ucb_ny", "category": "improv", "categories": ["improv", "sketch_electives"],
+    "count": 2, "pushTitle": "New Improv classes at UCB New York", "pushBody": "Improv 201 · Improv 301",
+    "classIDs": "42353,42333", "envs": ["production"],
+}
 
 
 class SendAlertsRetryTests(unittest.TestCase):
@@ -418,6 +622,24 @@ class SendAlertsRetryTests(unittest.TestCase):
     @staticmethod
     def _accepted(env, names):
         return _FakeResponse({"records": [{"recordName": name} for name in names]})
+
+    def test_old_bundled_pending_alert_is_written_with_its_original_fields(self):
+        import json
+        from unittest.mock import patch
+        written = []
+
+        def urlopen(req, timeout=None):
+            ops = json.loads(req.data)["operations"]
+            written.extend((req.full_url.split("/")[6], op["record"]) for op in ops)
+            return _FakeResponse({"records": [{"recordName": op["record"]["recordName"]} for op in ops]})
+        with patch.object(watcher.urllib.request, "urlopen", side_effect=urlopen):
+            unsent = watcher.send_alerts([dict(_OLD_BUNDLED_ALERT)])
+        self.assertEqual(unsent, [])
+        self.assertEqual([env for env, _ in written], ["production"], "only the owed environment")
+        record = written[0][1]
+        self.assertTrue(record["recordName"].startswith("alert-") and "-ucb_ny-improv-" in record["recordName"])
+        self.assertEqual({k: v["value"] for k, v in record["fields"].items()},
+                         {k: v for k, v in _OLD_BUNDLED_ALERT.items() if k != "envs"})
 
     def test_incomplete_or_unrelated_acknowledgements_remain_pending(self):
         for response in ({}, [], {"records": []}, {"records": [{}]},
@@ -536,6 +758,22 @@ class MainAtLeastOnceTests(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         p = patch.object(watcher, "STATE_PATH", os.path.join(self.dir, "state.json"))
         p.start(); self.addCleanup(p.stop)
+        env = patch.dict(os.environ)
+        env.start(); self.addCleanup(env.stop)
+        os.environ.pop(watcher.NEW_CLASSES_FILE_ENV, None)
+
+    def _marker(self):
+        """Point WATCH_NEW_CLASSES_FILE at a fresh path; return a reader."""
+        import os
+        path = os.path.join(self.dir, "new-classes.txt")
+        os.environ[watcher.NEW_CLASSES_FILE_ENV] = path
+
+        def lines():
+            if not os.path.exists(path):
+                return None
+            with open(path, encoding="utf-8") as f:
+                return f.read().splitlines()
+        return lines
 
     def _main(self, scanned, send_result, argv=("--ucb",)):
         from unittest.mock import patch
@@ -556,9 +794,9 @@ class MainAtLeastOnceTests(unittest.TestCase):
                    "ucb_la": {}, "ucb_online": {}}
         rc, sent, state = self._main(scanned, lambda alerts: [dict(a, envs=["production"]) for a in alerts])
         self.assertEqual(rc, 1)
-        self.assertEqual([a["classIDs"] for a in sent], ["2"])
+        self.assertEqual([a["classIDs"] for a in sent], ["ucb_ny/2"])
         self.assertEqual(state["ucb_ny"]["ids"], ["1", "2"], "state still advances")
-        self.assertEqual([a["classIDs"] for a in state[watcher.PENDING_KEY]], ["2"])
+        self.assertEqual([a["classIDs"] for a in state[watcher.PENDING_KEY]], ["ucb_ny/2"])
         self.assertEqual(state[watcher.PENDING_KEY][0]["envs"], ["production"])
         self.assertTrue(watcher.others_stale(state, 20), "a parked list is not a school stamp")
 
@@ -566,7 +804,7 @@ class MainAtLeastOnceTests(unittest.TestCase):
         # and, once accepted, the slot is cleared.
         rc, sent, state = self._main(scanned, lambda alerts: [])
         self.assertEqual(rc, 0)
-        self.assertEqual([(a["classIDs"], a.get("envs")) for a in sent], [("2", ["production"])])
+        self.assertEqual([(a["classIDs"], a.get("envs")) for a in sent], [("ucb_ny/2", ["production"])])
         self.assertNotIn(watcher.PENDING_KEY, state)
 
     def test_clean_run_exits_zero_and_parks_nothing(self):
@@ -594,7 +832,7 @@ class MainAtLeastOnceTests(unittest.TestCase):
             rc, sent, state = self._main(scanned, send)
         self.assertEqual(rc, 1)
         self.assertEqual(state["ucb_ny"]["ids"], ["1", "2"])
-        self.assertEqual(state[watcher.PENDING_KEY][0]["classIDs"], "2")
+        self.assertEqual(state[watcher.PENDING_KEY][0]["classIDs"], "ucb_ny/2")
         self.assertEqual(state[watcher.PENDING_KEY][0]["envs"], ["development", "production"])
 
     def test_more_than_fifty_failed_alerts_remain_pending_and_all_retry(self):
@@ -606,13 +844,13 @@ class MainAtLeastOnceTests(unittest.TestCase):
             rc, sent, state = self._main(scanned,
                                          lambda alerts: [dict(a, envs=["production"]) for a in alerts])
         self.assertEqual(rc, 1)
-        self.assertEqual([a["classIDs"] for a in sent], [str(i) for i in range(52)])
+        self.assertEqual([a["classIDs"] for a in sent], [str(i) for i in range(51)] + ["ucb_ny/51"])
         self.assertEqual(state[watcher.PENDING_KEY], parked + [dict(sent[-1], envs=["production"])])
         self.assertTrue(any("retaining all 52" in line for line in logs.output))
 
         rc, sent, state = self._main(scanned, lambda alerts: [])
         self.assertEqual(rc, 0)
-        self.assertEqual([a["classIDs"] for a in sent], [str(i) for i in range(52)])
+        self.assertEqual([a["classIDs"] for a in sent], [str(i) for i in range(51)] + ["ucb_ny/51"])
         self.assertNotIn(watcher.PENDING_KEY, state)
 
     def test_large_deferred_environment_backlog_survives_repeated_runs(self):
@@ -668,6 +906,74 @@ class MainAtLeastOnceTests(unittest.TestCase):
              patch.object(watcher.sys, "argv", ["watcher.py", "--ucb"]):
             self.assertEqual(watcher.main(), 1)
         self.assertEqual(watcher.load_state(), {})
+
+    def test_marker_appends_each_school_with_new_classes_once(self):
+        lines = self._marker()
+        with open(watcher.os.environ[watcher.NEW_CLASSES_FILE_ENV], "w", encoding="utf-8") as f:
+            f.write("brooklyn_cc\n")   # an earlier run's line the workflow hasn't consumed yet
+        watcher.save_state({"ucb_ny": {"ids": ["1"]}, "ucb_la": {"ids": []}, "ucb_online": {"ids": ["5"]}})
+        scanned = {"ucb_ny": dict([_ucb("A", ["improv"], "1"), _ucb("B", ["improv"], "2"),
+                                   _ucb("C", ["standup"], "3")]),
+                   "ucb_la": dict([_ucb("D", ["acting"], "7", school="ucb_la")]),
+                   "ucb_online": dict([_ucb("E", ["improv"], "5", school="ucb_online")])}
+        rc, sent, state = self._main(scanned, lambda alerts: [])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(sent), 3)
+        self.assertEqual(lines(), ["brooklyn_cc", "ucb_ny", "ucb_la"])
+        self.assertIn("new_at", state["ucb_ny"])
+        self.assertNotIn("new_at", state["ucb_online"])
+        # Nothing new next iteration: nothing appended.
+        self._main(scanned, lambda alerts: [])
+        self.assertEqual(lines(), ["brooklyn_cc", "ucb_ny", "ucb_la"])
+
+    def test_marker_is_written_even_when_cloudkit_parks_the_alert(self):
+        lines = self._marker()
+        watcher.save_state({"ucb_ny": {"ids": ["1"]}})
+        rc, _, state = self._main({"ucb_ny": dict([_ucb("A", ["improv"], "1"), _ucb("B", ["improv"], "2")])},
+                                  lambda alerts: [dict(a, envs=["production"]) for a in alerts])
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(state[watcher.PENDING_KEY]), 1)
+        self.assertEqual(lines(), ["ucb_ny"], "the class feed refresh doesn't wait for push delivery")
+
+    def test_old_bundled_pending_alert_retries_unchanged_without_a_marker(self):
+        lines = self._marker()
+        school = {"ids": ["42353", "42333"], "updated": "2026-10-01T00:00:00+00:00"}
+        watcher.save_state({"ucb_ny": school, watcher.PENDING_KEY: [dict(_OLD_BUNDLED_ALERT)]})
+        rc, sent, state = self._main({"ucb_ny": dict([_ucb("A", ["improv"], "42353"),
+                                                      _ucb("B", ["improv"], "42333")])},
+                                     lambda alerts: [])
+        self.assertEqual(rc, 0)
+        self.assertEqual(sent, [_OLD_BUNDLED_ALERT])
+        self.assertNotIn(watcher.PENDING_KEY, state)
+        self.assertIsNone(lines(), "a retry is not a new detection")
+        self.assertNotIn("new_at", state["ucb_ny"])
+
+    def test_dry_run_never_writes_the_marker(self):
+        lines = self._marker()
+        watcher.save_state({"ucb_ny": {"ids": ["1"]}})
+        rc, sent, _ = self._main({"ucb_ny": dict([_ucb("A", ["improv"], "1"), _ucb("B", ["improv"], "2")])},
+                                 lambda alerts: [], argv=("--ucb", "--dry-run"))
+        self.assertEqual((rc, sent), (0, []))
+        self.assertIsNone(lines())
+
+    def test_marker_write_failure_warns_and_keeps_the_exit_code(self):
+        import os
+        os.environ[watcher.NEW_CLASSES_FILE_ENV] = os.path.join(self.dir, "missing-dir", "new.txt")
+        watcher.save_state({"ucb_ny": {"ids": ["1"]}})
+        with self.assertLogs("ucb.watcher", level="WARNING") as logs:
+            rc, _, state = self._main({"ucb_ny": dict([_ucb("A", ["improv"], "1"),
+                                                       _ucb("B", ["improv"], "2")])}, lambda alerts: [])
+        self.assertEqual(rc, 0)
+        self.assertEqual(state["ucb_ny"]["ids"], ["1", "2"], "state was saved before the marker")
+        self.assertTrue(any("could not append new-class schools ucb_ny" in line for line in logs.output))
+
+    def test_no_marker_without_the_environment_variable(self):
+        import os
+        watcher.save_state({"ucb_ny": {"ids": ["1"]}})
+        rc, sent, _ = self._main({"ucb_ny": dict([_ucb("A", ["improv"], "1"), _ucb("B", ["improv"], "2")])},
+                                 lambda alerts: [])
+        self.assertEqual((rc, len(sent)), (0, 1))
+        self.assertEqual(sorted(os.listdir(self.dir)), ["state.json"])
 
 
 class TestModeTests(unittest.TestCase):
