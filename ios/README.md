@@ -79,6 +79,11 @@ iCloud account on the device or simulator; everything else works without one.
   Sketch 1–2). Each
   class has a native detail page (description, instructor, schedule, price)
   with **Register** opening the registration page in an in-app Safari sheet.
+  On that page each instructor's name is a link: their UCB bio page (the
+  same one a show's cast chip opens) when the UCB talent directory knows the
+  name, otherwise a Google search for "<name> + <theater>" (e.g. "Ryan Beck +
+  UCB") in the in-app Safari sheet; placeholders like "Teacher TBD" stay
+  plain text. The class list rows are not links.
   UCB links select the exact course session. Searching auto-expands every
   matching folder.
 - **Class alerts** — the bell in the Classes toolbar: a master switch, per-

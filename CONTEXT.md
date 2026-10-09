@@ -617,6 +617,17 @@ matches real subscribers.
   Upcoming Shows; directory filters All/New York/Los Angeles (LA membership
   wins; NY = everyone whose city label is New York). `TalentStore.phase`
   (`loading/loaded/offline/failed`) drives a Try Again / offline banner.
+  On a class's detail page (only there — list rows stay plain), each
+  instructor name (`ClassItem.instructorNames`: split on ",", "&", "and",
+  keeping "Jr."/"Sr.") opens the same bio when `TalentStore.instructor(named:)`
+  matches — the exact name, else a unique teachers-roster variant (first
+  names where one starts the other, 3+ letters; the other words in order:
+  Raymond/Ray Cordova, Leslie Meisel [Ellis], Tristan [Lee] Griffin) — for
+  any school's class, since many teachers also perform at UCB;
+  otherwise `ClassItem.instructorSearchURL` opens a Google search for
+  "<name> + <org>" (the "+" kept literal) in the in-app Safari sheet.
+  "Teacher TBD"/"TBA"/"Staff" stay plain. The Classes stack is a
+  `NavigationPath` registering ClassItem, TalentRoute and Show destinations.
 - **Calendar**: first Add-to-Calendar asks Apple vs Google, remembered in
   `@AppStorage("calendarProvider")`. Apple = write-only EventKit; Google =
   calendar.google.com/render TEMPLATE URL (routes to the Google app; title,
