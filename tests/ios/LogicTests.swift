@@ -606,6 +606,7 @@ struct LogicTests {
         testPickedTheaterWithNoClasses()
         testClassAlertTargets()
         testClassesStaleness()
+        testInstructorLinks()
         testShowSearchByteParity()
         testShowsSectionMemo()
         testShowsSearchFiltering()
@@ -813,6 +814,42 @@ func testClassesStaleness() {
 }
 
 // MARK: Shows tab feed (search byte parity, section memoization, pruning)
+
+func testInstructorLinks() {
+    checkEqual(ClassItem.splitInstructors("Lou Gonzalez Jr, Monika Smith"),
+               ["Lou Gonzalez Jr", "Monika Smith"], "UCB joins presenters with commas")
+    checkEqual(ClassItem.splitInstructors("Jane Doe & John Roe"), ["Jane Doe", "John Roe"], "ampersand splits")
+    checkEqual(ClassItem.splitInstructors("Jane Doe and John Roe"), ["Jane Doe", "John Roe"], "'and' splits")
+    checkEqual(ClassItem.splitInstructors("John Smith, Jr., Ann Lee"), ["John Smith, Jr.", "Ann Lee"],
+               "a suffix stays with its name")
+    checkEqual(ClassItem.splitInstructors("Alexandra Andrews"), ["Alexandra Andrews"],
+               "'and' inside a name is not a separator")
+    checkEqual(ClassItem.splitInstructors("  "), [], "blank is no one")
+    check(ClassItem.isPlaceholderInstructor("Teacher TBD"), "TBD is a placeholder")
+    check(ClassItem.isPlaceholderInstructor("Staff"), "Staff is a placeholder")
+    check(!ClassItem.isPlaceholderInstructor("Shannon O'Neill"), "a real name is not")
+    check(!ClassItem.isPlaceholderInstructor("Tbadeen Staffordshire"), "whole words only")
+    check(!ClassItem.isPlaceholderInstructor("Jamie Staff"), "a surname Staff is a person")
+    check(ClassItem.isPlaceholderInstructor("Teacher TBC"), "TBC is a placeholder")
+    checkEqual(ClassItem.splitInstructors("Jane&John Roe"), ["Jane", "John Roe"], "& without spaces splits")
+    let variant = { (a: String, b: String) in
+        TalentStore.isNameVariant(a.split(separator: " ").map(String.init),
+                                  of: b.split(separator: " ").map(String.init)) }
+    check(variant("raymond cordova", "ray cordova"), "Raymond is Ray")
+    check(variant("leslie meisel", "leslie meisel ellis"), "an added surname")
+    check(variant("tristan griffin", "tristan lee griffin"), "an added middle name")
+    check(!variant("kevin mcdonald", "patrick mcdonald"), "a different first name")
+    check(!variant("elf lyons", "tim lyons"), "a different first name")
+    check(!variant("al cordova", "alan cordova"), "a two-letter first name is too short to stretch")
+    check(!variant("tristan griffin", "tristan smith"), "the surname must appear")
+    checkEqual(ClassItem.instructorSearchURL(name: "Shannon O'Neill", theater: "UCB")?.absoluteString,
+               "https://www.google.com/search?q=Shannon%20O'Neill%20%2B%20UCB",
+               "Google search for name + theater, the + kept literal")
+    checkEqual(ClassItem.instructorSearchURL(name: "Ann Lee", theater: "Magnet Theater")?.absoluteString,
+               "https://www.google.com/search?q=Ann%20Lee%20%2B%20Magnet%20Theater", "theater name with a space")
+    checkEqual(ClassItem.instructorSearchURL(name: "Ann & Lee", theater: "")?.absoluteString,
+               "https://www.google.com/search?q=Ann%20%26%20Lee", "query separators are escaped")
+}
 
 func showsPayload(_ items: [[String: Any]]) -> ShowsPayload {
     let data = try! JSONSerialization.data(withJSONObject: ["shows": items])

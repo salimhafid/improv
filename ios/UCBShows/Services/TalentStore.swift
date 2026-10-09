@@ -80,6 +80,39 @@ final class TalentStore {
         byName[TalentPerson.nameKey(raw)]
     }
 
+    /// Directory entry for a class's instructor: the exact name first, then —
+    /// on the teachers roster only — the same person under a fuller or
+    /// shorter form of the name. Class listings and the roster disagree for
+    /// some teachers ("Raymond Cordova" / "Ray Cordova", "Leslie Meisel" /
+    /// "Leslie Meisel Ellis", "Tristan Griffin" / "Tristan Lee Griffin"):
+    /// first names where one starts the other (3+ letters), every other word
+    /// of the class's name in order in the roster name, and exactly one
+    /// teacher fitting — an ambiguous fit is no match, which falls back to a
+    /// web search rather than someone else's bio.
+    func instructor(named raw: String) -> TalentPerson? {
+        if let exact = person(named: raw) { return exact }
+        let words = TalentPerson.nameKey(raw).split(separator: " ").map(String.init)
+        guard words.count >= 2 else { return nil }
+        let fits = keyedPeople.filter { key, person in
+            person.groups.contains("teachers")
+                && Self.isNameVariant(words, of: key.split(separator: " ").map(String.init))
+        }
+        return fits.count == 1 ? fits[0].1 : nil
+    }
+
+    /// See `instructor(named:)`. Both sides are `nameKey` words.
+    nonisolated static func isNameVariant(_ words: [String], of roster: [String]) -> Bool {
+        guard let first = words.first, let rosterFirst = roster.first,
+              min(first.count, rosterFirst.count) >= 3,
+              first.hasPrefix(rosterFirst) || rosterFirst.hasPrefix(first) else { return false }
+        var rest = roster.dropFirst()[...]
+        for word in words.dropFirst() {
+            guard let at = rest.firstIndex(of: word) else { return false }
+            rest = rest[(at + 1)...]
+        }
+        return true
+    }
+
     /// Exact directory entry for a structured cast member.
     func person(slug: String) -> TalentPerson? {
         bySlug[slug]

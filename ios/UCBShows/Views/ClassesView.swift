@@ -14,9 +14,13 @@ struct ClassesView: View {
     @State private var expandedSchool: String?
     @State private var expandedSubjects: Set<String> = []
     @State private var retrying = false
-    /// Typed: this stack only ever pushes classes. Held so a class-alert tap
-    /// can open its class from wherever the stack was.
-    @State private var path: [ClassItem] = []
+    /// Held so a class-alert tap can open its class from wherever the stack
+    /// was. Untyped: a class page pushes an instructor's bio, and a bio pushes
+    /// their shows.
+    @State private var path = NavigationPath()
+    /// Zoom-transition namespace that `ShowDetailView` requires; shows pushed
+    /// from a bio here have no zoom source, so it is never matched.
+    @Namespace private var zoom
     /// A tapped alert whose class isn't in the feed yet, and when to stop
     /// looking for it; drives the "just posted" banner. View state rather
     /// than part of the target so a tab switch — which cancels the lookup and
@@ -80,6 +84,17 @@ struct ClassesView: View {
             }
             .navigationDestination(for: ClassItem.self) { item in
                 ClassDetailView(item: item)
+            }
+            // An instructor's bio (from a class page) and that person's
+            // shows (from the bio), as in the Shows tab.
+            .navigationDestination(for: TalentRoute.self) { route in
+                switch route {
+                case .person(let person): TalentBioView(person: person)
+                case .directory(let initialSearch): TalentDirectoryView(initialSearch: initialSearch)
+                }
+            }
+            .navigationDestination(for: Show.self) { show in
+                ShowDetailView(show: show, namespace: zoom)
             }
             .searchable(text: $query, prompt: searchPrompt)
             .sheet(isPresented: $showAlerts) {
@@ -349,7 +364,7 @@ struct ClassesView: View {
                 if let group { expandedSubjects.insert(group.id) }
             }
         }
-        path = [item]
+        path = NavigationPath([item])
         if pendingAlert != nil {
             withAnimation(.snappy(duration: 0.25)) { pendingAlert = nil }
         }

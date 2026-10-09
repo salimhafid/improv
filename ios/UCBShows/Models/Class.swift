@@ -188,4 +188,52 @@ extension ClassItem {
     var subtitleLine: String {
         [instructor, schedule].filter { !$0.isEmpty }.joined(separator: " · ")
     }
+
+    /// Each teacher named in `instructor`, so the class page can link them
+    /// one by one. UCB joins Arlo's presenters with ", "; other schools write
+    /// "A & B" or "A and B". A trailing "Jr."/"Sr."/roman numeral after a
+    /// comma stays with the name before it.
+    var instructorNames: [String] { Self.splitInstructors(instructor) }
+
+    static func splitInstructors(_ raw: String) -> [String] {
+        let parts = raw
+            .replacingOccurrences(of: #"\s*&\s*|\s+and\s+"#, with: ",",
+                                  options: [.regularExpression, .caseInsensitive])
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var names: [String] = []
+        for part in parts {
+            let suffix = part.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            if let last = names.last, ["jr", "sr", "ii", "iii", "iv"].contains(suffix) {
+                names[names.count - 1] = "\(last), \(part)"
+            } else {
+                names.append(part)
+            }
+        }
+        return names
+    }
+
+    /// "Teacher TBD", "TBA", "Staff": a stand-in, not a person to look up.
+    /// "Staff" only as the whole name, so a teacher surnamed Staff still links.
+    static func isPlaceholderInstructor(_ name: String) -> Bool {
+        if name.range(of: #"\b(tbd|tba|tbc|to be (announced|determined|confirmed))\b"#,
+                      options: [.regularExpression, .caseInsensitive]) != nil { return true }
+        let whole = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["staff", "ucb staff", "teacher", "instructor", "various", "various instructors"]
+            .contains(whole)
+    }
+
+    /// Google search for a teacher with no UCB bio: "<name> + <theater>",
+    /// e.g. "Shannon O'Neill + UCB". The "+" is percent-encoded so Google
+    /// shows the query exactly as written rather than reading it as a space.
+    static func instructorSearchURL(name: String, theater: String) -> URL? {
+        let query = [name, theater].map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }.joined(separator: " + ")
+        guard !query.isEmpty else { return nil }
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=?#")
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
+        return URL(string: "https://www.google.com/search?q=\(encoded)")
+    }
 }

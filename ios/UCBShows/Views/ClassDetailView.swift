@@ -2,11 +2,14 @@ import SwiftUI
 
 /// Native class detail: header image (or tinted glyph banner), metadata,
 /// the full scraped description, and a pinned Register bar that opens the
-/// registration page in an in-app Safari sheet.
+/// registration page in an in-app Safari sheet. Each instructor's name is a
+/// link: their UCB bio page when the talent directory knows them, otherwise
+/// a Google search for "<name> + <theater>".
 struct ClassDetailView: View {
     let item: ClassItem
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(TalentStore.self) private var talent
     @State private var webLink: WebLink?
 
     var body: some View {
@@ -20,8 +23,12 @@ struct ClassDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     VStack(alignment: .leading, spacing: 6) {
-                        if !item.instructor.isEmpty {
-                            Label(item.instructor, systemImage: "person.fill")
+                        if !item.instructorNames.isEmpty {
+                            Label {
+                                instructorLinks
+                            } icon: {
+                                Image(systemName: "person.fill")
+                            }
                         }
                         if !item.schedule.isEmpty {
                             Label(item.schedule, systemImage: "calendar")
@@ -84,6 +91,44 @@ struct ClassDetailView: View {
             Image(systemName: "graduationcap.fill")
                 .font(.system(size: 44, weight: .semibold))
                 .foregroundStyle(Theme.accent)
+        }
+    }
+
+    /// One link per teacher, wrapping like the cast chips on a show page.
+    private var instructorLinks: some View {
+        let names = item.instructorNames
+        return FlowLayout(spacing: 4) {
+            ForEach(Array(names.enumerated()), id: \.offset) { index, name in
+                instructorLink(name, comma: index < names.count - 1)
+            }
+        }
+    }
+
+    /// The same bio page a show's cast chip opens (headshot, UCB bio, their
+    /// shows, the full ucbcomedy.com profile) when the directory has this
+    /// name; a Google search in the in-app Safari sheet when it doesn't. The
+    /// directory is UCB's, so a teacher at another school who also performs
+    /// at UCB opens that UCB bio too.
+    @ViewBuilder
+    private func instructorLink(_ name: String, comma: Bool) -> some View {
+        let label = HStack(spacing: 0) {
+            Text(name).foregroundStyle(ClassItem.isPlaceholderInstructor(name) ? Color.secondary : Theme.accent)
+            if comma { Text(",") }
+        }
+        if ClassItem.isPlaceholderInstructor(name) {
+            label.foregroundStyle(.secondary)   // "Teacher TBD": nobody to look up
+        } else if let person = talent.instructor(named: name) {
+            NavigationLink(value: TalentRoute.person(person)) { label }
+                .buttonStyle(.plain)
+                .accessibilityLabel(name)
+                .accessibilityHint("Opens their UCB bio")
+        } else if let url = ClassItem.instructorSearchURL(name: name, theater: item.org) {
+            Button { webLink = WebLink(url: url) } label: { label }
+                .buttonStyle(.plain)
+                .accessibilityLabel(name)
+                .accessibilityHint("Searches Google for \(name) and \(item.org)")
+        } else {
+            label
         }
     }
 

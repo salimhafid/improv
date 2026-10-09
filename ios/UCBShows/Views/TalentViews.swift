@@ -305,11 +305,20 @@ private struct TalentRow: View {
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
+    /// A subview's ideal size, but never wider than the row: an item longer
+    /// than a whole row (a long name at an accessibility text size) gets the
+    /// row width and wraps inside it instead of running off the screen.
+    private func fittedSize(_ view: LayoutSubview, maxWidth: CGFloat) -> CGSize {
+        let ideal = view.sizeThatFits(.unspecified)
+        guard ideal.width > maxWidth, maxWidth.isFinite else { return ideal }
+        return view.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let maxWidth = proposal.width ?? .infinity
         var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            let size = fittedSize(view, maxWidth: maxWidth)
             if x > 0, x + size.width > maxWidth {
                 x = 0
                 y += rowHeight + spacing
@@ -324,7 +333,7 @@ struct FlowLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            let size = fittedSize(view, maxWidth: bounds.width)
             if x > bounds.minX, x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing
