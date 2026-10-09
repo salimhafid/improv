@@ -14,6 +14,9 @@ import SwiftUI
 ///   UITEST_SIDEBAR          — "1" to open the theater sidebar on launch
 ///   UITEST_CALENDAR_DIALOG  — "1" to open the Add-to-Calendar dialog
 ///   UITEST_SHARE            — "1" to open the share sheet
+///   UITEST_CLASS_ALERT_RECORD — a ClassAlert record name: replay a tap on that
+///                             alert at launch (read in UCBShowsApp; pair with
+///                             UITEST_CLASS_ALERT_SUB for the subscription id)
 struct UITestTabSelection: ViewModifier {
     @Binding var selection: Int
 

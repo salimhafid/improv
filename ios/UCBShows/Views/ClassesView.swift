@@ -14,6 +14,30 @@ struct ClassesView: View {
     @State private var expandedSchool: String?
     @State private var expandedSubjects: Set<String> = []
     @State private var retrying = false
+    /// Typed: this stack only ever pushes classes. Held so a class-alert tap
+    /// can open its class from wherever the stack was.
+    @State private var path: [ClassItem] = []
+    /// A tapped alert whose class isn't in the feed yet, and when to stop
+    /// looking for it; drives the "just posted" banner. View state rather
+    /// than part of the target so a tab switch — which cancels the lookup and
+    /// restarts it on return — resumes the same budget instead of a new one.
+    @State private var pendingAlert: PendingAlert?
+
+    private struct PendingAlert: Equatable {
+        let target: ClassAlertTarget
+        let deadline: Date
+    }
+
+    /// The watcher alerts within minutes of a class going up; the feed it
+    /// lands in is republished a few minutes after that, and the raw CDN can
+    /// keep serving the old copy for its 5-minute max-age (query-string cache
+    /// busters are ignored). Polling is the only way to see it arrive.
+    private static let pendingPollInterval: Duration = .seconds(30)
+    private static let pendingBudget: TimeInterval = 10 * 60
+    /// How old an alert can be and still have its class "on the way". Past
+    /// this, a class missing from the feed has most likely started and left
+    /// it (see `ClassAlertTarget.isRecent`), so there is nothing to wait for.
+    private static let pendingRecency: TimeInterval = 30 * 60
 
     private var theaters: Set<String> { app.selectedTheaters }
     /// During a search every folder and subject is held open: the layout only
@@ -28,7 +52,7 @@ struct ClassesView: View {
 
     var body: some View {
         let layout = store.schoolFolders(theaters: theaters, searchText: query)
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if store.allClasses.isEmpty {
                     switch store.phase {
@@ -79,6 +103,11 @@ struct ClassesView: View {
                 }
             }
         }
+        // On the stack, not its root: pushing a class must not cancel a wait
+        // for the alerted one. Keyed on the whole target, so a new tap, the
+        // record resolving, a dismissal or the tab going away each cancel the
+        // run in progress.
+        .task(id: app.classAlertTarget) { await followAlert(app.classAlertTarget) }
     }
 
     // MARK: List
@@ -89,6 +118,13 @@ struct ClassesView: View {
                 if store.phase == .offline {
                     OfflineBanner(updatedLabel: store.updatedLabel, noun: "classes")
                         .padding(.bottom, 8)
+                }
+
+                if let pendingAlert {
+                    PendingClassBanner(titleHint: pendingAlert.target.titleHint) {
+                        dismissPendingAlert()
+                    }
+                    .transition(.opacity)
                 }
 
                 ForEach(layout.selected) { folder in
@@ -236,6 +272,115 @@ struct ClassesView: View {
         }
     }
 
+    // MARK: Class-alert deep link
+
+    /// Open the class a tapped alert names (`AppState.classAlertTarget`),
+    /// waiting for it to reach the feed when the alert beat the feed there.
+    /// Runs as the `.task` keyed on the target, so it is cancelled and
+    /// restarted whenever the target changes, and cancelled when the tab
+    /// goes away.
+    private func followAlert(_ target: ClassAlertTarget?) async {
+        if let pendingAlert, pendingAlert.target.id != target?.id {
+            withAnimation(.snappy(duration: 0.25)) { self.pendingAlert = nil }
+        }
+        guard let target else { return }
+        // Record still on its way (bounded at ~10 s): land on the school
+        // now; the resolved target re-runs this task.
+        if target.isProvisional {
+            revealFolder(target.school)
+            return
+        }
+        // A flood summary, or an alert whose record couldn't be read: the
+        // school's folder is the closest thing to "that class".
+        guard target.classIDs.count == 1 else {
+            revealFolder(target.school)
+            consume(target)
+            return
+        }
+        // Only this target's wait can still be in `pendingAlert` (see above).
+        // One that ran out while the tab was away ends here: pushing a class
+        // long after the banner's "few minutes" would be a surprise.
+        let deadline = pendingAlert?.deadline ?? Date().addingTimeInterval(Self.pendingBudget)
+        guard Date() < deadline else {
+            withAnimation(.snappy(duration: 0.25)) { pendingAlert = nil }
+            consume(target)
+            return
+        }
+        if let item = store.item(for: target) { open(item, for: target); return }
+        // Our copy predates the class; the published feed may not.
+        await store.refresh(force: true)
+        if Task.isCancelled { return }
+        if let item = store.item(for: target) { open(item, for: target); return }
+
+        if pendingAlert == nil {
+            // Only a fresh alert's class can still be on its way. An old
+            // one's has usually started and dropped off the feed, so promise
+            // nothing and land on the school, like an alert naming no class.
+            guard target.isRecent(now: Date(), within: Self.pendingRecency) else {
+                revealFolder(target.school)
+                consume(target)
+                return
+            }
+            withAnimation(.snappy(duration: 0.25)) {
+                pendingAlert = PendingAlert(target: target, deadline: deadline)
+            }
+        }
+        while Date() < deadline {
+            try? await Task.sleep(for: Self.pendingPollInterval)
+            if Task.isCancelled { return }
+            await store.refresh(force: true)
+            if Task.isCancelled { return }
+            if let item = store.item(for: target) { open(item, for: target); return }
+        }
+        // Still not published: stop promising it.
+        withAnimation(.snappy(duration: 0.25)) { pendingAlert = nil }
+        consume(target)
+    }
+
+    /// Open the alerted class: its folder and subject group expanded behind
+    /// it (when the current theater selection shows that school — the
+    /// selection is never changed to make it), the stack popped to root and
+    /// the class pushed in one assignment, like the Tickets tab's deep links.
+    private func open(_ item: ClassItem, for target: ClassAlertTarget) {
+        if let folder = openableFolder(item.source) {
+            let group = folder.subjects.first { $0.classes.contains { $0.id == item.id } }
+            withAnimation(.snappy(duration: 0.25)) {
+                expandedSchool = folder.id
+                if let group { expandedSubjects.insert(group.id) }
+            }
+        }
+        path = [item]
+        if pendingAlert != nil {
+            withAnimation(.snappy(duration: 0.25)) { pendingAlert = nil }
+        }
+        consume(target)
+    }
+
+    /// Expand `school`'s folder if the list currently shows one.
+    private func revealFolder(_ school: String?) {
+        guard let school, let folder = openableFolder(school) else { return }
+        withAnimation(.snappy(duration: 0.25)) { expandedSchool = folder.id }
+    }
+
+    /// `school`'s folder in the layout on screen, if it has anything to open.
+    /// Same key as `body`, so this is a memo hit, not a rebuild.
+    private func openableFolder(_ school: String) -> SchoolFolder? {
+        store.schoolFolders(theaters: theaters, searchText: query).selected
+            .first { $0.id == school && !$0.subjects.isEmpty }
+    }
+
+    /// Clear the target — only if it is still this one; a newer tap owns it
+    /// otherwise.
+    private func consume(_ target: ClassAlertTarget) {
+        if app.classAlertTarget?.id == target.id { app.classAlertTarget = nil }
+    }
+
+    private func dismissPendingAlert() {
+        guard let target = pendingAlert?.target else { return }
+        withAnimation(.snappy(duration: 0.25)) { pendingAlert = nil }
+        consume(target)
+    }
+
     // MARK: States
 
     /// Only reachable during a search: with an empty query every picked
@@ -302,6 +447,58 @@ struct ClassesView: View {
                     .accessibilityLabel("Class alerts")
             }
         }
+    }
+}
+
+/// "Just posted" card at the top of the list while a tapped alert's class is
+/// still on its way into the class feed. Styled as a school card so it reads
+/// as part of the list rather than an error.
+private struct PendingClassBanner: View {
+    let titleHint: String?
+    let onDismiss: () -> Void
+
+    private static let detail = "It will appear here within a few minutes."
+
+    private var headline: String {
+        titleHint.map { "Just posted: \($0)" } ?? "A new class was just posted"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 12) {
+                ProgressView()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(headline)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                    Text(Self.detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            // Read as one sentence; the dismiss button stays its own stop.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(headline). \(Self.detail)")
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 4)
+        .padding(.vertical, 6)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, Theme.Space.gutter)
+        .padding(.top, 10)
     }
 }
 

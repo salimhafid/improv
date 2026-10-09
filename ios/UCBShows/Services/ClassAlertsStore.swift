@@ -7,20 +7,25 @@ import UserNotifications
 /// Class-alert preferences + the CloudKit subscriptions that make them real.
 ///
 /// The GitHub Actions watcher (watcher.py) writes a `ClassAlert` record to the
-/// app's public CloudKit database whenever a school posts new classes — UCB
-/// checked on a schedule (one record per bundle of classes sharing a category
-/// set), BCC daily with the same category bundles, and other schools daily
-/// with one bundled record. Each device turns its
+/// app's public CloudKit database whenever a school posts new classes — one
+/// record per new class (a capped summary record when a school posts a flood
+/// at once), UCB checked every couple of minutes and the other schools about
+/// daily. Each device turns its
 /// toggles into `CKQuerySubscription`s, so Apple's push infrastructure
 /// delivers exactly the alerts this user asked for — no server of ours involved.
 ///
 /// A UCB record carries every category its classes belong to, and a
 /// subscription matches if ANY of them is one the user picked — a Kevin
 /// McDonald workshop tagged Improv Electives + Sketch Electives + Featured
-/// Programs reaches all three audiences. Subscription IDs are deterministic
-/// ("alert/v2/<school>/<category>") so the desired set can be reconciled
-/// against CloudKit's on every change; the "v2" retires the first-generation
-/// IDs, whose `category ==` predicate only ever saw a class's primary tag.
+/// Programs reaches all three audiences, and someone who picked all three
+/// hears it once. That is why a categorized school gets ONE subscription for
+/// all its picks ("alert/v3/<school>/<digest of the picks>", `ANY categories
+/// IN picks`) — CloudKit pushes once per matching subscription, so the
+/// per-category "alert/v2/<school>/<category>" IDs pushed once per pick a
+/// class carried. IDs are deterministic so the desired set can be reconciled
+/// against CloudKit's on every change. Retired generations — v2, and the
+/// first-generation `category ==` IDs that only ever saw a class's primary
+/// tag — still start with "alert/", so the reconcile deletes them as stale.
 @MainActor
 @Observable
 final class ClassAlertsStore {
@@ -347,14 +352,26 @@ final class ClassAlertsStore {
                     sub.notificationInfo = info
                     new.append(sub)
                 }
-                if !new.isEmpty || !stale.isEmpty {
-                    let (saved, deleted) = try await database.modifySubscriptions(saving: new, deleting: stale)
-                    // The call throws only for the operation as a whole. An
-                    // item CloudKit rejected on its own (a predicate on a
-                    // field the schema hasn't indexed, say) comes back per
-                    // item, and swallowing it read as "healthy" over a
-                    // subscription that never existed.
+                // Save first, delete only once every save succeeded — two
+                // calls, not one. If production rejects a new subscription
+                // (a query shape its schema hasn't learned — each new shape,
+                // v3's `ANY categories IN` included, needs a schema deploy),
+                // deleting the old ones in the same call would leave the user
+                // with no alerts at all. Keeping them means duplicate pushes
+                // at worst until a later reconcile succeeds; the dirty flag
+                // stays set, so the next launch or foreground retries.
+                //
+                // Each call throws only for the operation as a whole. An
+                // item CloudKit rejected on its own (a predicate on a field
+                // the schema hasn't indexed, say) comes back per item, and
+                // swallowing it read as "healthy" over a subscription that
+                // never existed.
+                if !new.isEmpty {
+                    let (saved, _) = try await database.modifySubscriptions(saving: new, deleting: [])
                     for case .failure(let error) in saved.values { throw error }
+                }
+                if !stale.isEmpty {
+                    let (_, deleted) = try await database.modifySubscriptions(saving: [], deleting: stale)
                     for case .failure(let error) in deleted.values { throw error }
                 }
                 // A toggle that landed during the awaits above only coalesced

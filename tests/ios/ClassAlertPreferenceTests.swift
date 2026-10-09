@@ -51,10 +51,11 @@ func runClassAlertPreferenceTests() {
     checkEqual(legacy.schools, ["magnet"], "migration removes only BCC's school-wide flag")
     check(!legacy.migrateIfNeeded(), "a normalized preference is not migrated repeatedly")
     let migratedIDs = Set(legacy.subscriptionPlan.map(\.id))
-    checkEqual(migratedIDs, ["alert/magnet/all", "alert/v2/ucb_ny/improv",
-                            "alert/v2/ucb_ny/workshops", "alert/v2/brooklyn_cc/improv",
-                            "alert/v2/brooklyn_cc/sketch", "alert/v2/brooklyn_cc/other"],
-               "migration plans category subscriptions and retires legacy BCC's ID")
+    // Digests computed independently (Python FNV-1a 64 over "improv,workshops"
+    // and "improv,other,sketch") so a drift in the hash is caught here.
+    checkEqual(migratedIDs, ["alert/magnet/all", "alert/v3/ucb_ny/35f327ff2c05f906",
+                            "alert/v3/brooklyn_cc/bf496b29bf4c487a"],
+               "migration plans one subscription per school and retires legacy BCC's ID")
     checkEqual(legacy.activeCount, 3, "badge counts active schools rather than categories")
 
     var silent = alertPrefs(#"{"master":true,"schools":["brooklyn_cc"],"ucb":{"ucb_ny":[],"brooklyn_cc":[]},"version":1}"#)
@@ -126,14 +127,95 @@ func runClassAlertPreferenceTests() {
           "default BCC subscriptions exclude exclusively tagged core records")
     check(defaults.contains { $0.predicate.evaluate(with: improvRecord) },
           "default BCC subscriptions include non-core improv")
-    let core = ClassAlertSubscription(school: "brooklyn_cc", category: "improv_core")
-    checkEqual(core.id, "alert/v2/brooklyn_cc/improv_core", "core subscription uses the established v2 namespace")
+    let core = ClassAlertSubscription(school: "brooklyn_cc", categories: ["improv_core"])
+    checkEqual(core.id, "alert/v3/brooklyn_cc/3566072d07e6ead2", "a core-only pick uses the v3 namespace")
     check(core.predicate.evaluate(with: coreRecord) && !core.predicate.evaluate(with: improvRecord),
           "core subscription uses list membership rather than the broader category")
     check(!core.predicate.evaluate(with: ["school": "ucb_ny", "categories": ["improv_core"]]),
           "category predicates remain scoped to their school")
-    let schoolWide = ClassAlertSubscription(school: "magnet", category: nil)
+    let schoolWide = ClassAlertSubscription(school: "magnet", categories: nil)
+    checkEqual(schoolWide.id, "alert/magnet/all", "school-wide subscription IDs are unchanged")
+    checkEqual(schoolWide.predicate.predicateFormat, #"school == "magnet""#,
+               "school-wide predicates are unchanged")
     check(schoolWide.predicate.evaluate(with: ["school": "magnet"]) &&
           !schoolWide.predicate.evaluate(with: ["school": "brooklyn_cc"]),
           "ordinary school subscriptions still require only the school")
+
+    runSubscriptionPlanTests(ucbDefaults: ucbDefaults)
+}
+
+/// One subscription per categorized school (v3): CloudKit pushes once per
+/// matching subscription, so the old per-category plan pushed once per pick a
+/// class carried.
+private func runSubscriptionPlanTests(ucbDefaults: Set<String>) {
+    // FNV-1a 64 published vectors, plus the "," join of the sorted picks.
+    checkEqual(ClassAlertSubscription.digest([]), "cbf29ce484222325", "FNV-1a 64 of the empty string")
+    checkEqual(ClassAlertSubscription.digest(["a"]), "af63dc4c8601ec8c", "FNV-1a 64 of \"a\"")
+    checkEqual(ClassAlertSubscription.digest(["foobar"]), "85944171f73967e8", "FNV-1a 64 of \"foobar\"")
+    checkEqual(ClassAlertSubscription.digest(["a", "b"]), "e6169119046025e6",
+               "the digest hashes the picks joined by commas")
+
+    var owner = ClassAlertPreferences()
+    owner.master = true
+    owner.setCategorizedSchool("ucb_ny", enabled: true)
+    owner.setCategorizedSchool("ucb_la", enabled: true)
+    owner.setSchool("brooklyn_cc", enabled: true)
+    owner.setSchool("magnet", enabled: true)
+    let plan = owner.subscriptionPlan
+    checkEqual(plan.map(\.school), ["magnet", "brooklyn_cc", "ucb_la", "ucb_ny"],
+               "one subscription per enabled school, sorted by ID")
+    checkEqual(Set(plan.map(\.id)).count, plan.count, "planned subscription IDs are unique")
+    let ny = plan.first { $0.school == "ucb_ny" }
+    checkEqual(ny?.id, "alert/v3/ucb_ny/c4368f6c672388e9",
+               "the 13 default UCB picks hash to a fixed ID on every device and launch")
+    checkEqual(ny?.categories, ucbDefaults.sorted(), "the subscription carries every pick, sorted")
+    check(ny?.predicate.predicateFormat.contains("ANY categories IN") == true,
+          "categorized subscriptions use ANY categories IN (CloudKit listContainsAny)")
+
+    // The reported bug: a class carrying three picked categories matched
+    // three subscriptions and pushed three times. Now exactly one matches.
+    let multi: [String: Any] = ["school": "ucb_ny", "categories": ["standup", "featured_programs", "workshops"]]
+    checkEqual(plan.filter { $0.predicate.evaluate(with: multi) }.count, 1,
+               "a class tagged with several picked categories matches exactly one subscription")
+    check(ny?.predicate.evaluate(with: ["school": "ucb_ny", "categories": ["improv_core", "standup"]]) == true,
+          "a class sharing any one pick matches")
+    check(ny?.predicate.evaluate(with: ["school": "ucb_ny", "categories": ["improv_core"]]) == false,
+          "a class sharing no pick does not match")
+    check(ny?.predicate.evaluate(with: ["school": "ucb_la", "categories": ["standup"]]) == false,
+          "the single subscription stays scoped to its school")
+
+    // Deterministic and independent of the order picks were made in.
+    var forward = ClassAlertPreferences()
+    forward.master = true
+    forward.setCategorizedSchool("ucb_ny", enabled: true)
+    forward.setAllCategories("ucb_ny", enabled: false)
+    for key in ["workshops", "acting", "standup"] { forward.setCategory("ucb_ny", category: key, enabled: true) }
+    var backward = ClassAlertPreferences()
+    backward.master = true
+    backward.setCategorizedSchool("ucb_ny", enabled: true)
+    backward.setAllCategories("ucb_ny", enabled: false)
+    for key in ["standup", "acting", "workshops"] { backward.setCategory("ucb_ny", category: key, enabled: true) }
+    checkEqual(forward.subscriptionPlan.map(\.id), backward.subscriptionPlan.map(\.id),
+               "the subscription ID does not depend on pick order")
+    checkEqual(ClassAlertSubscription(school: "ucb_ny", categories: ["workshops", "acting", "standup"]).id,
+               ClassAlertSubscription(school: "ucb_ny", categories: ["standup", "workshops", "acting"]).id,
+               "the subscription ID depends only on the set of picks")
+
+    // A pick change must change the ID, or the ID-keyed reconcile would keep
+    // the old subscription (and its old predicate).
+    let before = forward.subscriptionPlan.map(\.id)
+    forward.setCategory("ucb_ny", category: "clowning", enabled: true)
+    let added = forward.subscriptionPlan.map(\.id)
+    check(added != before && added.count == 1, "adding a pick replaces the subscription ID")
+    forward.setCategory("ucb_ny", category: "clowning", enabled: false)
+    checkEqual(forward.subscriptionPlan.map(\.id), before, "restoring the picks restores the original ID")
+    forward.setCategory("ucb_ny", category: "acting", enabled: false)
+    check(forward.subscriptionPlan.map(\.id) != before, "removing a pick replaces the subscription ID")
+
+    var silentNY = alertPrefs(#"{"master":true,"schools":["magnet"],"ucb":{"ucb_ny":[]},"version":2}"#)
+    silentNY.migrateIfNeeded()
+    checkEqual(silentNY.subscriptionPlan.map(\.id), ["alert/magnet/all"],
+               "a categorized school with no picks plans no subscription")
+    silentNY.master = false
+    check(silentNY.subscriptionPlan.isEmpty, "master Off plans no subscriptions")
 }

@@ -30,6 +30,97 @@ struct SchoolFolderLayout: Equatable {
     let orderKey: String
 }
 
+/// Where a tapped class-alert notification should land in the Classes tab.
+/// Built by the app from the push (see `NotificationRouter`), consumed — and
+/// cleared — by `ClassesView`. Foundation-only so the logic harness can drive
+/// it.
+struct ClassAlertTarget: Equatable {
+    /// One per tap, so tapping the same alert twice is two requests to open
+    /// it, and a late record fetch can tell whether its tap is still the one
+    /// on screen.
+    let id: UUID
+    /// Watcher school id (== class source id, e.g. "ucb_ny"), when known.
+    var school: String?
+    /// Feed ids from the record's `classIDs` (`ClassItem.rawID`, e.g.
+    /// "ucb_ny/43407"). Exactly one = a per-class alert; several = a
+    /// flood-summary alert; none = unknown.
+    var classIDs: [String]
+    /// The alert's first body line, for the "just posted" banner while the
+    /// class hasn't reached the feed yet.
+    var titleHint: String?
+    /// True from the tap until the alert's record has been fetched. Without
+    /// it the view could not tell "ids not known yet" from "an alert naming no
+    /// class", and would consume the tap before the record arrived.
+    var isProvisional: Bool
+    /// When the alert was sent: its record's CloudKit `creationDate` (system
+    /// metadata, not a record field). Nil until resolved, or if unknown.
+    var alertedAt: Date?
+
+    init(id: UUID = UUID(), school: String?, classIDs: [String] = [],
+         titleHint: String? = nil, isProvisional: Bool = false, alertedAt: Date? = nil) {
+        self.id = id
+        self.school = school
+        self.classIDs = classIDs
+        self.titleHint = titleHint
+        self.isProvisional = isProvisional
+        self.alertedAt = alertedAt
+    }
+
+    /// Whether the alert went out within `window` of `now` — i.e. whether its
+    /// class missing from the feed can still mean "not published yet". The
+    /// feed lists upcoming classes only and alert records are never deleted,
+    /// so an old alert tapped from Notification Center usually names a class
+    /// that has started and left the feed for good. An unknown send time
+    /// can't back a "few minutes" promise, so it is not recent; a send time
+    /// slightly ahead of `now` (device clock behind the server's) is.
+    func isRecent(now: Date, within window: TimeInterval) -> Bool {
+        guard let alertedAt else { return false }
+        return now.timeIntervalSince(alertedAt) <= window
+    }
+
+    /// The school a class-alert subscription id names: "alert/v3/<school>/
+    /// <digest>" and "alert/v2/<school>/<category>" (categorized schools),
+    /// "alert/<school>/all" (school-wide). Anything else is nil. The push
+    /// carries the subscription id for free, so this is what the app shows
+    /// while the alert's record is still being fetched — and all it has if
+    /// that fetch fails.
+    static func school(fromSubscriptionID id: String?) -> String? {
+        guard let id else { return nil }
+        let parts = id.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard parts.first == "alert" else { return nil }
+        if parts.count == 4, parts[1] == "v2" || parts[1] == "v3", !parts[2].isEmpty {
+            return parts[2]
+        }
+        if parts.count == 3, parts[2] == "all", !parts[1].isEmpty {
+            return parts[1]
+        }
+        return nil
+    }
+
+    /// This tap, resolved from its `ClassAlert` record's fields (nil = field
+    /// missing, or the fetch failed). Keeps the tap's `id`; the record's
+    /// school wins over the one inferred from the subscription id;
+    /// `classIDs` is the record's comma-separated list, trimmed, empty
+    /// entries dropped; the hint is the body's first line; `alertedAt` is the
+    /// record's creation date.
+    func resolved(school recordSchool: String?, classIDs field: String?,
+                  pushBody: String?, alertedAt: Date? = nil) -> ClassAlertTarget {
+        let trimmedSchool = recordSchool?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ids = (field ?? "").split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let firstLine = pushBody?.split(whereSeparator: \.isNewline).first
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        return ClassAlertTarget(
+            id: id,
+            school: trimmedSchool.flatMap { $0.isEmpty ? nil : $0 } ?? school,
+            classIDs: ids,
+            titleHint: firstLine.flatMap { $0.isEmpty ? nil : $0 },
+            isProvisional: false,
+            alertedAt: alertedAt)
+    }
+}
+
 /// Single source of truth for the Classes tab: loads the `/classes.json` feed,
 /// caches it for offline, and exposes filtered + city-grouped output. Mirrors
 /// `ShowsStore` for the class data type.
@@ -68,6 +159,15 @@ final class ClassesStore {
     /// memo's miss count. Read by the offline logic harness.
     @ObservationIgnored private(set) var layoutBuildCount = 0
 
+    /// When a network fetch last succeeded — the staleness clock behind
+    /// `refreshIfStale`. Nil until one has. Ignored by observation: no view
+    /// reads it, and every write would otherwise invalidate the Classes tab.
+    @ObservationIgnored private var lastFetched: Date?
+    /// Network fetches in flight. A foreground at cold launch lands while the
+    /// launch fetch is still running; that one is about to answer, so
+    /// `refreshIfStale` stands down instead of sending a duplicate.
+    @ObservationIgnored private var fetchesInFlight = 0
+
     private struct LayoutKey: Equatable {
         let theaters: Set<String>
         /// Already normalized (see `normalizedQuery`).
@@ -93,19 +193,65 @@ final class ClassesStore {
     }
 
     /// Refresh from the network. `force` — the default, since every caller
-    /// outside the store is the user pulling or tapping "Try Again" — makes
-    /// the request revalidate with the origin even inside the CDN's max-age,
-    /// so an explicit refresh can't "succeed" out of `URLCache` while offline.
-    /// The launch path passes false and lets the protocol cache answer.
+    /// outside the store is the user pulling, tapping "Try Again", or waiting
+    /// on an alerted class — makes the request revalidate with the origin even
+    /// inside the CDN's max-age, so an explicit refresh can't "succeed" out of
+    /// `URLCache` while offline. The launch and foreground paths pass false
+    /// and let the protocol cache answer.
     func refresh(force: Bool = true) async {
+        fetchesInFlight += 1
+        defer { fetchesInFlight -= 1 }
         do {
             let payload = try await service.fetchRemote(
                 policy: force ? .reloadRevalidatingCacheData : .useProtocolCachePolicy)
             apply(payload)
             phase = .loaded
+            lastFetched = Date()
         } catch {
+            // A caller torn down mid-request (the class-alert lookup in
+            // `ClassesView` is cancelled whenever its target changes or the
+            // tab goes away) says nothing about connectivity; reporting it
+            // as `.offline` would raise the offline banner over a good feed.
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
             phase = allClasses.isEmpty ? .failed(error.localizedDescription) : .offline
         }
+    }
+
+    /// Foreground refresh: the launch fetch is the only automatic one, so an
+    /// app left running for days kept showing the class list it launched
+    /// with — and a just-alerted class could never appear in it. Throttled
+    /// (default: the CDN's 5-minute max-age, inside which a fetch can't see
+    /// anything newer anyway) and let the protocol cache answer, so frequent
+    /// app switching costs at most a 304.
+    func refreshIfStale(maxAge: TimeInterval = 300) async {
+        guard fetchesInFlight == 0,
+              Self.isStale(lastFetched: lastFetched, now: Date(), maxAge: maxAge) else { return }
+        await refresh(force: false)
+    }
+
+    /// The staleness decision, pure so the harness can check it: never
+    /// fetched, or the last success is more than `maxAge` old. A clock set
+    /// backwards (`now` before the stamp) also counts as stale rather than
+    /// suppressing refreshes until the clock catches up.
+    static func isStale(lastFetched: Date?, now: Date, maxAge: TimeInterval) -> Bool {
+        guard let lastFetched else { return true }
+        let age = now.timeIntervalSince(lastFetched)
+        return age > maxAge || age < 0
+    }
+
+    // MARK: Class alerts
+
+    /// The class a tapped alert names, when it names exactly ONE that is in
+    /// the feed. A flood-summary alert (several ids) or an unknown one (none)
+    /// is nil — the caller opens the school's folder instead. Records written
+    /// before alert ids became feed ids carried bare UCB EventIDs ("43407"),
+    /// so a bare id with a known school also tries "<school>/<id>".
+    func item(for target: ClassAlertTarget) -> ClassItem? {
+        guard target.classIDs.count == 1, let id = target.classIDs.first else { return nil }
+        if let hit = allClasses.first(where: { $0.rawID == id }) { return hit }
+        guard !id.contains("/"), let school = target.school, !school.isEmpty else { return nil }
+        let prefixed = "\(school)/\(id)"
+        return allClasses.first { $0.rawID == prefixed }
     }
 
     /// The single write path for class data — both loaders above go through it,

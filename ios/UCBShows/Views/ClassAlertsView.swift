@@ -69,7 +69,7 @@ struct ClassAlertsView: View {
                 } header: {
                     Text("UCB — customizable")
                 } footer: {
-                    Text("Checked every 10 minutes. Pick exactly which class categories alert you, per city.")
+                    Text("Checked every few minutes. Pick exactly which class categories alert you, per city.")
                 }
 
                 Section {
@@ -96,7 +96,7 @@ struct ClassAlertsView: View {
                 } header: {
                     Text("Other schools")
                 } footer: {
-                    Text("Checked daily — one bundled notification per school when anything new appears. Alerts work even for theaters you don’t have toggled on elsewhere.")
+                    Text("Checked daily — one notification per new class, or a single summary when a school posts many at once. Alerts work even for theaters you don’t have toggled on elsewhere.")
                 }
             }
             .navigationTitle("Class Alerts")
@@ -157,7 +157,7 @@ struct CategoryAlertDetailView: View {
     private var categories: [(key: String, label: String)] { ClassAlertCatalog.categories(for: school.id) }
     private var allSelected: Bool { ClassAlertCatalog.categoryKeys(for: school.id).isSubset(of: selected) }
     private var schedule: String {
-        school.id == ClassAlertCatalog.bccSchool.id ? "Checked daily." : "Checked every 10 minutes."
+        school.id == ClassAlertCatalog.bccSchool.id ? "Checked daily." : "Checked every few minutes."
     }
 
     var body: some View {

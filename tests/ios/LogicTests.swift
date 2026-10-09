@@ -604,6 +604,8 @@ struct LogicTests {
         testSearchByteParity()
         testSchoolFolderOrder()
         testPickedTheaterWithNoClasses()
+        testClassAlertTargets()
+        testClassesStaleness()
         testShowSearchByteParity()
         testShowsSectionMemo()
         testShowsSearchFiltering()
@@ -711,6 +713,103 @@ func testPickedTheaterWithNoClasses() {
     // An unpicked empty theater is still dropped.
     check(!picked.selected.contains { $0.id == "playground" },
           "an unpicked theater with no classes stays out of the list")
+}
+
+// MARK: Class-alert deep links (tap → target → class) and foreground refresh
+
+@MainActor
+func testClassAlertTargets() {
+    // School from the subscription id the push carries.
+    checkEqual(ClassAlertTarget.school(fromSubscriptionID: "alert/v3/ucb_ny/0123456789abcdef"),
+               "ucb_ny", "v3 subscription id names its school")
+    checkEqual(ClassAlertTarget.school(fromSubscriptionID: "alert/v2/brooklyn_cc/improv"),
+               "brooklyn_cc", "v2 subscription id names its school")
+    checkEqual(ClassAlertTarget.school(fromSubscriptionID: "alert/magnet/all"),
+               "magnet", "school-wide subscription id names its school")
+    for garbage in [nil, "", "alert", "alert/", "alert/v3//abc", "alert/v3/ucb_ny",
+                    "alert/v3/ucb_ny/abc/extra", "alert/ucb_ny/improv", "other/magnet/all",
+                    "alert//all", "_test_probe"] as [String?] {
+        checkEqual(ClassAlertTarget.school(fromSubscriptionID: garbage), nil,
+                   "no school from subscription id \(garbage ?? "nil")")
+    }
+
+    // Resolving a provisional target from the alert record's fields.
+    let provisional = ClassAlertTarget(school: "ucb_ny", isProvisional: true)
+    let resolved = provisional.resolved(school: "ucb_la", classIDs: " ucb_la/41719 , ,",
+                                        pushBody: "Advanced Study: Harold\nwith Jane Doe · Workshop")
+    checkEqual(resolved.id, provisional.id, "resolving keeps the tap's id")
+    check(!resolved.isProvisional, "a resolved target is no longer provisional")
+    checkEqual(resolved.school, "ucb_la", "the record's school wins over the inferred one")
+    checkEqual(resolved.classIDs, ["ucb_la/41719"], "class ids are trimmed, empty entries dropped")
+    checkEqual(resolved.titleHint, "Advanced Study: Harold", "the hint is the body's first line")
+    let failed = provisional.resolved(school: nil, classIDs: nil, pushBody: nil)
+    checkEqual(failed.school, "ucb_ny", "a failed fetch keeps the inferred school")
+    checkEqual(failed.classIDs, [], "...with no class ids")
+    checkEqual(failed.titleHint, nil, "...and no hint")
+    checkEqual(provisional.resolved(school: "  ", classIDs: "", pushBody: "  \n").school, "ucb_ny",
+               "a blank record school falls back to the inferred one")
+    checkEqual(provisional.resolved(school: nil, classIDs: "ucb_ny/1,ucb_ny/2", pushBody: nil).classIDs,
+               ["ucb_ny/1", "ucb_ny/2"], "a flood summary keeps every id")
+    check(ClassAlertTarget(school: "ucb_ny") != ClassAlertTarget(school: "ucb_ny"),
+          "two taps on the same alert are distinct targets")
+
+    // Alert age: only a fresh alert's missing class is worth waiting for.
+    let sent = fixedNow.addingTimeInterval(-5 * 60)
+    checkEqual(provisional.resolved(school: nil, classIDs: "ucb_ny/1", pushBody: nil,
+                                    alertedAt: sent).alertedAt,
+               sent, "resolving carries the record's creation date")
+    checkEqual(failed.alertedAt, nil, "a failed fetch has no send time")
+    let window: TimeInterval = 30 * 60
+    check(ClassAlertTarget(school: "ucb_ny", alertedAt: sent).isRecent(now: fixedNow, within: window),
+          "a 5-minute-old alert is recent")
+    check(ClassAlertTarget(school: "ucb_ny", alertedAt: fixedNow.addingTimeInterval(-window))
+            .isRecent(now: fixedNow, within: window),
+          "exactly the window is still recent")
+    check(!ClassAlertTarget(school: "ucb_ny", alertedAt: fixedNow.addingTimeInterval(-19 * 86_400))
+            .isRecent(now: fixedNow, within: window),
+          "a weeks-old alert is not recent (its class has likely left the feed)")
+    check(ClassAlertTarget(school: "ucb_ny", alertedAt: fixedNow.addingTimeInterval(60))
+            .isRecent(now: fixedNow, within: window),
+          "a send time just ahead of a slow device clock is recent")
+    check(!ClassAlertTarget(school: "ucb_ny").isRecent(now: fixedNow, within: window),
+          "an unknown send time is not recent")
+
+    // Finding the class a target names.
+    let store = ClassesStore()
+    store.apply(classesPayload([
+        ["id": "ucb_ny/43407", "title": "Improv 201", "source": "ucb_ny", "city": "New York", "org": "UCB"],
+        ["id": "magnet/12061", "title": "Level One", "source": "magnet", "city": "New York", "org": "Magnet Theater"],
+        ["id": "ucb_la/43407", "title": "Sketch 101", "source": "ucb_la", "city": "Los Angeles", "org": "UCB"],
+    ]))
+    checkEqual(store.item(for: ClassAlertTarget(school: "magnet", classIDs: ["magnet/12061"]))?.title,
+               "Level One", "a feed id finds its class")
+    checkEqual(store.item(for: ClassAlertTarget(school: nil, classIDs: ["ucb_ny/43407"]))?.title,
+               "Improv 201", "a feed id needs no school")
+    checkEqual(store.item(for: ClassAlertTarget(school: "ucb_la", classIDs: ["43407"]))?.title,
+               "Sketch 101", "a legacy bare UCB EventID resolves within its school")
+    checkEqual(store.item(for: ClassAlertTarget(school: nil, classIDs: ["43407"]))?.title, nil,
+               "a bare id with no school finds nothing")
+    checkEqual(store.item(for: ClassAlertTarget(school: "ucb_ny",
+                                                classIDs: ["ucb_ny/43407", "magnet/12061"]))?.title,
+               nil, "a flood summary names no single class")
+    checkEqual(store.item(for: ClassAlertTarget(school: "ucb_ny", classIDs: ["ucb_ny/99999"]))?.title,
+               nil, "a class not in the feed yet is nil")
+    checkEqual(store.item(for: ClassAlertTarget(school: "ucb_ny"))?.title, nil,
+               "a target with no ids is nil")
+}
+
+@MainActor
+func testClassesStaleness() {
+    let now = fixedNow
+    check(ClassesStore.isStale(lastFetched: nil, now: now, maxAge: 300), "never fetched is stale")
+    check(!ClassesStore.isStale(lastFetched: now.addingTimeInterval(-120), now: now, maxAge: 300),
+          "a 2-minute-old fetch is fresh")
+    check(!ClassesStore.isStale(lastFetched: now.addingTimeInterval(-300), now: now, maxAge: 300),
+          "exactly maxAge is still fresh")
+    check(ClassesStore.isStale(lastFetched: now.addingTimeInterval(-301), now: now, maxAge: 300),
+          "older than maxAge is stale")
+    check(ClassesStore.isStale(lastFetched: now.addingTimeInterval(3600), now: now, maxAge: 300),
+          "a clock set backwards doesn't suppress refreshes")
 }
 
 // MARK: Shows tab feed (search byte parity, section memoization, pruning)

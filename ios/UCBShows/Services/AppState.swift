@@ -33,6 +33,11 @@ final class AppState {
     /// (set by a heart-reminder tap), consumed — and cleared — by the Tickets
     /// tab.
     var openShowID: String?
+    /// Deep-link target: the class a tapped class alert names (set by the app
+    /// — provisionally from the push, then from the alert's CloudKit record),
+    /// consumed — and cleared — by the Classes tab, which waits for the class
+    /// to reach the feed when it isn't there yet.
+    var classAlertTarget: ClassAlertTarget?
 
     private static let theatersKey = "selectedTheaters"
     private static let legacyTheaterKey = "selectedTheater"

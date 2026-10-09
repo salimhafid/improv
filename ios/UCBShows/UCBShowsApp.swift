@@ -91,9 +91,33 @@ struct UCBShowsApp: App {
                         app.openShowID = id
                         app.activeTab = 1
                     }
-                    notifications.onClassAlert = {
+                    notifications.onClassAlert = { tap in
                         app.activeTab = 2
+                        // The push names only the record and the subscription.
+                        // Show the school straight away (the subscription id
+                        // says which), then swap in the record's class ids —
+                        // unless a newer tap has taken over meanwhile.
+                        let provisional = ClassAlertTarget(
+                            school: ClassAlertTarget.school(fromSubscriptionID: tap.subscriptionID),
+                            isProvisional: true)
+                        app.classAlertTarget = provisional
+                        Task {
+                            let resolved = await notifications.resolve(tap, provisional: provisional)
+                            if app.classAlertTarget?.id == provisional.id {
+                                app.classAlertTarget = resolved
+                            }
+                        }
                     }
+                    #if DEBUG
+                    // Replays a class-alert tap without a push (simulator
+                    // banners are hard to hit), exercising the record fetch,
+                    // class lookup and navigation. See UITestSupport.
+                    let env = ProcessInfo.processInfo.environment
+                    if let record = env["UITEST_CLASS_ALERT_RECORD"] {
+                        notifications.onClassAlert?(ClassAlertTap(
+                            recordName: record, subscriptionID: env["UITEST_CLASS_ALERT_SUB"]))
+                    }
+                    #endif
                     // Class alerts arrive as CloudKit pushes, so they need an
                     // APNs registration + a subscription reconcile on EVERY
                     // launch — the device token rotates, prefs can arrive from
@@ -140,6 +164,9 @@ struct UCBShowsApp: App {
                     // Covers a device token rotating and permission granted in
                     // Settings while we were backgrounded. Idempotent.
                     Task { await classAlerts.armOnLaunch() }
+                    // The launch fetch is otherwise the class list's only
+                    // automatic refresh. Throttled inside the store.
+                    Task { await classesStore.refreshIfStale() }
                 }
         }
     }

@@ -150,33 +150,77 @@ struct ClassAlertPreferences: Codable, Equatable {
         return schools.count + categorySelections.filter { !$0.value.isEmpty }.count
     }
 
+    /// At most one subscription per school, never one per picked category —
+    /// see `ClassAlertSubscription` for why. An enabled school with no picks
+    /// plans nothing, which is what makes that state silent.
     var subscriptionPlan: [ClassAlertSubscription] {
         guard master else { return [] }
         var normalized = self
         normalized.migrateIfNeeded()
-        let schoolWide = normalized.schools.map { ClassAlertSubscription(school: $0, category: nil) }
-        let categorized = normalized.categorySelections.flatMap { school, categories in
-            categories.map { ClassAlertSubscription(school: school, category: $0) }
-        }
+        let schoolWide = normalized.schools.map { ClassAlertSubscription(school: $0, categories: nil) }
+        let categorized = normalized.categorySelections
+            .filter { !$0.value.isEmpty }
+            .map { ClassAlertSubscription(school: $0.key, categories: $0.value) }
         return (schoolWide + categorized).sorted { $0.id < $1.id }
     }
 }
 
-/// Uses the existing school-only and school + categories CONTAINS templates.
-/// New category values do not introduce a new CloudKit query shape.
+/// One CloudKit query subscription: school-wide (`alert/<school>/all`,
+/// `school == X`) or, for a categorized school, ONE subscription covering
+/// every pick (`alert/v3/<school>/<digest>`, `school == X AND ANY categories
+/// IN picks`).
+///
+/// Why one per school: CloudKit sends a push for every subscription a new
+/// record matches. The v2 plan had one subscription per picked category
+/// (`categories CONTAINS c`), so a class tagged Stand-Up + Featured Programs +
+/// Workshops pushed three times to anyone who picked all three. CloudKit
+/// predicates have no OR, but `ANY categories IN picks` is sent as the
+/// server's `listContainsAny` filter: the single subscription matches when
+/// the class shares any pick, and fires once.
+///
+/// That query shape is new to the container. Like every earlier shape it had
+/// to be learned in the development environment and deployed with the schema
+/// to production before production would accept it (see CONTEXT.md,
+/// "Production UCB subscription failure").
+///
+/// The digest is in the ID because the reconcile diffs by ID alone: a pick
+/// change has to produce a new ID, so the old subscription (stale) is replaced
+/// rather than left matching the previous picks. Sorting first makes it the
+/// same on every device and launch whatever order the picks were made in.
 struct ClassAlertSubscription: Identifiable, Equatable {
     let school: String
-    let category: String?
+    /// Nil for a school-wide subscription; otherwise the picks, sorted.
+    let categories: [String]?
+
+    init(school: String, categories: Set<String>?) {
+        self.school = school
+        self.categories = categories?.sorted()
+    }
 
     var id: String {
-        if let category { return "alert/v2/\(school)/\(category)" }
+        if let categories { return "alert/v3/\(school)/\(Self.digest(categories))" }
         return "alert/\(school)/all"
     }
 
     var predicate: NSPredicate {
-        if let category {
-            return NSPredicate(format: "school == %@ AND categories CONTAINS %@", school, category)
+        if let categories {
+            return NSPredicate(format: "school == %@ AND ANY categories IN %@", school, categories)
         }
         return NSPredicate(format: "school == %@", school)
+    }
+
+    /// 16 lowercase hex chars: FNV-1a 64-bit over the UTF-8 bytes of the
+    /// sorted picks joined by ",". Hand-rolled because the logic harness
+    /// compiles this file with plain `swiftc` (Foundation only, no CryptoKit),
+    /// and Swift's `hashValue` is seeded per process, so it would change the
+    /// ID on every launch. Not a security boundary — only a stable name.
+    static func digest(_ sortedPicks: [String]) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in sortedPicks.joined(separator: ",").utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        let hex = String(hash, radix: 16)
+        return String(repeating: "0", count: 16 - hex.count) + hex
     }
 }
