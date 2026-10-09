@@ -41,6 +41,35 @@ def _operation(request):
     return json.loads(request.data)["operations"][0]
 
 
+def _is_query(request):
+    return request.full_url.endswith("/records/query")
+
+
+def _modify_requests(urlopen):
+    """The probe's subscription create/delete requests, in order, without its
+    read-only LIST_CONTAINS_ANY record query."""
+    return [c.args[0] for c in urlopen.call_args_list if not _is_query(c.args[0])]
+
+
+def _alert_record(*categories):
+    return {"recordName": "class-alert-test", "recordType": "ClassAlert",
+            "fields": {"categories": {"value": list(categories), "type": "STRING_LIST"}}}
+
+
+# Every shipped subscription shape's category filter, in QUERY_SHAPES order
+# (school-only adds none). ucb-v3 sends the picks as one STRING_LIST value.
+_CATEGORY_FILTERS = [
+    [],
+    [{"fieldName": "category", "comparator": "EQUALS",
+      "fieldValue": {"value": "improv", "type": "STRING"}}],
+    [{"fieldName": "categories", "comparator": "LIST_CONTAINS",
+      "fieldValue": {"value": "improv", "type": "STRING"}}],
+    [{"fieldName": "categories", "comparator": "LIST_CONTAINS_ANY",
+      "fieldValue": {"value": ["improv", "standup"], "type": "STRING_LIST"}}],
+]
+_SHAPES = ("school-only", "ucb-legacy", "ucb-v2", "ucb-v3")
+
+
 def _native_notification_info():
     # Independent fixture using normalized native REST response names, not an
     # echo of the request: unknown request keys can be silently discarded.
@@ -77,6 +106,10 @@ class DiagnosticHarness(unittest.TestCase):
 
     @staticmethod
     def acknowledge_subscription(request, **_):
+        if _is_query(request):
+            # The probe's read-only contains-any check; an empty result is a
+            # valid answer. Tests of that check answer it themselves.
+            return _response({"records": []})
         operation = _operation(request)
         subscription = {"subscriptionID": operation["subscription"]["subscriptionID"]}
         if operation["operationType"] == "create":
@@ -103,9 +136,9 @@ class SubscriptionProbeTests(DiagnosticHarness):
                 self.output = io.StringIO()
 
                 def answer(request, **kwargs):
-                    operation = _operation(request)
-                    if operation["operationType"] != "create":
+                    if _is_query(request) or _operation(request)["operationType"] != "create":
                         return self.acknowledge_subscription(request, **kwargs)
+                    operation = _operation(request)
                     info = _native_notification_info()
                     if key is None:
                         info = value
@@ -119,8 +152,9 @@ class SubscriptionProbeTests(DiagnosticHarness):
 
                 self.urlopen.side_effect = answer
                 self.assertEqual(self.run_main(probe), 1)
-                operations = [_operation(c.args[0]) for c in self.urlopen.call_args_list]
-                self.assertEqual(len(operations), 6)
+                operations = [_operation(r) for r in _modify_requests(self.urlopen)]
+                self.assertEqual(len(operations), 8)
+                self.assertEqual(self.urlopen.call_count, 9)   # + the contains-any query
                 for create, delete in zip(operations[::2], operations[1::2]):
                     self.assertEqual(delete, {"operationType": "delete", "subscription": {
                         "subscriptionID": create["subscription"]["subscriptionID"]}})
@@ -131,7 +165,10 @@ class SubscriptionProbeTests(DiagnosticHarness):
         self.urlopen.side_effect = self.acknowledge_subscription
         self.assertEqual(self.run_main(probe, ["--matrix"]), 0)
         requests = [call.args[0] for call in self.urlopen.call_args_list]
-        self.assertEqual(len(requests), 48)
+        # 4 shapes x 2 orders x 2 scopes x (create + delete) x 2 environments;
+        # the matrix skips the record query.
+        self.assertEqual(len(requests), 64)
+        self.assertFalse(any(_is_query(r) for r in requests))
         created_ids = set()
         variants_by_env = {env: [] for env in ("development", "production")}
         for create, delete in zip(requests[::2], requests[1::2]):
@@ -163,11 +200,16 @@ class SubscriptionProbeTests(DiagnosticHarness):
                 self.assertNotIn("zoneID", subscription)
             else:
                 self.assertEqual(subscription["zoneID"], {"zoneName": "_defaultZone"})
+            for f in filters:
+                if f["comparator"] == "LIST_CONTAINS_ANY":
+                    self.assertEqual(f["fieldValue"], {"value": ["improv", "standup"],
+                                                       "type": "STRING_LIST"})
             variants_by_env[env].append((tuple((f["fieldName"], f["comparator"])
                                                for f in filters), subscription["zoneWide"]))
         expected = []
         for field, comparator in ((None, None), ("category", "EQUALS"),
-                                  ("categories", "LIST_CONTAINS")):
+                                  ("categories", "LIST_CONTAINS"),
+                                  ("categories", "LIST_CONTAINS_ANY")):
             order = [("school", "EQUALS")]
             if field:
                 order.append((field, comparator))
@@ -176,8 +218,9 @@ class SubscriptionProbeTests(DiagnosticHarness):
                     expected.append((tuple(filters), zone_wide))
         for env, actual in variants_by_env.items():
             self.assertEqual(actual, expected)
-            self.assertIn(f"{env} / ucb-v2 / reversed / default-zone: subscription type accepted",
-                          self.output.getvalue())
+            for shape in ("ucb-v2", "ucb-v3"):
+                self.assertIn(f"{env} / {shape} / reversed / default-zone: subscription type accepted",
+                              self.output.getvalue())
 
     def test_matrix_rejection_still_cleans_owned_id_and_continues_other_variants(self):
         diagnose.watcher.ENVIRONMENTS = ["production"]
@@ -194,7 +237,7 @@ class SubscriptionProbeTests(DiagnosticHarness):
         self.urlopen.side_effect = answer
         self.assertEqual(self.run_main(probe, ["--matrix"]), 1)
         operations = [_operation(c.args[0]) for c in self.urlopen.call_args_list]
-        self.assertEqual(len(operations), 24)
+        self.assertEqual(len(operations), 32)
         for create, delete in zip(operations[::2], operations[1::2]):
             self.assertEqual(delete, {"operationType": "delete", "subscription": {
                 "subscriptionID": create["subscription"]["subscriptionID"]}})
@@ -208,14 +251,22 @@ class SubscriptionProbeTests(DiagnosticHarness):
         self.urlopen.side_effect = self.acknowledge_subscription
         self.assertEqual(self.run_main(probe), 0)
         requests = [call.args[0] for call in self.urlopen.call_args_list]
-        self.assertEqual(len(requests), 12)
+        # Per environment: create + delete for each of the 4 shapes, then one
+        # read-only contains-any record query.
+        self.assertEqual(len(requests), 18)
         created_ids = set()
-        expected_filters = [[], [{"fieldName": "category", "comparator": "EQUALS",
-                                 "fieldValue": {"value": "improv", "type": "STRING"}}],
-                            [{"fieldName": "categories", "comparator": "LIST_CONTAINS",
-                              "fieldValue": {"value": "improv", "type": "STRING"}}]]
-        for env, group in zip(("development", "production"), (requests[:6], requests[6:])):
-            for index, extra_filters in enumerate(expected_filters):
+        for env, group in zip(("development", "production"), (requests[:9], requests[9:])):
+            query = group[8]
+            self.assertEqual(query.get_method(), "POST")
+            self.assertTrue(query.full_url.endswith(f"/{env}/public/records/query"))
+            body = json.loads(query.data)
+            self.assertNotIn("operations", body)
+            self.assertEqual(body["query"], {"recordType": "ClassAlert", "filterBy": [
+                {"fieldName": "school", "comparator": "EQUALS",
+                 "fieldValue": {"value": "ucb_ny", "type": "STRING"}},
+                {"fieldName": "categories", "comparator": "LIST_CONTAINS_ANY",
+                 "fieldValue": {"value": ["standup", "writing_programs"], "type": "STRING_LIST"}}]})
+            for index, extra_filters in enumerate(_CATEGORY_FILTERS):
                 create, delete = group[index * 2:index * 2 + 2]
                 for request in (create, delete):
                     self.assertEqual(request.get_method(), "POST")
@@ -240,13 +291,14 @@ class SubscriptionProbeTests(DiagnosticHarness):
                     "titleLocalizedKey": "CA_TITLE", "titleLocalizedArguments": ["pushTitle"],
                     "alertLocalizationKey": "CA_BODY", "alertLocalizationArgs": ["pushBody"],
                     "soundName": "default"})
-            for shape in ("school-only", "ucb-legacy", "ucb-v2"):
+            for shape in _SHAPES:
                 self.assertIn(f"{env} / {shape}: subscription type accepted", self.output.getvalue())
-        self.assertEqual(self.output.getvalue().count("title/body payload verified"), 6)
+            self.assertIn(f"{env} / contains-any query: 0 record(s)", self.output.getvalue())
+        self.assertEqual(self.output.getvalue().count("title/body payload verified"), 8)
 
     def test_production_item_error_is_reported_after_development_cleanup(self):
         def answer(request, **kwargs):
-            if "/production/" in request.full_url:
+            if "/production/" in request.full_url and not _is_query(request):
                 operation = _operation(request)
                 sid = operation["subscription"]["subscriptionID"]
                 if operation["operationType"] == "delete":
@@ -258,9 +310,8 @@ class SubscriptionProbeTests(DiagnosticHarness):
 
         self.urlopen.side_effect = answer
         self.assertEqual(self.run_main(probe), 1)
-        requests = [call.args[0] for call in self.urlopen.call_args_list]
-        self.assertEqual([_operation(r)["operationType"] for r in requests],
-                         ["create", "delete"] * 6)
+        self.assertEqual([_operation(r)["operationType"] for r in _modify_requests(self.urlopen)],
+                         ["create", "delete"] * 8)
         self.assertIn("production / ucb-legacy: subscription creation FAILED: INVALID_ARGUMENT",
                       self.errors.getvalue())
         self.assertIn("query type is not deployed", self.errors.getvalue())
@@ -270,6 +321,8 @@ class SubscriptionProbeTests(DiagnosticHarness):
         diagnose.watcher.ENVIRONMENTS = ["production"]
 
         def answer(request, **kwargs):
+            if _is_query(request):
+                return self.acknowledge_subscription(request, **kwargs)
             operation = _operation(request)
             subscription = operation["subscription"]
             if operation["operationType"] == "create" and any(
@@ -280,16 +333,18 @@ class SubscriptionProbeTests(DiagnosticHarness):
 
         self.urlopen.side_effect = answer
         self.assertEqual(self.run_main(probe), 1)
-        self.assertEqual(self.urlopen.call_count, 6)
+        self.assertEqual(self.urlopen.call_count, 9)
         self.assertIn("production / ucb-legacy: subscription creation HTTP 400", self.errors.getvalue())
-        self.assertIn("production / school-only: subscription type accepted", self.output.getvalue())
-        self.assertIn("production / ucb-v2: subscription type accepted", self.output.getvalue())
+        for shape in ("school-only", "ucb-v2", "ucb-v3"):
+            self.assertIn(f"production / {shape}: subscription type accepted", self.output.getvalue())
 
     def test_cleanup_failure_is_nonzero_and_identifies_the_owned_subscription(self):
         diagnose.watcher.ENVIRONMENTS = ["production"]
         created_ids = []
 
         def answer(request, **kwargs):
+            if _is_query(request):
+                return self.acknowledge_subscription(request, **kwargs)
             operation = _operation(request)
             sid = operation["subscription"]["subscriptionID"]
             if operation["operationType"] == "create":
@@ -299,7 +354,8 @@ class SubscriptionProbeTests(DiagnosticHarness):
 
         self.urlopen.side_effect = answer
         self.assertEqual(self.run_main(probe), 1)
-        self.assertEqual(self.urlopen.call_count, 6)
+        self.assertEqual(self.urlopen.call_count, 9)
+        self.assertEqual(len(created_ids), 4)
         for sid in created_ids:
             self.assertIn(f"cleanup FAILED for {sid}", self.errors.getvalue())
 
@@ -309,7 +365,9 @@ class SubscriptionProbeTests(DiagnosticHarness):
             with self.subTest(kind=kind):
                 self.urlopen.reset_mock()
 
-                def answer(request, **_):
+                def answer(request, **kwargs):
+                    if _is_query(request):
+                        return self.acknowledge_subscription(request, **kwargs)
                     operation = _operation(request)
                     subscription = operation["subscription"]
                     if operation["operationType"] == "delete":
@@ -324,8 +382,9 @@ class SubscriptionProbeTests(DiagnosticHarness):
                 self.assertEqual(self.run_main(probe), 1)
                 # The create may have committed despite its malformed reply.
                 # Delete our generated ID, never an unrelated returned ID.
-                self.assertEqual(self.urlopen.call_count, 6)
-                operations = [_operation(c.args[0]) for c in self.urlopen.call_args_list]
+                self.assertEqual(self.urlopen.call_count, 9)
+                operations = [_operation(r) for r in _modify_requests(self.urlopen)]
+                self.assertEqual(len(operations), 8)
                 for create, delete in zip(operations[::2], operations[1::2]):
                     owned_id = create["subscription"]["subscriptionID"]
                     self.assertEqual(delete, {"operationType": "delete",
@@ -338,6 +397,8 @@ class SubscriptionProbeTests(DiagnosticHarness):
         generated_ids = []
 
         def answer(request, **kwargs):
+            if _is_query(request):
+                return self.acknowledge_subscription(request, **kwargs)
             operation = _operation(request)
             sid = operation["subscription"]["subscriptionID"]
             if operation["operationType"] == "create":
@@ -349,10 +410,84 @@ class SubscriptionProbeTests(DiagnosticHarness):
 
         self.urlopen.side_effect = answer
         self.assertEqual(self.run_main(probe), 1)
-        self.assertEqual(self.urlopen.call_count, 6)
+        self.assertEqual(self.urlopen.call_count, 9)
+        self.assertEqual(len(generated_ids), 4)
         self.assertEqual(stored_ids, set())
         for sid in generated_ids:
             self.assertIn(sid, self.errors.getvalue())
+
+    def assert_every_create_was_cleaned_up(self):
+        operations = [_operation(r) for r in _modify_requests(self.urlopen)]
+        self.assertEqual(len(operations), 8 * len(diagnose.watcher.ENVIRONMENTS))
+        for create, delete in zip(operations[::2], operations[1::2]):
+            self.assertEqual(create["operationType"], "create")
+            self.assertEqual(delete, {"operationType": "delete", "subscription": {
+                "subscriptionID": create["subscription"]["subscriptionID"]}})
+
+    def test_contains_any_query_must_only_return_records_sharing_a_queried_category(self):
+        # ucb-v3 is one subscription per school matching ANY picked category;
+        # a server that matched records outside the picks would push classes
+        # the user never chose.
+        diagnose.watcher.ENVIRONMENTS = ["production"]
+        cases = [
+            ("all match", [_alert_record("standup"),
+                           _alert_record("writing_programs", "featured_programs"),
+                           _alert_record("standup", "writing_programs")], 0),
+            ("one stray", [_alert_record("standup"), _alert_record("improv", "workshops")], 1),
+            ("no categories", [{"recordName": "legacy", "fields": {}}], 1),
+        ]
+        for label, records, expected in cases:
+            with self.subTest(label=label):
+                self.urlopen.reset_mock()
+                self.output, self.errors = io.StringIO(), io.StringIO()
+
+                def answer(request, **kwargs):
+                    if _is_query(request):
+                        return _response({"records": records})
+                    return self.acknowledge_subscription(request, **kwargs)
+
+                self.urlopen.side_effect = answer
+                self.assertEqual(self.run_main(probe), expected)
+                self.assert_every_create_was_cleaned_up()
+                stray = len(records) if label == "no categories" else expected
+                self.assertIn(f"production / contains-any query: {len(records)} record(s) for "
+                              f"['standup', 'writing_programs']; {stray} without a matching category",
+                              self.output.getvalue())
+
+    def test_malformed_contains_any_reply_fails_instead_of_passing_vacuously(self):
+        diagnose.watcher.ENVIRONMENTS = ["production"]
+        for payload in ({}, [], {"records": None},
+                        {"records": [{"recordName": "x", "serverErrorCode": "ACCESS_DENIED"}]}):
+            with self.subTest(payload=payload):
+                self.urlopen.reset_mock()
+                self.errors = io.StringIO()
+
+                def answer(request, **kwargs):
+                    if _is_query(request):
+                        return _response(payload)
+                    return self.acknowledge_subscription(request, **kwargs)
+
+                self.urlopen.side_effect = answer
+                self.assertEqual(self.run_main(probe), 1)
+                self.assertIn("production / contains-any query FAILED", self.errors.getvalue())
+                self.assert_every_create_was_cleaned_up()
+
+    def test_contains_any_query_http_error_fails_but_subscriptions_are_still_cleaned_up(self):
+        def answer(request, **kwargs):
+            if _is_query(request) and "/development/" in request.full_url:
+                raise urllib.error.HTTPError(request.full_url, 400, "Bad request", {},
+                                             io.BytesIO(b'{"reason":"comparator not supported"}'))
+            return self.acknowledge_subscription(request, **kwargs)
+
+        self.urlopen.side_effect = answer
+        self.assertEqual(self.run_main(probe), 1)
+        self.assertEqual(self.urlopen.call_count, 18)
+        self.assert_every_create_was_cleaned_up()
+        self.assertIn("development / contains-any query: HTTP 400", self.errors.getvalue())
+        self.assertIn("comparator not supported", self.errors.getvalue())
+        # One environment's query failure does not skip the other's checks.
+        self.assertIn("production / ucb-v3: subscription type accepted", self.output.getvalue())
+        self.assertIn("production / contains-any query: 0 record(s)", self.output.getvalue())
 
     def test_delete_already_absent_is_a_noop_for_shared_helper_callers(self):
         sid = "improv-diagnostic/owned-test-id"

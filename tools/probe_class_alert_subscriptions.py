@@ -2,8 +2,13 @@
 
 Creates a temporary subscription for an impossible school value, then removes
 only that subscription. Does not create ClassAlert records or send pushes.
-Development may learn the school-only, legacy UCB scalar-category, and current
-UCB list-category query types, ready for schema promotion.
+Development may learn the school-only, legacy UCB scalar-category (ucb-legacy),
+per-category list-membership (ucb-v2, LIST_CONTAINS) and per-school
+any-of-the-picks (ucb-v3, LIST_CONTAINS_ANY with a STRING_LIST value) query
+types, ready for schema promotion.
+Without --matrix it also runs one read-only LIST_CONTAINS_ANY query per
+environment against real UCB NY alert records and fails if any returned
+record shares none of the queried categories (ucb-v3 relies on "shares any").
 The optional matrix also checks reversed filter order and explicit default-zone
 scope. It diagnoses server validation differences, not the native app's scope.
 """
@@ -117,7 +122,14 @@ def check_contains_any_query(env: str) -> bool:
                                      headers=watcher._sign(subpath, raw, env), method="POST")
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            records = json.load(response).get("records", [])
+            result = json.load(response)
+        # A reply without a records array would otherwise pass as "0 records,
+        # none stray", and an errored record would be misreported as stray.
+        records = result.get("records") if isinstance(result, dict) else None
+        if not isinstance(records, list):
+            raise ValueError("CloudKit did not acknowledge the query with a records array")
+        if any(not isinstance(r, dict) or r.get("serverErrorCode") for r in records):
+            raise ValueError("CloudKit returned a per-record query error")
     except urllib.error.HTTPError as error:
         print(f"{env} / contains-any query: HTTP {error.code}: "
               f"{error.read().decode('utf-8', errors='replace')[:600]}", file=sys.stderr)
