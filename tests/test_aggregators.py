@@ -1,7 +1,8 @@
 """Offline tests for the shared cadence/carry loop (aggregation.run_sources)
 as driven by scraper.py and classes.py: per-source cadence, carry-over on
-not-due and on failure, upcoming filtering, and summary bookkeeping. Fake
-sources only — no network, tmpdir store."""
+not-due and on failure, upcoming filtering, summary bookkeeping, and class
+sources forced due by the class watcher's "new_at" stamps. Fake sources only
+— no network, tmpdir store."""
 from __future__ import annotations
 
 import os
@@ -338,6 +339,126 @@ class ClassesAggregateTests(AggregatorHarness):
                           [{"id": "x", "org": "O", "city": "Chicago", "fetch": fetch}]):
             payload = classes_mod.aggregate_classes(now=NOW)
         self.assertEqual([c["title"] for c in payload["classes"]], [None, "B"])
+
+
+class ClassesWatcherForceTests(AggregatorHarness):
+    """A class source is forced due when the class watcher's state says it saw
+    new classes there ("new_at") after that source's last scrape — the push
+    already went out, so the Classes tab must not wait for the daily cadence."""
+
+    SCRAPED = NOW - timedelta(hours=2)      # inside the 24h cadence: not due
+
+    def save_previous(self, scraped):
+        """A previous classes.json with one carried class per source;
+        `scraped` maps source id -> scraped_at (None = never scraped)."""
+        storage.save_classes({
+            "generated_at": NOW.isoformat(), "count": len(scraped),
+            "sources": [{"id": sid, "org": "O", "city": "Chicago", "count": 1, "ok": True,
+                         "stale": False, "scraped_at": when and when.isoformat(), "error": None}
+                        for sid, when in scraped.items()],
+            "classes": [make_class(id=f"{sid}/old", title=f"{sid} carried", start="2026-08-01",
+                                   source=sid, org="O", city="Chicago") for sid in scraped]})
+
+    @staticmethod
+    def fresh(sid):
+        return Mock(return_value=[make_class(id=f"{sid}/new", title=f"{sid} fresh",
+                                             start="2026-08-02", source=sid, org="O",
+                                             city="Chicago")])
+
+    @staticmethod
+    def sources(**fetches):
+        return [{"id": sid, "org": "O", "city": "Chicago", "fetch": fetch}
+                for sid, fetch in fetches.items()]
+
+    def test_newer_detection_forces_that_source_and_carries_the_rest(self):
+        self.save_previous({"x": self.SCRAPED, "y": self.SCRAPED})
+        fetch_x = self.fresh("x")
+        fetch_y = Mock(side_effect=MustNotScrape("not due and not forced"))
+        state = {"x": {"ids": ["1"], "updated": NOW.isoformat(),
+                       "new_at": (self.SCRAPED + timedelta(minutes=5)).isoformat()},
+                 "y": {"ids": ["2"], "updated": NOW.isoformat()},
+                 "_pending_alerts": []}
+        with patch.object(classes_mod, "CLASS_SOURCES", self.sources(x=fetch_x, y=fetch_y)), \
+             self.assertLogs("ucb.classes", "INFO") as logs:
+            payload = classes_mod.aggregate_classes(now=NOW, watch_state=state)
+        fetch_x.assert_called_once()
+        fetch_y.assert_not_called()
+        self.assertEqual(sorted(c["title"] for c in payload["classes"]),
+                         ["x fresh", "y carried"])
+        rows = {r["id"]: r for r in payload["sources"]}
+        self.assertEqual(rows["x"]["scraped_at"], NOW.isoformat())
+        self.assertEqual(rows["y"]["scraped_at"], self.SCRAPED.isoformat())
+        self.assertTrue(any("forced due" in line and "x" in line for line in logs.output))
+
+    def test_detection_older_or_equal_to_last_scrape_does_not_force(self):
+        for new_at in (self.SCRAPED - timedelta(minutes=1), self.SCRAPED):
+            with self.subTest(new_at=new_at):
+                self.save_previous({"x": self.SCRAPED})
+                fetch = Mock(side_effect=MustNotScrape("already scraped since detection"))
+                state = {"x": {"ids": [], "updated": NOW.isoformat(),
+                               "new_at": new_at.isoformat()}}
+                with patch.object(classes_mod, "CLASS_SOURCES", self.sources(x=fetch)):
+                    payload = classes_mod.aggregate_classes(now=NOW, watch_state=state)
+                fetch.assert_not_called()
+                self.assertEqual([c["title"] for c in payload["classes"]], ["x carried"])
+
+    def test_stamp_formats_compare_as_instants(self):
+        # The watcher writes isoformat() with microseconds and +00:00; a "Z"
+        # or naive (assumed UTC) stamp must compare as the same instant.
+        prev = {"x": self.SCRAPED.isoformat()}
+        for new_at, forced in ((self.SCRAPED.strftime("%Y-%m-%dT%H:%M:%SZ"), set()),
+                               ((self.SCRAPED + timedelta(microseconds=1)).isoformat(), {"x"}),
+                               ((self.SCRAPED + timedelta(seconds=1)).replace(tzinfo=None)
+                                .isoformat(), {"x"}),
+                               ((self.SCRAPED + timedelta(hours=1))
+                                .astimezone(timezone(timedelta(hours=-4))).isoformat(), {"x"})):
+            with self.subTest(new_at=new_at), \
+                 patch.object(classes_mod, "CLASS_SOURCES", self.sources(x=None)):
+                self.assertEqual(classes_mod._forced_by_watcher(
+                    {"x": {"new_at": new_at}}, prev), forced)
+
+    def test_detection_with_no_previous_scrape_is_forced(self):
+        state = {"x": {"ids": [], "new_at": NOW.isoformat()},
+                 "y": {"ids": [], "new_at": NOW.isoformat()}}
+        with patch.object(classes_mod, "CLASS_SOURCES", self.sources(x=None, y=None)):
+            # x: never scraped (null stamp); y: absent from the previous payload.
+            self.assertEqual(classes_mod._forced_by_watcher(state, {"x": None}), {"x", "y"})
+            # An unparseable previous stamp is no stamp at all.
+            self.assertEqual(classes_mod._forced_by_watcher(
+                {"x": state["x"]}, {"x": "not a time"}), {"x"})
+
+    def test_unknown_ids_and_malformed_state_are_ignored(self):
+        self.save_previous({"x": self.SCRAPED})
+        later = (self.SCRAPED + timedelta(hours=1)).isoformat()
+        for state in (None, [], "garbage", {},
+                      {"not_a_source": {"new_at": later}},          # not a class source
+                      {"x": ["new_at", later]},                     # entry not a dict
+                      {"x": "new_at"},
+                      {"x": {"ids": []}},                           # never detected
+                      {"x": {"new_at": None}},
+                      {"x": {"new_at": "yesterday-ish"}},           # unparseable
+                      {"x": {"new_at": 1760000000}},
+                      {"x": {"new_at": {"at": later}}}):
+            with self.subTest(state=state):
+                fetch = Mock(side_effect=MustNotScrape("malformed state must not force"))
+                with patch.object(classes_mod, "CLASS_SOURCES", self.sources(x=fetch)):
+                    payload = classes_mod.aggregate_classes(now=NOW, watch_state=state)
+                fetch.assert_not_called()
+                self.assertEqual([c["title"] for c in payload["classes"]], ["x carried"])
+
+    def test_forced_source_that_fails_keeps_its_stamp_so_the_next_run_retries(self):
+        self.save_previous({"x": self.SCRAPED})
+        state = {"x": {"new_at": (self.SCRAPED + timedelta(minutes=5)).isoformat()}}
+        fetch = Mock(side_effect=RuntimeError("arlo down"))
+        with patch.object(classes_mod, "CLASS_SOURCES", self.sources(x=fetch)):
+            payload = classes_mod.aggregate_classes(now=NOW, watch_state=state)
+        fetch.assert_called_once()
+        (row,) = payload["sources"]
+        self.assertTrue(row["stale"])
+        self.assertEqual(row["scraped_at"], self.SCRAPED.isoformat())
+        with patch.object(classes_mod, "CLASS_SOURCES", self.sources(x=None)):
+            self.assertEqual(classes_mod._forced_by_watcher(
+                state, {"x": row["scraped_at"]}), {"x"})
 
 
 if __name__ == "__main__":

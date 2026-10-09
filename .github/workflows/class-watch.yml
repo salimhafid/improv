@@ -8,6 +8,10 @@ name: Class alert watcher
 # (class-watch-kick-*.yml) restart the chain if it ever dies; they never run
 # the scan themselves. New classes become CloudKit ClassAlert records, which
 # fan out as pushes to every device whose in-app alert toggles subscribe.
+# Once the state recording a detection is pushed, the chain also dispatches a
+# classes-only feed publish (scrape.yml -f classes_only=true), so the class a
+# push announces reaches the app's Classes tab within minutes rather than on
+# the feed's daily class cadence.
 on:
   workflow_dispatch:
     inputs:
@@ -94,6 +98,11 @@ jobs:
           CLOUDKIT_PRIVATE_KEY: ${{ secrets.CLOUDKIT_PRIVATE_KEY }}
           MODE: ${{ github.event.inputs.mode || 'chain' }}
           DIAGNOSTIC_RECORD: ${{ github.event.inputs.diagnostic_record }}
+          # watcher.py appends one line per school with newly detected classes
+          # (after saving state); refresh_class_feed below consumes it, using
+          # GH_TOKEN to dispatch scrape.yml (permissions: actions: write).
+          WATCH_NEW_CLASSES_FILE: ${{ runner.temp }}/new-classes.txt
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -u
           # Commit + push the state file. Our file is the newest truth (it was
@@ -111,6 +120,20 @@ jobs:
               git reset -q --soft FETCH_HEAD
               git commit -q -m "Update class-watch state"
               git push -q origin HEAD:class-watch-state )
+          }
+
+          # Ask scrape.yml for a classes-only publish when the watcher detected
+          # new classes. Call it only after commit_state succeeded: the publish
+          # decides which class sources to refetch from the "new_at" stamps it
+          # reads off the state branch, so the state must be pushed first. A
+          # failed dispatch keeps the marker so the next iteration retries; if
+          # the job ends first, the next hourly feed run still sees new_at.
+          refresh_class_feed() {
+            [ -s "$WATCH_NEW_CLASSES_FILE" ] || return 0
+            echo "new classes at: $(sort -u "$WATCH_NEW_CLASSES_FILE" | tr '\n' ' ')"
+            gh workflow run scrape.yml -f classes_only=true || return 1
+            : > "$WATCH_NEW_CLASSES_FILE"
+            echo "classes-only feed publish dispatched"
           }
 
           case "$MODE" in
@@ -148,7 +171,12 @@ jobs:
               # file is still the newest truth, so commit it either way.
               rc=0
               python watcher.py $FLAGS || rc=$?
-              commit_state || rc=1
+              if commit_state; then
+                refresh_class_feed \
+                  || echo "::warning::could not dispatch the classes-only feed publish"
+              else
+                rc=1
+              fi
               exit $rc
               ;;
             *)
@@ -175,7 +203,12 @@ jobs:
               || echo "::warning::watcher failed on iteration $n (exit $?)"
             python watcher.py --all-if-stale "$ALL_IF_STALE_HOURS" \
               || echo "::warning::non-UCB watcher failed on iteration $n (exit $?)"
-            commit_state || echo "::warning::state commit failed on iteration $n"
+            if commit_state; then
+              refresh_class_feed \
+                || echo "::warning::classes-only feed publish dispatch failed on iteration $n; retrying next iteration"
+            else
+              echo "::warning::state commit failed on iteration $n"
+            fi
             echo "::endgroup::"
             # Start-to-start target; don't add two minutes after scrape time.
             REMAINING=$(( ITERATION_SLEEP_SEC - (SECONDS - ITERATION_START) ))

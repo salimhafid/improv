@@ -7,16 +7,32 @@ not yet due keep their last-good data) and the content the raw CDN serves.
 
 Usage (as in .github/workflows/scrape.yml):
     LOCAL_STORE_DIR=docs python publish_static.py
+    LOCAL_STORE_DIR=docs python publish_static.py --classes-only
+
+--classes-only aggregates and saves only the classes feed (shows.json and
+talent.json are left untouched). The class-alert watcher dispatches such a run
+right after it detects new classes, so the Classes tab catches up with a push
+within minutes instead of on the daily class cadence.
+
+WATCH_STATE_FILE (optional, either mode) is a path to the watcher's
+class-watch.json. Class sources at which the watcher has detected new classes
+since their last scrape are forced due (see classes.aggregate_classes). Unset
+means no forcing; a missing, unreadable or corrupt file is warned about and
+treated the same way, because a stale feed is better than no publish.
 
 Exits nonzero if no show source contributed any shows (a partial failure keeps
 the last-good data for the failing sources and still publishes), or if any feed
 could not be written to the store. A classes or talent payload to which no
 source contributed items is skipped (the previous file stays in place) rather
-than blanking that feed.
+than blanking that feed. With --classes-only, only a failed classes write
+exits nonzero.
 """
 from __future__ import annotations
 
+import argparse
+import json
 import logging
+import os
 import sys
 
 import storage
@@ -46,11 +62,52 @@ def _save_guarded(name: str, payload: dict, save_fn) -> bool:
     return save_fn(payload)
 
 
-def main() -> int:
+def _load_watch_state() -> dict | None:
+    """The class watcher's state from WATCH_STATE_FILE, or None. Every failure
+    is a warning, never fatal: the state only lets class sources refresh
+    early, and without it they keep their normal daily cadence."""
+    path = os.environ.get("WATCH_STATE_FILE")
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, ValueError) as e:    # missing, unreadable, corrupt JSON
+        print(f"WATCH_STATE_FILE {path} could not be read ({e!r}); "
+              "class sources keep their normal cadence", file=sys.stderr)
+        return None
+    if not isinstance(state, dict):
+        print(f"WATCH_STATE_FILE {path} is not a JSON object; "
+              "class sources keep their normal cadence", file=sys.stderr)
+        return None
+    return state
+
+
+def _publish_classes_only(watch_state: dict | None) -> int:
+    """Aggregate and save only the classes feed. scrape() and
+    aggregate_talent() are not called, so their feeds (and their scrape
+    cadences) are untouched by this run."""
+    classes_payload = aggregate_classes(watch_state=watch_state)
+    print(f"classes: {classes_payload.get('count')} (classes-only run; shows and talent untouched)")
+    if not _save_guarded("classes", classes_payload, storage.save_classes):
+        print("could not write classes to the store (is LOCAL_STORE_DIR set?)", file=sys.stderr)
+        return 1
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Publish the static JSON feeds into LOCAL_STORE_DIR.")
+    parser.add_argument("--classes-only", action="store_true",
+                        help="aggregate and save only the classes feed; shows and talent are untouched")
+    args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 
+    watch_state = _load_watch_state()
+    if args.classes_only:
+        return _publish_classes_only(watch_state)
+
     payload = scrape()
-    classes_payload = aggregate_classes()
+    classes_payload = aggregate_classes(watch_state=watch_state)
     talent_payload = aggregate_talent()
 
     print(f"shows: {payload.get('count')} · classes: {classes_payload.get('count')}"

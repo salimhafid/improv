@@ -15,10 +15,23 @@ on:
         description: "Force a from-scratch scrape into a throwaway dir (no commit) — tests that runner IPs can reach the sources"
         type: boolean
         default: false
+      classes_only:
+        description: "Publish only docs/classes.json (shows and talent untouched). Dispatched by the class watcher (class-watch.yml) right after it detects new classes, so the Classes tab shows a class within minutes of its push"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+# Runs are serialized, never parallel: each run starts from main as the
+# previous run left it (the checkout step fetches the branch tip, not the
+# event's SHA), so an older run can't commit its classes.json over a
+# fresher one. GitHub keeps at most one pending run per group, so a newer
+# trigger replaces a pending one (a cron tick can replace the watcher's
+# pending classes-only dispatch, or the other way round). Neither loses the
+# refresh: forced class sources are decided by the durable "new_at" stamps in
+# the watcher's state, which any run reads, and a skipped cron tick is
+# covered by the next one through the per-source cadence carry.
 concurrency:
   group: scrape
   cancel-in-progress: false
@@ -28,7 +41,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # Check out the branch tip as of job start. With no ref, checkout uses
+      # github.sha, which is fixed when the event fires: a run that waited in
+      # the "scrape" group (e.g. the watcher's dispatch behind a cron run)
+      # would start from main before the earlier run's commit, rebuild
+      # classes.json from that older payload, and its rebase fallback below
+      # would then overwrite the fresher file.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -37,12 +58,41 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # The class watcher stamps each school with "new_at" when it detects new
+      # classes there (class-watch.json on the class-watch-state branch). A
+      # class source whose new_at is later than its last scrape is forced due
+      # on this run, so a class that has been pushed to phones reaches the
+      # Classes tab. Fetched into FETCH_HEAD only: no local branch is created
+      # and the main checkout (which the commit step pushes) is untouched.
+      # Without the state, class sources simply keep their daily cadence.
+      # Probe mode skips it: its empty store makes every source due anyway.
+      - name: Fetch class-watch state
+        if: ${{ !inputs.probe }}
+        run: |
+          dest="$RUNNER_TEMP/class-watch.json"
+          if git fetch --quiet --depth=1 origin class-watch-state \
+             && git show FETCH_HEAD:class-watch.json > "$dest"; then
+            echo "class-watch state: $(wc -c < "$dest") bytes"
+          else
+            rm -f "$dest"
+            echo "::warning::could not read class-watch state; class sources keep their daily cadence this run"
+          fi
+
       - name: Scrape and write feeds into docs/
         env:
           # Probe mode scrapes into a throwaway dir with no previous payload,
           # so every source is due — a true test of runner connectivity.
           LOCAL_STORE_DIR: ${{ inputs.probe && 'probe-out' || 'docs' }}
-        run: python publish_static.py
+          CLASSES_ONLY: ${{ inputs.classes_only }}
+        run: |
+          if [ -s "$RUNNER_TEMP/class-watch.json" ]; then
+            export WATCH_STATE_FILE="$RUNNER_TEMP/class-watch.json"
+          fi
+          if [ "$CLASSES_ONLY" = "true" ]; then
+            python publish_static.py --classes-only
+          else
+            python publish_static.py
+          fi
 
       - name: Commit updated feeds
         if: ${{ !inputs.probe }}

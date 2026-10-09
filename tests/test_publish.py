@@ -1,5 +1,6 @@
-"""Offline tests for publish_static.py's guards and exit code, and for
-storage.save's failure path. The aggregators are stubbed; tmpdir store."""
+"""Offline tests for publish_static.py's guards and exit code, its
+--classes-only mode and WATCH_STATE_FILE handling, and for storage.save's
+failure path. The aggregators are stubbed; tmpdir store."""
 from __future__ import annotations
 
 import io
@@ -8,7 +9,7 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import publish_static
 import storage
@@ -31,17 +32,28 @@ class PublishHarness(unittest.TestCase):
         p = patch.object(storage, "LOCAL_DIR", self.tmp.name)
         p.start()
         self.addCleanup(p.stop)
+        # An exported WATCH_STATE_FILE would leak the caller's state into
+        # every run; isolate the harness from the caller's shell.
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("WATCH_STATE_FILE", None)
         self.shows = _payload("shows", [{"title": "A"}], [_row("a", 1)])
         self.classes = _payload("classes", [{"title": "C"}], [_row("x", 1)])
         self.talent = _payload("people", [{"slug": "p"}], [_row("ny", 1)])
+        self.class_calls = []    # the watch_state each aggregate_classes call got
 
-    def run_main(self):
+    def aggregate_classes(self, **kwargs):
+        self.class_calls.append(kwargs.get("watch_state"))
+        return self.classes
+
+    def run_main(self, argv=(), *, scrape=None, talent=None):
         out, err = io.StringIO(), io.StringIO()
-        with patch.object(publish_static, "scrape", lambda: self.shows), \
-             patch.object(publish_static, "aggregate_classes", lambda: self.classes), \
-             patch.object(publish_static, "aggregate_talent", lambda: self.talent), \
+        with patch.object(publish_static, "scrape", scrape or (lambda: self.shows)), \
+             patch.object(publish_static, "aggregate_classes", self.aggregate_classes), \
+             patch.object(publish_static, "aggregate_talent", talent or (lambda: self.talent)), \
              redirect_stdout(out), redirect_stderr(err):
-            code = publish_static.main()
+            code = publish_static.main(list(argv))
         return code, err.getvalue()
 
     def stored(self, name):
@@ -102,6 +114,106 @@ class PublishTests(PublishHarness):
         self.assertIn("talent: no source contributed items", err)
         self.assertEqual(self.stored(storage.CLASSES_BLOB)["count"], 1)
         self.assertIsNone(self.stored(storage.TALENT_BLOB))
+
+
+class ClassesOnlyTests(PublishHarness):
+    """--classes-only: the class watcher's dispatched refresh. It must never
+    touch shows.json or talent.json (nor spend their scrape time)."""
+
+    def run_classes_only(self):
+        must_not_run = Mock(side_effect=AssertionError("must not run in --classes-only"))
+        code, err = self.run_main(["--classes-only"], scrape=must_not_run, talent=must_not_run)
+        must_not_run.assert_not_called()
+        return code, err
+
+    def test_saves_classes_and_leaves_shows_and_talent_untouched(self):
+        storage.save_payload(_payload("shows", [{"title": "Old show"}], [_row("a", 1)]))
+        storage.save_talent(_payload("people", [{"slug": "old"}], [_row("ny", 1)]))
+        shows_before = self.stored(storage.SHOWS_BLOB)
+        talent_before = self.stored(storage.TALENT_BLOB)
+        code, _ = self.run_classes_only()
+        self.assertEqual(code, 0)
+        self.assertEqual(self.stored(storage.CLASSES_BLOB), self.classes)
+        self.assertEqual(self.stored(storage.SHOWS_BLOB), shows_before)
+        self.assertEqual(self.stored(storage.TALENT_BLOB), talent_before)
+
+    def test_does_not_create_missing_shows_or_talent_files(self):
+        code, _ = self.run_classes_only()
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(os.listdir(self.tmp.name)), [storage.CLASSES_BLOB])
+
+    def test_failed_classes_write_exits_nonzero(self):
+        self.classes["classes"][0]["when"] = {1}     # not JSON-serialisable
+        code, err = self.run_classes_only()
+        self.assertEqual(code, 1)
+        self.assertIn("could not write classes", err)
+
+    def test_unset_store_dir_exits_nonzero(self):
+        with patch.object(storage, "LOCAL_DIR", ""):
+            code, err = self.run_classes_only()
+        self.assertEqual(code, 1)
+        self.assertIn("LOCAL_STORE_DIR", err)
+
+    def test_empty_classes_keeps_previous_file_without_failing(self):
+        storage.save_classes(self.classes)
+        self.classes = _payload("classes", [], [_row("x", 0, ok=False)])
+        code, err = self.run_classes_only()
+        self.assertEqual(code, 0)
+        self.assertIn("classes: no source contributed items", err)
+        self.assertEqual(self.stored(storage.CLASSES_BLOB)["count"], 1)
+
+
+class WatchStateFileTests(PublishHarness):
+    """WATCH_STATE_FILE only lets class sources refresh early, so every
+    problem with it degrades to "no state" with a warning, never a failed
+    publish."""
+
+    def write_state(self, data: bytes):
+        path = os.path.join(self.tmp.name, "class-watch.json")
+        with open(path, "wb") as f:
+            f.write(data)
+        os.environ["WATCH_STATE_FILE"] = path
+
+    def test_state_is_passed_to_classes_in_both_modes(self):
+        state = {"ucb_ny": {"ids": ["1"], "updated": "2026-10-09T22:00:00+00:00",
+                            "new_at": "2026-10-09T22:00:00+00:00"}}
+        self.write_state(json.dumps(state).encode())
+        for argv in ([], ["--classes-only"]):
+            with self.subTest(argv=argv):
+                self.class_calls.clear()
+                code, err = self.run_main(argv)
+                self.assertEqual(code, 0)
+                self.assertEqual(self.class_calls, [state])
+                self.assertNotIn("WATCH_STATE_FILE", err)
+
+    def test_unset_or_empty_env_is_silently_no_state(self):
+        for value in (None, ""):
+            with self.subTest(value=value):
+                self.class_calls.clear()
+                if value is not None:
+                    os.environ["WATCH_STATE_FILE"] = value
+                code, err = self.run_main()
+                self.assertEqual(code, 0)
+                self.assertEqual(self.class_calls, [None])
+                self.assertNotIn("WATCH_STATE_FILE", err)
+
+    def test_missing_corrupt_or_non_object_file_warns_and_publishes_without_state(self):
+        for label, data in (("missing", None), ("corrupt", b'{"ucb_ny": {"new_at": '),
+                            ("not utf-8", b"\xff\xfe{"), ("not an object", b'["ucb_ny"]')):
+            for argv in ([], ["--classes-only"]):
+                with self.subTest(label=label, argv=argv):
+                    self.class_calls.clear()
+                    if data is None:
+                        os.environ["WATCH_STATE_FILE"] = os.path.join(
+                            self.tmp.name, "absent", "class-watch.json")
+                    else:
+                        self.write_state(data)
+                    code, err = self.run_main(argv)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(self.class_calls, [None])
+                    self.assertIn("WATCH_STATE_FILE", err)
+                    self.assertIn("normal cadence", err)
+                    self.assertIsNotNone(self.stored(storage.CLASSES_BLOB))
 
 
 class StorageSaveTests(PublishHarness):
