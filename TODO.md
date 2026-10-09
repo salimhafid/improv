@@ -24,9 +24,11 @@ unreleased notification-delivery diagnostics).
       Changes (diff showed no record type, index or role changes) → "Changes
       Deployed"; probe run 38002232662 then reported `production / ucb-v3:
       subscription type accepted; title/body payload verified`.
-- [ ] **Ship 1.7 (27)**: one push
+- [ ] **Ship 1.7 (27)** — build 27 uploaded to App Store Connect 2026-10-09
+      (processing); not yet submitted for review. Carries: one push
       per class (one `ANY categories IN` subscription per school), taps open
-      the class, foreground class-feed refresh. Then confirm on the phone:
+      the class, foreground class-feed refresh, instructor names on a class
+      page linking to their UCB bio (else a Google search). Then confirm on the phone:
       one banner per new UCB class ("New class at …" / name / instructor /
       category, no wrapped lines), tap lands
       on the class.
