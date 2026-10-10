@@ -25,7 +25,7 @@
    "annoyance/standup-sundays-with-st-james-jackson",
    "annoyance/workshop-drop-in-improv-classes"
   ],
-  "updated": "2026-10-09T15:20:24.764677+00:00"
+  "updated": "2026-10-10T11:22:05.408506+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -76,7 +76,7 @@
    "brooklyn_cc/tony-stop-fighting-improv",
    "brooklyn_cc/use-your-dang-voice-noelle-cbjsg"
   ],
-  "updated": "2026-10-09T15:20:24.764677+00:00"
+  "updated": "2026-10-10T11:22:05.408506+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -125,7 +125,7 @@
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-10-09T15:20:24.764677+00:00"
+  "updated": "2026-10-10T11:22:05.408506+00:00"
  },
  "logan_square": {
   "ids": [
@@ -198,7 +198,7 @@
    "magnet/12060",
    "magnet/12061"
   ],
-  "updated": "2026-10-09T15:20:24.764677+00:00"
+  "updated": "2026-10-10T11:22:05.408506+00:00"
  },
  "second_city": {
   "ids": [
@@ -244,7 +244,6 @@
    "second_city/46369",
    "second_city/46372",
    "second_city/46373",
-   "second_city/46386",
    "second_city/46388",
    "second_city/46389",
    "second_city/46390",
@@ -288,9 +287,24 @@
    "second_city/46534",
    "second_city/46541",
    "second_city/46542",
+   "second_city/46545",
+   "second_city/46547",
+   "second_city/46548",
+   "second_city/46549",
+   "second_city/46550",
+   "second_city/46551",
+   "second_city/46552",
+   "second_city/46553",
+   "second_city/46554",
+   "second_city/46555",
+   "second_city/46556",
+   "second_city/46557",
+   "second_city/46558",
+   "second_city/46559",
    "second_city/46561"
   ],
-  "updated": "2026-10-09T15:20:24.764677+00:00"
+  "new_at": "2026-10-10T11:22:05.408506+00:00",
+  "updated": "2026-10-10T11:22:05.408506+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -351,7 +365,7 @@
    "43263",
    "43273"
   ],
-  "updated": "2026-10-10T11:19:56.206554+00:00"
+  "updated": "2026-10-10T11:21:55.936098+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -419,7 +433,7 @@
    "43407",
    "43426"
   ],
-  "updated": "2026-10-10T11:19:56.206554+00:00"
+  "updated": "2026-10-10T11:21:55.936098+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -437,7 +451,7 @@
    "42686",
    "42864"
   ],
-  "updated": "2026-10-10T11:19:56.206554+00:00"
+  "updated": "2026-10-10T11:21:55.936098+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -479,7 +493,7 @@
    "wgis_la/1875",
    "wgis_la/1876"
   ],
-  "updated": "2026-10-09T15:20:24.764677+00:00"
+  "updated": "2026-10-10T11:22:05.408506+00:00"
  },
  "wgis_ny": {
   "ids": [
