@@ -24,8 +24,11 @@ unreleased notification-delivery diagnostics).
       Changes (diff showed no record type, index or role changes) → "Changes
       Deployed"; probe run 38002232662 then reported `production / ucb-v3:
       subscription type accepted; title/body payload verified`.
-- [ ] **Ship 1.7 (27)** — build 27 uploaded to App Store Connect 2026-10-09
-      (processing); not yet submitted for review. Carries: one push
+- [x] **Submit 1.7 (27)** — uploaded 2026-10-09; version 1.7 created, What's
+      New + promo text set, build 27 attached and submitted 2026-10-10 04:06
+      UTC (submission `8894a56c-9bd0-4f72-ab32-984778e00c95`,
+      WAITING_FOR_REVIEW, releases automatically on approval).
+- [ ] **After 1.7 is approved**, confirm on the phone. It carries: one push
       per class (one `ANY categories IN` subscription per school), taps open
       the class, foreground class-feed refresh, instructor names on a class
       page linking to their UCB bio (else a Google search). Then confirm on the phone:
