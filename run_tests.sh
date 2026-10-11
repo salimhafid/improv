@@ -25,6 +25,7 @@ xcrun swiftc -parse-as-library -o "$BIN" \
   ios/UCBShows/Models/Class.swift \
   ios/UCBShows/Models/ClassCurriculum.swift \
   ios/UCBShows/Services/ClassAlertPreferences.swift \
+  ios/UCBShows/Services/ClassAlertsAccessPolicy.swift \
   ios/UCBShows/Services/NotificationDeliveryStatus.swift \
   ios/UCBShows/Models/Source.swift \
   ios/UCBShows/Models/Filters.swift \
@@ -37,6 +38,7 @@ xcrun swiftc -parse-as-library -o "$BIN" \
   ios/UCBShows/Services/ClassesStore.swift \
   ios/UCBShows/Services/TalentStore.swift \
   tests/ios/ClassAlertPreferenceTests.swift \
+  tests/ios/ClassAlertsAccessTests.swift \
   tests/ios/NotificationDeliveryTests.swift \
   tests/ios/LogicTests.swift
 "$BIN"

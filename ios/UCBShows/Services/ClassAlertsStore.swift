@@ -26,9 +26,32 @@ import UserNotifications
 /// against CloudKit's on every change. Retired generations — v2, and the
 /// first-generation `category ==` IDs that only ever saw a class's primary
 /// tag — still start with "alert/", so the reconcile deletes them as stale.
+///
+/// From 1.8 alerts are an in-app purchase, and `access` gates them. Unlocked
+/// (bought; grandfathered because the first install predates the paywall
+/// build; or a TestFlight build while the remote free flag is on) plans the
+/// prefs as before. Locked deletes every "alert/" subscription only to take
+/// back what this install subscribed under an unlock that can end (a refund,
+/// the TestFlight flag turned off), and then only once; otherwise it leaves
+/// them alone. Subscriptions belong to the iCloud account, and TestFlight
+/// shares production CloudKit with the App Store, so a locked TestFlight build
+/// that deleted them would silence a paying or grandfathered device on the same
+/// account. Unknown (StoreKit can't answer yet, e.g. an offline first launch)
+/// touches nothing and keeps the reconcile owed: deleting on a guess would
+/// silence a paying user who is merely offline. The paywall never edits
+/// `prefs` — they ride iCloud to the user's other devices — it only stops
+/// them taking effect.
 @MainActor
 @Observable
 final class ClassAlertsStore {
+
+    /// The purchase gate, set once at launch (see `desired`). Observed, not
+    /// ignored: the bell may render before the app wires it, and setting it
+    /// is what makes that view start tracking the gate's state.
+    var access: ClassAlertsAccess?
+    /// Definitively locked. Unknown is not locked: until StoreKit answers,
+    /// the badge and switches go on reading the saved prefs.
+    private var isLocked: Bool { access?.isLocked ?? false }
 
     // MARK: Preferences (persisted)
     private(set) var prefs = ClassAlertPreferences()
@@ -62,6 +85,14 @@ final class ClassAlertsStore {
     /// it is this device's debt — and it is what lets a switch-off that
     /// failed offline retry on a later launch even though master is now Off.
     private static let syncPendingKey = "classAlertSyncPending"
+    /// True once this install has subscribed under an unlock a later lock can
+    /// end (a purchase, which can be refunded, or the TestFlight flag); cleared
+    /// when that lock's delete completes. Local only for the same reason as
+    /// the pending flag. Grandfathering never sets it: it is permanent in
+    /// production, so a lock that follows it means a TestFlight build was
+    /// installed over the App Store one, and other devices' subscriptions are
+    /// not this install's to delete.
+    private static let revokeOnLockKey = "classAlertsRevokeOnLock"
 
     /// Lazy on purpose: `CKContainer(identifier:)` traps when the build lacks
     /// the iCloud entitlement, and as a stored property that took the whole app
@@ -90,13 +121,14 @@ final class ClassAlertsStore {
         // Whichever feature obtained the grant, ours has to re-arm — matching
         // TicketStore and GoingStore. Without this, a user who granted via a
         // heart or a ticket left class alerts unregistered forever. With the
-        // master switch Off there is nothing to arm, and the reconcile only
-        // ever put an iCloud sign-in nag under an Off switch.
+        // master switch Off (or alerts locked behind the purchase) there is
+        // nothing to arm, and the reconcile only ever put an iCloud sign-in
+        // nag under an Off switch.
         NotificationCenter.default.addObserver(
             forName: NotificationAuth.didGrant, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.prefs.master else { return }
+                guard let self, self.prefs.master, !self.isLocked else { return }
                 self.authorizationDenied = false
                 UIApplication.shared.registerForRemoteNotifications()
                 Task {
@@ -144,11 +176,37 @@ final class ClassAlertsStore {
     /// Count of schools currently alerting — drives the bell badge. Deliberately
     /// stricter than `isCategorizedSchoolEnabled`: this means "actually pushing", so a school
     /// that's on with no categories picked (which sends nothing) doesn't count.
-    var activeCount: Int { prefs.activeCount }
+    /// Zero while locked: this install isn't keeping any subscription for them.
+    var activeCount: Int { isLocked ? 0 : prefs.activeCount }
+
+    /// The paywall's answer moved (bought, refunded, restored, grandfathering
+    /// settled, the TestFlight flag flipped). Owes a reconcile like a pref
+    /// change: unlocking subscribes the saved picks, and locking takes back
+    /// what this install's own unlock subscribed (see `desired`).
+    /// With master Off the plan is empty whatever the answer, so only a debt
+    /// already on record is worth the CloudKit trip — an Off device stays off
+    /// CloudKit at launch, as before.
+    func accessChanged() {
+        guard prefs.master || UserDefaults.standard.bool(forKey: Self.syncPendingKey) else { return }
+        queueSync()
+        // An unlock outside the sheet (Ask to Buy approved, a purchase on
+        // another device, the TestFlight flag turned on) also has to register
+        // this device, because `armOnLaunch` skips that while locked. Without
+        // it the subscriptions exist and no push reaches this device until the
+        // next foreground. It never prompts; its reconcile coalesces with the
+        // one just queued.
+        if prefs.master, access?.isUnlocked == true {
+            Task { await armOnLaunch() }
+        }
+    }
 
     // MARK: Toggles (each persists + resyncs)
+    // Switching something on is what the purchase buys, so it is a no-op
+    // while locked (the sheet disables those controls too). Switching off
+    // always works.
 
     func setMaster(_ on: Bool) {
+        if on && isLocked { return }
         prefs.master = on
         if on {
             // The ask and the subscribe are independent: a declined prompt
@@ -165,12 +223,14 @@ final class ClassAlertsStore {
     }
 
     func setSchool(_ id: String, enabled: Bool) {
+        if enabled && isLocked { return }
         prefs.setSchool(id, enabled: enabled)
         if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
     }
 
     func setCategorizedSchool(_ id: String, enabled: Bool) {
+        if enabled && isLocked { return }
         prefs.setCategorizedSchool(id, enabled: enabled)
         if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
@@ -179,7 +239,7 @@ final class ClassAlertsStore {
     func setCategory(_ id: String, category: String, enabled: Bool) {
         // Never materialize a key for an off school — under key-presence
         // semantics that would silently switch it on.
-        guard prefs.isCategorizedSchoolEnabled(id) else { return }
+        guard prefs.isCategorizedSchoolEnabled(id), !(enabled && isLocked) else { return }
         prefs.setCategory(id, category: category, enabled: enabled)
         if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
@@ -187,7 +247,7 @@ final class ClassAlertsStore {
 
     /// Switch every category on, or clear them all while leaving the school on.
     func setAllCategories(_ id: String, enabled: Bool) {
-        guard prefs.isCategorizedSchoolEnabled(id) else { return }
+        guard prefs.isCategorizedSchoolEnabled(id), !(enabled && isLocked) else { return }
         prefs.setAllCategories(id, enabled: enabled)
         if enabled { Task { await promptIfAlreadyDenied() } }
         persistAndSync()
@@ -262,10 +322,12 @@ final class ClassAlertsStore {
     /// launch, because the device token rotates.
     func armOnLaunch() async {
         await refreshDeliveryStatus()
-        guard prefs.master else {
+        guard prefs.master, !isLocked else {
             // Off can still owe a reconcile: a switch-off that failed offline
             // left every subscription live, and with master Off nothing else
-            // retries. `desired` is empty, so this is only the delete.
+            // retries. `desired` is empty, so this is only the delete. Locked
+            // is the same — nothing to register for, but a refund's delete
+            // that failed offline is owed.
             if UserDefaults.standard.bool(forKey: Self.syncPendingKey) {
                 await syncSubscriptions()
             }
@@ -292,8 +354,8 @@ final class ClassAlertsStore {
     /// only one a user whose prefs arrived from iCloud will ever reach — they
     /// never touch the toggle, so `setMaster` never fires.
     func armIfNeeded() async {
-        guard prefs.master else {
-            await armOnLaunch()   // the master-Off retry, nothing to prompt for
+        guard prefs.master, !isLocked else {
+            await armOnLaunch()   // the Off/locked retry, nothing to prompt for
             return
         }
         guard await NotificationAuth.status() == .notDetermined else {
@@ -306,9 +368,24 @@ final class ClassAlertsStore {
 
     // MARK: CloudKit subscription reconcile
 
-    /// Desired subscription IDs for the current prefs.
-    private var desired: [String: NSPredicate] {
-        Dictionary(uniqueKeysWithValues: prefs.subscriptionPlan.map { ($0.id, $0.predicate) })
+    /// Desired subscription IDs, or nil for "don't reconcile" — the one place
+    /// the purchase gate meets CloudKit. Unlocked: the prefs' plan. Locked:
+    /// none, so every "alert/" subscription goes, but only while this install
+    /// owes that revoke (`revokeOnLockKey`: a refund, or the TestFlight flag
+    /// turned off). A locked install that never subscribed under such an
+    /// unlock gets nil instead: those subscriptions belong to another device
+    /// on the account. Unknown, or the gate not wired yet: nil, and nothing is
+    /// created or deleted until the answer arrives (`accessChanged` queues
+    /// that reconcile).
+    private var desired: [String: NSPredicate]? {
+        switch access?.state {
+        case .unlocked:
+            return Dictionary(uniqueKeysWithValues: prefs.subscriptionPlan.map { ($0.id, $0.predicate) })
+        case .locked:
+            return UserDefaults.standard.bool(forKey: Self.revokeOnLockKey) ? [:] : nil
+        case .unknown, nil:
+            return nil
+        }
     }
 
     /// Serialized: the reconcile is a read-modify-write (read `allSubscriptions`,
@@ -320,6 +397,11 @@ final class ClassAlertsStore {
     /// deterministic collision, not a rare one. A caller that coalesces gets
     /// its change reconciled all the same: `performSync` goes round again
     /// when `desired` moved under it.
+    ///
+    /// While `desired` is nil (the purchase gate undecided, or locked with
+    /// nothing of this install's to take back) this returns without touching
+    /// CloudKit or the pending flag, so the debt survives for the reconcile
+    /// `accessChanged` queues once the answer changes.
     func syncSubscriptions() async {
         if let inFlight = syncTask { await inFlight.value; return }
         let task = Task { await performSync() }
@@ -331,7 +413,15 @@ final class ClassAlertsStore {
     private func performSync() async {
         do {
             while true {
-                let want = desired
+                // Nothing to reconcile (undecided, or locked with no revoke
+                // owed), at the start or after a round whose awaits it moved
+                // under. Return before the flag is cleared.
+                guard let want = desired else { return }
+                // Recorded before any write, so a run that fails partway
+                // still leaves a refund owing the delete.
+                if case .unlocked(let reason)? = access?.state, reason != .grandfathered {
+                    UserDefaults.standard.set(true, forKey: Self.revokeOnLockKey)
+                }
                 let existing = try await database.allSubscriptions()
                 let ours = existing.filter { $0.subscriptionID.hasPrefix("alert/") }
 
@@ -374,13 +464,19 @@ final class ClassAlertsStore {
                     let (_, deleted) = try await database.modifySubscriptions(saving: [], deleting: stale)
                     for case .failure(let error) in deleted.values { throw error }
                 }
-                // A toggle that landed during the awaits above only coalesced
-                // onto this run; reconcile it now rather than at the next
-                // foreground. IDs are deterministic, so keys are the diff.
-                if Set(desired.keys) == Set(want.keys) { break }
+                // A toggle (or a purchase-gate change) that landed during the
+                // awaits above only coalesced onto this run; reconcile it now
+                // rather than at the next foreground. IDs are deterministic,
+                // so keys are the diff. A gate gone undecided (nil) goes round
+                // to the guard above.
+                if let now = desired, Set(now.keys) == Set(want.keys) { break }
             }
             syncIssue = ""
             UserDefaults.standard.set(false, forKey: Self.syncPendingKey)
+            // The lock's delete went through. Later locked launches hold, or
+            // a TestFlight build would delete on every launch what an App
+            // Store device on the account keeps recreating.
+            if isLocked { UserDefaults.standard.removeObject(forKey: Self.revokeOnLockKey) }
         } catch let error as CKError where error.code == .notAuthenticated {
             syncIssue = "Sign in to iCloud (Settings) to receive class alerts."
         } catch {

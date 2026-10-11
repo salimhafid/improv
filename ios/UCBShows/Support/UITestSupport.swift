@@ -14,6 +14,8 @@ import SwiftUI
 ///   UITEST_SIDEBAR          — "1" to open the theater sidebar on launch
 ///   UITEST_CALENDAR_DIALOG  — "1" to open the Add-to-Calendar dialog
 ///   UITEST_SHARE            — "1" to open the share sheet
+///   UITEST_PAYWALL_PRICE    — price text for the Class Alerts unlock button when
+///                             the product can't load (App Review screenshot)
 ///   UITEST_CLASS_ALERT_RECORD — a ClassAlert record name: replay a tap on that
 ///                             alert at launch (read in UCBShowsApp; pair with
 ///                             UITEST_CLASS_ALERT_SUB for the subscription id)
@@ -66,6 +68,17 @@ extension ProcessInfo {
     var uiTestTalent: String? {
         #if DEBUG
         environment["UITEST_TALENT"]
+        #else
+        nil
+        #endif
+    }
+
+    /// UITEST_PAYWALL_PRICE: the price to show on the Class Alerts unlock
+    /// button when the product can't load (simulator runs outside Xcode), for
+    /// the App Review screenshot of the paywall.
+    var uiTestPaywallPrice: String? {
+        #if DEBUG
+        environment["UITEST_PAYWALL_PRICE"]
         #else
         nil
         #endif

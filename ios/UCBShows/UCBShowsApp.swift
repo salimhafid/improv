@@ -33,6 +33,7 @@ struct UCBShowsApp: App {
     @State private var account: UCBAccountStore
     @State private var tickets: TicketStore
     @State private var classAlerts: ClassAlertsStore
+    @State private var classAlertsAccess: ClassAlertsAccess
     @Environment(\.scenePhase) private var scenePhase
     private let notifications = NotificationRouter()
 
@@ -56,6 +57,7 @@ struct UCBShowsApp: App {
         _account = State(initialValue: UCBAccountStore())
         _tickets = State(initialValue: TicketStore())
         _classAlerts = State(initialValue: ClassAlertsStore())
+        _classAlertsAccess = State(initialValue: ClassAlertsAccess())
     }
 
     var body: some Scene {
@@ -69,6 +71,7 @@ struct UCBShowsApp: App {
                 .environment(account)
                 .environment(tickets)
                 .environment(classAlerts)
+                .environment(classAlertsAccess)
                 .tint(Theme.accent)
                 .task {
                     // Wire the ticket feature once, then restore any UCB session
@@ -118,6 +121,15 @@ struct UCBShowsApp: App {
                             recordName: record, subscriptionID: env["UITEST_CLASS_ALERT_SUB"]))
                     }
                     #endif
+                    // The class-alert purchase gate, wired before arming so the
+                    // launch reconcile already consults it (undecided holds the
+                    // reconcile rather than guessing) and every answer it
+                    // reaches queues one. Unstructured: entitlements,
+                    // AppTransaction, the remote config and the product are
+                    // round trips the session restore must not wait on.
+                    classAlerts.access = classAlertsAccess
+                    classAlertsAccess.onStateChange = { classAlerts.accessChanged() }
+                    Task { await classAlertsAccess.start() }
                     // Class alerts arrive as CloudKit pushes, so they need an
                     // APNs registration + a subscription reconcile on EVERY
                     // launch — the device token rotates, prefs can arrive from
@@ -164,6 +176,9 @@ struct UCBShowsApp: App {
                     // Covers a device token rotating and permission granted in
                     // Settings while we were backgrounded. Idempotent.
                     Task { await classAlerts.armOnLaunch() }
+                    // A refund, an Ask to Buy approval or a flipped TestFlight
+                    // flag lands here; a changed answer queues its reconcile.
+                    Task { await classAlertsAccess.refresh() }
                     // The launch fetch is otherwise the class list's only
                     // automatic refresh. Throttled inside the store.
                     Task { await classesStore.refreshIfStale() }
