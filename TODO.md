@@ -42,10 +42,14 @@ behind a $9.99 in-app purchase and is not yet uploaded).
   - [ ] **Paid Applications Agreement** active in App Store Connect →
         Business, tax and banking complete. Without it the IAP can't be sold
         and the product doesn't even load in TestFlight.
-  - [ ] **Create the IAP**: take a paywall screenshot (Classes → bell), run
-        `tools/asc_iap.py create --screenshot <png> --dry-run`, then without
-        `--dry-run`; `status` should show the en-US localization, USD 9.99,
-        availability, review note and a COMPLETE screenshot.
+  - [x] **Create the IAP** — done 2026-10-11: `6821749802`
+        `com.salimhafid.UCBShows.classalerts`, READY_TO_SUBMIT, en-US
+        localization, USD 9.99 (other territories by Apple's equalization),
+        175 territories + new ones, review note, review screenshot COMPLETE
+        (paywall captured with `UITEST_PAYWALL_PRICE`). The first `create`
+        stalled in an SSL read for 18 min and had to be killed; the rerun
+        (idempotent) finished in under 90 s.
+  - [x] **Upload build 28** — 1.8 (28) archived and uploaded 2026-10-11.
   - [ ] **TestFlight test of build 28** with `testflight_free` false: the
         paywall shows the price; a purchase (sandbox, not charged) unlocks and
         switches alerts on; Restore Purchase unlocks a reinstall or second
@@ -57,7 +61,7 @@ behind a $9.99 in-app purchase and is not yet uploaded).
         Review runs in the sandbox like TestFlight; `true` unlocks alerts for
         the reviewer, hides the paywall, and the IAP can't be found.
   - [ ] **Submit the IAP with 1.8**: an app's first IAP can only go to review
-        with an app version. After 1.7's review, create version 1.8, attach
+        with an app version. 1.7 is live, so create version 1.8, attach
         build 28, add Class Alerts under In-App Purchases on the version
         page, set the 1.8 review notes and the description's "(a one-time
         in-app purchase)" wording from metadata.md, then submit.
