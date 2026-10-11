@@ -1,8 +1,9 @@
 # TODO.md — open items, watchlist, and likely next steps
 
-Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-10-09 (app 1.6 is
+Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-10-11 (app 1.6 is
 READY_FOR_DISTRIBUTION; 1.7 (27) carries the class-alert fixes below plus the
-unreleased notification-delivery diagnostics).
+unreleased notification-delivery diagnostics; 1.8 (28) puts class alerts
+behind a $9.99 in-app purchase and is not yet uploaded).
 
 ## Release
 
@@ -35,6 +36,35 @@ unreleased notification-delivery diagnostics).
       one banner per new UCB class ("New class at …" / name / instructor /
       category, no wrapped lines), tap lands
       on the class.
+- [ ] **1.8 (28): Class Alerts in-app purchase** — design and runbook in
+      CONTEXT.md, "Class Alerts in-app purchase (1.8)"; listing text in
+      ios/AppStore/metadata.md.
+  - [ ] **Paid Applications Agreement** active in App Store Connect →
+        Business, tax and banking complete. Without it the IAP can't be sold
+        and the product doesn't even load in TestFlight.
+  - [ ] **Create the IAP**: take a paywall screenshot (Classes → bell), run
+        `tools/asc_iap.py create --screenshot <png> --dry-run`, then without
+        `--dry-run`; `status` should show the en-US localization, USD 9.99,
+        availability, review note and a COMPLETE screenshot.
+  - [ ] **TestFlight test of build 28** with `testflight_free` false: the
+        paywall shows the price; a purchase (sandbox, not charged) unlocks and
+        switches alerts on; Restore Purchase unlocks a reinstall or second
+        device; alerts still arrive afterwards. Then flip the switch to true,
+        confirm testers unlock without buying on a foreground (≤ 5 min), and
+        flip it back. In Xcode, refund via Manage Transactions and check the
+        `alert/` subscriptions are deleted once.
+  - [ ] **Keep `testflight_free` false whenever a build is in review.** App
+        Review runs in the sandbox like TestFlight; `true` unlocks alerts for
+        the reviewer, hides the paywall, and the IAP can't be found.
+  - [ ] **Submit the IAP with 1.8**: an app's first IAP can only go to review
+        with an app version. After 1.7's review, create version 1.8, attach
+        build 28, add Class Alerts under In-App Purchases on the version
+        page, set the 1.8 review notes and the description's "(a one-time
+        in-app purchase)" wording from metadata.md, then submit.
+  - [ ] **After 1.8 is live**: confirm an App Store install first downloaded
+        before build 28 shows alerts unlocked ("Included free…") and keeps
+        its subscriptions, and a fresh install sees the paywall —
+        grandfathering can only be observed in production.
 - [ ] **Verify physical-device class banners**. Pushes arrive in Notification
       Center, but the user reports no banner while backgrounded/locked. Check
       Banners, Lock Screen, Immediate Delivery and Focus on the phone, then
@@ -50,7 +80,8 @@ unreleased notification-delivery diagnostics).
 - [ ] App Privacy answers in ASC (web-only, no API): re-read against
       PRIVACY.md — nothing collected by us, CloudKit subscription for class
       alerts, iCloud KVS for settings/saved shows. Unchanged since 1.4 and
-      not re-checked this round.
+      not re-checked this round. 1.8's Apple-processed purchase adds nothing
+      collected by us; re-check before submitting 1.8.
 - [ ] A demo UCB student login for App Review (the reserve / QR / Wallet flow
       is invisible without one). 1.5's notes state the flow needs an enrolled
       UCB student account and that the rest of the app reviews without one.
@@ -261,5 +292,7 @@ that break the build.
   already answering 202.
 - After any app-code change that ships: bump CURRENT_PROJECT_VERSION (both
   configs), archive, upload, commit — the full runbook is in CONTEXT.md.
+- Before any App Review submission: `docs/app-config.json` on `main` must
+  say `"testflight_free": false`.
 - Run `./run_tests.sh` (Python + Swift harness) before committing; CI only
   runs the Python half.

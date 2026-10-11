@@ -1,6 +1,6 @@
 # Privacy Policy — Improv
 
-*Last updated: September 7, 2026*
+*Last updated: October 11, 2026*
 
 Improv is an app for browsing upcoming improv and comedy shows and classes.
 It is designed to collect no personal data. We run no servers and receive
@@ -59,6 +59,19 @@ If you add a ticket to Apple Wallet, the pass is created and signed on your
 device and handed to Wallet; nothing is uploaded. The pass carries the
 theater's location so Wallet can show it on your lock screen when you are
 nearby — the app itself never accesses your location.
+
+## Class Alerts purchase
+
+Class alerts are unlocked by a one-time in-app purchase. The purchase is made
+and processed entirely by Apple, through your App Store account and under
+Apple's privacy policy. The app never sees or stores your payment details,
+and it sends nothing about your purchase to any server of ours. To decide
+whether alerts are unlocked, the app asks Apple's StoreKit on your device
+whether your Apple ID owns the purchase, and which version of the app you
+first downloaded (people who installed before the purchase was introduced
+keep alerts free). That answer stays on your device. (Test builds
+distributed through TestFlight also download a small settings file from the
+same place as the listings.)
 
 ## Ticket purchases
 

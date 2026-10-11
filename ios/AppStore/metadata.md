@@ -58,8 +58,9 @@ being available clears itself.
 CLASSES TOO
 Every school in your city — not just the theater you picked — with its classes
 and workshops in a collapsible card, grouped by subject inside, each with
-instructor, schedule, and price. Register in a couple of taps, and turn on
-class alerts to hear when a school posts new classes.
+instructor, schedule, and price. Register in a couple of taps, and unlock
+class alerts (a one-time in-app purchase) to hear when a school posts new
+classes.
 
 BUILT LIKE APPLE BUILT IT
 Native SwiftUI, full Dynamic Type, light and dark mode, offline support (your
@@ -70,6 +71,10 @@ ours — see our short privacy policy.
 Improv is an independent guide. Shows and classes are listed with links to
 each theater's own ticketing; all sales happen on the theater's site.
 ```
+The "(a one-time in-app purchase)" wording is new for 1.8 and has to be set
+on the 1.8 version (a new version inherits 1.7's description): App Review
+guideline 2.3.2 asks a description to say when a feature it promotes needs
+an extra purchase.
 
 ## Keywords (100 chars max, comma-separated, no spaces needed)
 ```
@@ -92,6 +97,34 @@ improv,comedy,ucb,standup,sketch,shows,tonight,magnet,annoyance,theater,tickets,
   category picks so Apple can deliver the push. Answer the questionnaire from
   PRIVACY.md — "Data Not Collected" is the honest answer for data *we*
   collect, but re-read Apple's current definitions before submitting.
+- 1.8's Class Alerts purchase doesn't change that: Apple processes the
+  payment, and the app checks the entitlement and original download version
+  on device through StoreKit and sends them nowhere (no "Purchases" data
+  collected by us).
+
+## In-app purchase — Class Alerts (from 1.8)
+
+| Field | Value |
+|---|---|
+| Product ID | `com.salimhafid.UCBShows.classalerts` |
+| Type | Non-consumable |
+| Reference name | Class Alerts |
+| Display name (en-US, 30 max) | Class Alerts |
+| Description (en-US, 45 max) | Alerts when schools post new classes |
+| Price | USD 9.99 (base territory USA; other territories follow Apple's equalization) |
+| Availability | Every territory, plus new ones |
+| Family Sharing | Off (Apple doesn't allow turning it off once on) |
+| Review screenshot | The paywall: Classes tab → bell |
+
+IAP review note (set by the tool):
+```
+Unlocks Class Alerts: push notifications when improv schools post new classes. Open the Classes tab, tap the bell. Existing users who installed before version 1.8 keep the feature free.
+```
+Created and kept in step by `tools/asc_iap.py create --screenshot <png>`
+(`status` is read-only; `--dry-run` prints the writes). The app's first IAP
+has to be submitted together with an app version: add it on the 1.8 version
+page before Submit for Review. Needs the Paid Applications Agreement active
+(App Store Connect → Business). The local Xcode copy is `ios/UCBShows.storekit`.
 
 ## Age rating questionnaire
 - All "None" except: **Profanity or Crude Humor → Infrequent/Mild** (comedy
@@ -120,6 +153,59 @@ catalog.
 (1.4 shipped with "Bug fixes".)
 
 ## App Review notes
+
+### 1.8 — draft (not yet submitted)
+
+Replaces the 1.5 base text below, whose "The app sells nothing" and "no
+payment is taken anywhere in the app" stop being true with the Class Alerts
+purchase. Save it as `review-notes-1.8.txt` when submitting and set it with
+`tools/asc_release.py review <versionId> review-notes-1.8.txt`. **Before
+submitting, `docs/app-config.json` must say `"testflight_free": false`**:
+review installs run in the sandbox, so `true` would unlock alerts for the
+reviewer and hide the purchase.
+
+```
+Improv is a listings guide for live comedy theaters. All show/class data is
+publicly available information (titles, dates, venues, descriptions) that our
+GitHub Actions workflow scrapes from the theaters' public calendars and
+publishes as static JSON files; the app downloads those files. "Get Tickets" /
+"Register" open each theater's own website in an in-app Safari view, and all
+ticket and class purchases happen there.
+
+IN-APP PURCHASE (new in 1.8): "new classes posted" alerts are now unlocked by
+a one-time, non-consumable in-app purchase, "Class Alerts" (USD 9.99, product
+ID com.salimhafid.UCBShows.classalerts). It is the app's only purchase;
+everything else stays free. To find it: open the Classes tab and tap the bell
+in the toolbar. The Class Alerts sheet opens with the "Unlock for <price>" and
+"Restore Purchase" buttons at the top; the alert switches below stay visible
+but disabled until the purchase completes. After buying, Class Alerts switch
+on and the app asks for notification permission.
+
+People who installed Improv before version 1.8 keep Class Alerts free: the
+app reads AppTransaction.originalAppVersion and compares it with the first
+paid build, in the production App Store environment only. Sandbox installs,
+App Review's included, are never treated as earlier users, so the purchase
+always appears during review.
+
+No account is required to use the app, and every core feature (shows,
+classes, saving, reminders, filters, search) works without signing in. An
+OPTIONAL sign-in to an existing UCB (Upright Citizens Brigade) account, on
+UCB's own web page inside the app, lets current UCB students reserve free
+student tickets and see their ticket QR codes (Tickets tab, and optionally
+Apple Wallet). Reservations are free; UCB takes no payment through the app.
+The reservation flow is only available to enrolled UCB students, so it
+requires a real UCB student account; the rest of the app is fully reviewable
+without one.
+
+Calendar access is write-only and only used when the user taps "Add to
+Calendar". Notifications: local reminders for saved shows/tickets, plus the
+optional "new classes posted" alerts (the purchase above), delivered as
+CloudKit push notifications the user opts into (Classes tab -> bell). The app
+uses no location services; a Wallet pass carries the theater's location so
+Wallet can surface it nearby.
+```
+
+### 1.5 base (used through 1.6)
 
 Version 1.6's exact submitted notes are in
 [review-notes-1.6.txt](review-notes-1.6.txt). They retain the following 1.5
@@ -170,6 +256,9 @@ Chicago additions; refresh with the simulator recipe in CONTEXT.md
 before the next listing update.
 
 ## Build
+- Bundle ID: com.salimhafid.UCBShows · Version **1.8** · Build **28** — the
+  project's current setting, not yet uploaded; the first build with the Class
+  Alerts purchase (builds before 28 are the grandfathering cutoff).
 - Bundle ID: com.salimhafid.UCBShows · Version **1.6** · Build **26**.
   Uploaded 2026-09-08 and verified VALID with no non-exempt encryption.
   Submitted at **2026-09-08T21:48:26.855Z**; version and submission both

@@ -3,6 +3,8 @@
 **Improv** is a free iOS app that aggregates upcoming live-comedy shows,
 classes, and UCB talent across **New York, Los Angeles, and Chicago** —
 eleven theaters (plus UCB's online classes), one feed, zero backend cost.
+From 1.8, class alerts are a one-time $9.99 in-app purchase (free for anyone
+who installed earlier); everything else stays free.
 
 - App Store: **Improv** (bundle `com.salimhafid.UCBShows`)
 - Feeds (this repo, served from GitHub's raw CDN):
@@ -28,7 +30,9 @@ class reaches the feed within minutes. State lives on the `class-watch-state`
 branch.
 
 iOS app (ios/) fetches the raw-CDN JSON (URLSession's default cache policy →
-ETag/304 revalidation).
+ETag/304 revalidation). TestFlight/Xcode builds also read the hand-edited
+docs/app-config.json (a switch that unlocks class alerts without the purchase
+for testers; App Store builds ignore it).
 ```
 
 There is no server: the scrapers run on Actions, and the repo's `docs/`
@@ -91,5 +95,6 @@ watcher, the build/release runbook, simulator recipes — is
 
 No accounts of ours, no analytics, no tracking. The app offers an optional
 sign-in to a **UCB** account (on ucbcomedy.com, inside the app) for
-reserving free student tickets; that session stays on the device. See
-[PRIVACY.md](PRIVACY.md).
+reserving free student tickets; that session stays on the device. The Class
+Alerts purchase is processed entirely by Apple; the app checks it on device
+with StoreKit and sends nothing to us. See [PRIVACY.md](PRIVACY.md).

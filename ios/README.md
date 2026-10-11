@@ -41,6 +41,13 @@ Class alerts and iCloud sync need the app's entitlements (CloudKit container
 `iCloud.com.salimhafid.UCBShows`, push, key-value store) and a signed-in
 iCloud account on the device or simulator; everything else works without one.
 
+Run (⌘R) uses local StoreKit testing: the shared scheme points at
+`UCBShows.storekit` (next to the project, outside `UCBShows/` so it never
+ships), which defines the $9.99 Class Alerts purchase. Manage or refund test
+purchases in Xcode ▸ Debug ▸ StoreKit ▸ Manage Transactions. To see the
+paywall, the remote `testflight_free` switch must be off — it unlocks Xcode
+runs too (see CONTEXT.md, "Class Alerts in-app purchase (1.8)").
+
 > The screenshots in `screenshots/` are from an earlier design iteration
 > (source-toggle Setup, two tabs) and predate the sidebar / Tickets tab
 > redesign. `screenshots/appstore{,-65,-ipad}/` hold the App Store sets.
@@ -99,6 +106,12 @@ iCloud account on the device or simulator; everything else works without one.
   (a summary of many new classes opens the school's folder); if a fresh
   alert's class hasn't reached the class feed yet, a "Just posted" card holds
   its place while the tab checks for it every 30 seconds for up to 10 minutes.
+  From 1.8 alerts are a one-time **$9.99 in-app purchase** (StoreKit 2,
+  non-consumable `com.salimhafid.UCBShows.classalerts`); anyone who first
+  installed before 1.8 keeps them free. Until unlocked, the sheet leads with
+  Unlock / Restore Purchase and the switches stay visible but disabled; the
+  saved picks are never changed by the paywall. TestFlight builds can be
+  unlocked without purchase by a remote switch in `docs/app-config.json`.
 - **Talent** — UCB show pages list the cast as chips; a matched performer opens
   a bio page (headshot, city, scraped bio, their upcoming shows), an unmatched
   name opens the directory pre-searched. The directory filters All / New York /
@@ -143,9 +156,10 @@ venue's midnight in every city.
 UCBShows/
   UCBShowsApp.swift          @main; CloudSync.bootstrap() first, URLCache sizing,
                              notification delegate, APNs registration delegate,
-                             builds + injects the eight stores, wires tickets/
-                             account/alerts, deep-links, 5-min ticket sync + class-feed
-                             refresh on foreground
+                             builds + injects the eight stores and the Class Alerts
+                             purchase gate, wires tickets/account/alerts, deep-links,
+                             5-min ticket sync + class-feed and purchase refresh on
+                             foreground
   UCBShows.entitlements      aps-environment, iCloud container + CloudKit, KVS
   Localizable.strings        CA_TITLE / CA_BODY passthroughs for CloudKit pushes
   Models/
@@ -168,7 +182,10 @@ UCBShows/
     UCBSession.swift         the UCB "session engine": one WKWebView as cookie jar + API client
     WalletPass.swift         builds + CMS-signs .pkpass on device (swift-certificates)
     QRRender.swift           SVG QR → cached UIImage via off-screen WKWebView
-    ClassAlertsStore.swift   class-alert prefs + CloudKit subscription reconcile (one per school)
+    ClassAlertsStore.swift   class-alert prefs + CloudKit subscription reconcile (one per school),
+                             gated by the purchase (unknown → no reconcile)
+    ClassAlertsAccess.swift  StoreKit 2: entitlement, AppTransaction, purchase/restore → access state
+    ClassAlertsAccessPolicy.swift  Foundation-only: unlock rules, grandfathering, app-config decoder
     CloudSync.swift          iCloud key-value mirror of settings + going.json/tickets.json
     NotificationAuth.swift   one place to ask for notification permission
     NotificationRouter.swift UNUserNotificationCenter delegate; routes taps to tickets/shows/classes;
@@ -211,7 +228,10 @@ under `UCBShows/` are picked up automatically — no `.pbxproj` edits needed.
 The `FeedService` factories (`.shows` / `.classes` / `.talent`) point at the
 static feeds in this repo's `docs/` folder, served via raw.githubusercontent.com
 (committed by the scheduled scrape workflow). To point at a different backend,
-change the `liveFeed` base URL in `Services/FeedService.swift`.
+change the `liveFeed` base URL in `Services/FeedService.swift`. One more file
+there is hand-edited, not scraped: `docs/app-config.json`, the TestFlight
+switch for the Class Alerts purchase, read only by non-App-Store builds (URL
+in `Services/ClassAlertsAccess.swift`).
 
 ## Tests
 
@@ -229,6 +249,13 @@ computed values. `LogicTests.swift` covers class-alert tap targets (school
 from the subscription id, resolution from the record, recency, finding the
 class by feed id or a legacy bare id) and the class feed's foreground
 staleness rule.
+
+`ClassAlertsAccessTests.swift` pins the purchase gate: grandfathering (builds
+before 28, production only), the unlock/lock/unknown decision (a purchase
+wins; the TestFlight switch never unlocks production; anything uncertain
+stays unknown, because a lock deletes subscriptions), the lenient,
+fail-closed `app-config.json` decoder and its fetch → last-good → off
+resolution, and that the committed `docs/app-config.json` has the exact key.
 
 `NotificationDeliveryTests.swift` checks the device-settings status policy:
 permission/provisional warnings, disabled banners and Lock Screen alerts,

@@ -11,7 +11,9 @@ future apps), [ios/README.md](ios/README.md) (app architecture),
 
 **Improv** — a free, native iOS app aggregating live-comedy shows, classes,
 and UCB talent across New York, Los Angeles, and Chicago (plus UCB's online
-classes). Zero-cost backend: GitHub Actions scrapes on a cron and commits
+classes). From 1.8 one feature is paid: class alerts, a one-time $9.99
+in-app purchase (free for anyone who installed before 1.8).
+Zero-cost backend: GitHub Actions scrapes on a cron and commits
 static JSON to this repo; the app reads it from GitHub's raw CDN. No server
 of ours, no analytics. The only "backend" beyond the repo is Apple's: a
 CloudKit public database that the class-alert watcher writes to, iCloud
@@ -34,10 +36,12 @@ key-value storage that mirrors the user's own settings, and APNs.
   `ed477148-5b78-43d4-a963-ada1ab0d0a95`. Release and reviewer notes are in
   `ios/AppStore/whatsnew-1.6.txt` and `ios/AppStore/review-notes-1.6.txt`.
   On 2026-09-17, version **1.6** was verified **READY_FOR_DISTRIBUTION**.
-  Notification-delivery settings diagnostics added afterward are unreleased.
-  The project is now **MARKETING_VERSION 1.7, CURRENT_PROJECT_VERSION 27**
-  (not yet uploaded): those diagnostics plus the 2026-10-09 class-alert fixes
-  (one push per class, taps open the class, foreground class-feed refresh).
+  **1.7 (27)** — notification-delivery diagnostics plus the 2026-10-09
+  class-alert fixes (one push per class, taps open the class, foreground
+  class-feed refresh) — was uploaded 2026-10-09 and submitted 2026-10-10
+  (see TODO.md). The project is now **MARKETING_VERSION 1.8,
+  CURRENT_PROJECT_VERSION 28** (not yet uploaded): class alerts behind a
+  $9.99 in-app purchase (see "Class Alerts in-app purchase (1.8)").
 - Accounts: none of ours. The app offers an **optional UCB student sign-in**
   (ucbcomedy.com, inside a web view) for reserving free student tickets — see
   "UCB session engine" below and PRIVACY.md.
@@ -69,6 +73,8 @@ tests.yml: push to main (ignoring docs/**) → Python unit tests only.
 App fetch URLs (default URLSession cache policy → ETag/304 revalidation):
   https://raw.githubusercontent.com/salimhafid/improv/main/docs/shows.json
   …/classes.json  …/talent.json
+  …/app-config.json  (TestFlight switch for the Class Alerts purchase;
+                      fetched by non-App-Store builds only)
 ```
 
 The hourly cron replaced `17 */3 * * *` on this branch: GitHub starves a
@@ -671,7 +677,9 @@ matches real subscribers.
   live; class-alert prefs apply live (the store observes `UserDefaults`);
   theater selection and filters apply on next launch. `AccountChange` /
   `QuotaViolationChange` reasons are logged and not adopted. Device-local
-  only: `classAlertSyncPending`.
+  only: `classAlertSyncPending`, `classAlertsRevokeOnLock`,
+  `classAlertsGrandfathered` (the last two belong to the Class Alerts
+  purchase gate, and must stay off iCloud).
 - **Class alerts (app side)**: Foundation-only `ClassAlertPreferences` stores
   `{master, schools, ucb: [school: Set<category>], version}` under
   `classAlertPrefs` (the Swift property is `categorySelections`, with the
@@ -714,7 +722,9 @@ matches real subscribers.
   iCloud container `iCloud.com.salimhafid.UCBShows`, CloudKit, KVS.
   Subscriptions belong to the iCloud account, and every version deletes
   `alert/` IDs it doesn't plan: a 1.6 and a 1.7 device on one account swap
-  the v2 and v3 sets on each foreground until both run 1.7.
+  the v2 and v3 sets on each foreground until both run 1.7. From 1.8 the
+  purchase gate decides whether this plan applies at all — see "Class Alerts
+  in-app purchase (1.8)".
 - **Class-alert taps** (`NotificationRouter`, `ClassAlertTarget`,
   `ClassesView.followAlert`): the push carries only the record and
   subscription ids (notification info is fixed, the record schema too), so a
@@ -840,6 +850,145 @@ matches real subscribers.
   `DateUtils`' static `ISO8601DateFormatter`s, the harness's `var failures`,
   and the `Task.detached` captures in `WalletPass`/`PosterPipeline`.
 
+## Class Alerts in-app purchase (1.8)
+
+From 1.8 (build 28) class alerts are a **$9.99 non-consumable** in-app
+purchase: product id `com.salimhafid.UCBShows.classalerts`, name "Class
+Alerts", not family-shareable. StoreKit 2 only (`Product`, `Transaction`,
+`AppTransaction`, `AppStore.sync`); StoreKit's own signature verification
+is the only receipt check — no server of ours is involved. Everything else in
+the app stays free. Status 2026-10-11: code only; the IAP, the agreement
+check and the TestFlight tests are open in TODO.md.
+
+- **Code**: `ClassAlertsAccessPolicy.swift` (Foundation-only, in the logic
+  harness: the decision table, grandfathering, the remote-config decoder) and
+  `ClassAlertsAccess.swift` (`@MainActor @Observable`: StoreKit reads,
+  purchase, restore). `UCBShowsApp` builds one, injects it, sets
+  `classAlerts.access` and `onStateChange → classAlerts.accessChanged()`,
+  calls `start()` at launch (starts the `Transaction.updates` listener once)
+  and `refresh()` on every foreground. Inputs, re-read on each of those and on
+  every transaction update: the IAP in `Transaction.currentEntitlements`
+  (verified and not revoked; answers offline from StoreKit's cache);
+  `AppTransaction.shared` for the StoreKit environment and
+  `originalAppVersion` (never `AppTransaction.refresh()`, which can prompt
+  for a sign-in); and, outside production only, the TestFlight switch below.
+- **States**: `unknown`, `locked`, `unlocked(purchased | grandfathered |
+  testFlightFree)`. `decide`: a purchase wins; a sandbox/Xcode build with the
+  switch on is `testFlightFree`; grandfathered unlocks; `locked` needs a
+  definite "not purchased" plus a definite "not grandfathered" (or a test
+  environment, which can't grandfather); anything less certain is `unknown`.
+- **Unknown touches nothing.** Locking can delete subscriptions, so a guess
+  (an offline first launch, StoreKit unavailable) must never silence a paying
+  or grandfathered user. While unknown, `ClassAlertsStore.desired` is nil: the
+  reconcile neither creates nor deletes and leaves `classAlertSyncPending`
+  as it was, and `accessChanged` queues the owed reconcile once an answer
+  lands. The bell
+  badge and switches keep reading the saved prefs meanwhile.
+- **Locked**: badge 0, switches read Off and are disabled (the store also
+  refuses any switch-on), and a paywall leads the Class Alerts sheet — "Unlock for
+  <localized price>", Restore Purchase, "One-time purchase. No subscription."
+  The paywall **never edits prefs** — they sync through iCloud to the user's
+  other devices — it only stops them taking effect. A purchase or restore
+  tapped in the sheet switches the master on (asking notification permission)
+  or arms prefs that already say On; an unlock that arrives by itself never
+  flips a switch. Ask to Buy (`.pending`) and purchases on another device
+  arrive through `Transaction.updates`. Restore = `AppStore.sync()`, which may
+  ask for the Apple ID password, so only the button calls it.
+- **Refunds lock and delete.** A refunded (revoked) entitlement drops out of
+  `currentEntitlements` → locked → the reconcile deletes every `alert/`
+  subscription — but only if this install subscribed under an unlock that can
+  end (`classAlertsRevokeOnLock`: set when a purchased or testFlightFree
+  reconcile runs, cleared once the delete lands, device-local). A locked
+  install that never subscribed that way leaves them alone: subscriptions
+  belong to the iCloud account, and TestFlight shares production CloudKit
+  with the App Store build, so a locked TestFlight install that deleted them
+  would silence the same account's paid or grandfathered phone. The delete is
+  account-wide; another unlocked device re-creates its own on its next
+  foreground.
+- **Grandfathering**: anyone whose original download is a build before 28
+  keeps alerts free (`ClassAlertsAccessPolicy.firstPaywalledBuild`).
+  `AppTransaction.originalAppVersion` is the CFBundleVersion of the Apple ID's
+  first download, so a reinstall keeps it; builds are plain integers, and a
+  non-integer is not grandfathered. **Production only**: Apple documents that
+  `originalAppVersion` is always "1.0" in the sandbox, so TestFlight and Xcode
+  builds are never grandfathered (the switch below is how testers get it free).
+  A production proof is cached in `UserDefaults` `classAlertsGrandfathered`
+  so an offline launch starts unlocked. It is device-local and must NOT join
+  `CloudSync.defaultsKeys` (another device may use another App Store
+  account); never cached false; removed when StoreKit definitively says no
+  (a TestFlight build installed over a grandfathered App Store install keeps
+  the container). Grandfathering never sets the revoke flag.
+
+**TestFlight switch** — `docs/app-config.json` on `main`, served at
+`https://raw.githubusercontent.com/salimhafid/improv/main/docs/app-config.json`:
+
+```json
+{"class_alerts": {"testflight_free": false}}
+```
+
+`true` unlocks Class Alerts without purchase in builds whose StoreKit
+environment is not production: **TestFlight** (`.sandbox`), **Xcode** runs
+(`.xcode`), and **DEBUG** builds whose `AppTransaction` can't be read. App
+Store builds ignore it and never fetch it. To flip it, edit the value on
+`main` and push (`git pull --rebase` first — the scrape bot commits hourly);
+no build is needed. Keep the exact key and a JSON `true`/`false` (the Swift
+harness checks the committed file; CI doesn't, and pushes to `docs/**` skip
+tests.yml). Testers see the change on their next launch or
+foreground, up to 5 minutes later (the raw CDN's max-age). It fails closed: a
+missing key, a wrong type or an unparseable file reads `false` (an
+unparseable copy also drops the cached one); an unreachable CDN falls back to
+the last good copy (`app-config.cache.json` in Application Support), else
+`false`. Turning it off locks testers who haven't bought, and each install
+that subscribed under it deletes its account's `alert/` subscriptions once.
+While it is
+on, the paywall is hidden, so test purchase/restore with it off.
+
+> **App Review runs in the sandbox, like TestFlight.** With `testflight_free`
+> true, a reviewer's install gets Class Alerts unlocked, never sees the
+> paywall and can't find the IAP to test — grounds for rejecting the version
+> and its IAP. **Keep it `false` from submission until the review decision,
+> whenever any build is in review.**
+
+**Xcode runs**: `ios/UCBShows.storekit` (deliberately outside
+`ios/UCBShows/`, whose synchronized group would bundle it) defines the
+product locally — $9.99, non-consumable, not family-shareable — and the shared
+scheme's Run action references it, so ⌘R uses local StoreKit (environment
+`.xcode`; no App Store Connect product or agreement needed). Delete or refund
+test purchases in Xcode ▸ Debug ▸ StoreKit ▸ Manage Transactions to exercise
+the lock. The remote switch applies to Xcode runs too: it must be `false` to
+see the paywall. Xcode runs are never grandfathered.
+
+**App Store Connect**: `tools/asc_iap.py`, with the same Admin API key
+environment as `tools/asc_pass_cert.py` (`ASC_ISSUER_ID`, `ASC_KEY_ID`,
+`ASC_KEY_PATH`):
+
+```bash
+.venv/bin/python tools/asc_iap.py status                                     # read-only
+.venv/bin/python tools/asc_iap.py create --screenshot paywall.png --dry-run  # GETs only, prints the writes
+.venv/bin/python tools/asc_iap.py create --screenshot paywall.png
+```
+
+`create` is idempotent: it finds the IAP by product id (or creates it) and
+fills in only what is missing or different — the en-US localization ("Class
+Alerts" / "Alerts when schools post new classes"), the USD 9.99 price (other
+territories follow Apple's equalization), availability in every territory plus
+new ones, the App Review note, and the App Review screenshot (a shot of the
+paywall; a FAILED or interrupted upload is replaced). Apple doesn't allow
+turning Family Sharing off once on; the tool warns if it is. It does **not**
+submit: **an app's first IAP must go to review together with an app version**
+— add Class Alerts under In-App Purchases on the 1.8 version page before
+Submit for Review (`tools/asc_release.py submit` submits the version only).
+Selling it also needs the **Paid Applications Agreement** active in App Store
+Connect ▸ Business (tax and banking complete); without it the product doesn't
+load even in TestFlight, and the paywall shows "Unavailable — Try Again".
+
+Tests: `tests/ios/ClassAlertsAccessTests.swift` (harness: grandfathering,
+the `decide` rules, the config decoder, its fail-closed fetch → last-good →
+off resolution, and the committed `docs/app-config.json` spelling the key
+the app reads) and `tests/test_asc_iap.py` (offline, a fake ASC API).
+Not yet observed: a sandbox purchase, restore or refund on a device, and
+grandfathering in production.
+
 ## Build & release runbook
 
 ```bash
@@ -861,11 +1010,16 @@ xcodebuild -exportArchive -archivePath <path>/Improv.xcarchive \
   number is bumped by hand; Xcode must not rewrite it at upload).
 - **Version rule**: a train closes once approved — 1.2, 1.3 and 1.4 are
   closed (builds 19 and 20 were uploaded into 1.3 and are stranded); 1.5
-  and 1.6 are also approved; new uploads use MARKETING_VERSION 1.7. The upload fails at
+  and 1.6 are also approved; 1.7 (27) was submitted 2026-10-10; new uploads
+  use MARKETING_VERSION 1.8 (build 28 onward). The upload fails at
   the very END of a ~15 min export with "Invalid Pre-Release Train", so
   check the train before archiving, not after. Both settings appear twice in
   the pbxproj (Debug+Release) — sed with /g.
 - `ITSAppUsesNonExemptEncryption = NO` is baked in — no compliance prompt.
+- **From 1.8, before every submission**: `docs/app-config.json` must say
+  `"testflight_free": false` (App Review runs in the sandbox — see "Class
+  Alerts in-app purchase (1.8)"), and 1.8 itself must carry the Class Alerts
+  IAP on its version page.
 - `CODE_SIGN_ENTITLEMENTS = UCBShows/UCBShows.entitlements` (aps-environment
   `development` in the file; iCloud container + CloudKit; KVS). The watcher
   writes alerts to both CloudKit environments, so development and App Store
@@ -984,4 +1138,6 @@ Gotchas learned the hard way:
 
 $0/month for everything (public-repo Actions + raw CDN). The only recurring
 cost anywhere is Apple's $99/yr developer program, which also covers
-CloudKit, APNs, iCloud KVS and the Wallet pass type id.
+CloudKit, APNs, iCloud KVS and the Wallet pass type id. From 1.8 the one
+income is the $9.99 Class Alerts purchase, paid out by Apple net of its
+commission under the Paid Applications Agreement.
