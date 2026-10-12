@@ -6,14 +6,13 @@
    "annoyance/ap1-sundays-with-jillian-mueller-12cb3b2c-cbb3-4918-b033-e7be5555bf0d",
    "annoyance/ap1-thursdays-with-greg-lovelace",
    "annoyance/ap1-wednesdays-with-jeff-quintana",
-   "annoyance/ap2-mondays-with-jen-connor-4569961c-859b-4594-94dc-81248aa75907",
+   "annoyance/ap2-mondays-with-keenan-camp-6f5ab03b-9076-4bde-b976-061f69d48be6",
    "annoyance/ap2-thursdays-with-chris-kervick-90f8732e-52d1-46fe-b49a-7f99eb1f5cbf",
    "annoyance/ap2-tuesdays-with-megan-johns-b08079a4-b41f-4c81-8dab-07a634a1b8ec",
    "annoyance/ap2-wednesdays-with-casey-alltop-37470518-d940-491a-91a2-38f8538f517f",
    "annoyance/ap3-mondays-with-johanna-medrano",
    "annoyance/ap3-sundays-with-johanna-medrano",
    "annoyance/ap3-wednesdays-with-chris-kervick-05182ad6-b2bb-437f-bba3-c2429258eb3b",
-   "annoyance/ap4-thursdays-with-ross-taylor-5c2fd96d-495a-420e-81d1-22de6aa9e1e8",
    "annoyance/ap4-wednesdays-with-bruce-phillips-5a43f4ce-3762-4215-a196-aa2637b81272",
    "annoyance/ap5-thursdays-with-keenan-camp",
    "annoyance/crass1-tuesdays-with-hails-reeves",
@@ -25,14 +24,14 @@
    "annoyance/standup-sundays-with-st-james-jackson",
    "annoyance/workshop-drop-in-improv-classes"
   ],
-  "updated": "2026-10-11T07:23:11.470230+00:00"
+  "new_at": "2026-10-12T03:24:17.453440+00:00",
+  "updated": "2026-10-12T03:24:17.453440+00:00"
  },
  "brooklyn_cc": {
   "ids": [
    "brooklyn_cc/anya-clownpworkshop-oct-dec-2026",
    "brooklyn_cc/broken-box-mime-nov-dec",
    "brooklyn_cc/clown-1-hannah-oct-dec-2026",
-   "brooklyn_cc/clown-1-hannah-oct-dec-2026-thurs",
    "brooklyn_cc/clown-1-jeff-seal-oct-dec-2026",
    "brooklyn_cc/clown-1-tallie-oct-dec-2026",
    "brooklyn_cc/clown-2-chris-manley-oct-dec-2026",
@@ -45,6 +44,7 @@
    "brooklyn_cc/improv-1-molly-oct-dec-26-mon",
    "brooklyn_cc/improv-1-molly-oct-dec-26-sunday",
    "brooklyn_cc/improv-1-taylor-oct-dec-2026",
+   "brooklyn_cc/improv-1-tony-ferraro",
    "brooklyn_cc/improv-2-hannah-rehak-oct-dec-2026",
    "brooklyn_cc/improv-2-hannah-rehak-oct-dec-2026-sunday",
    "brooklyn_cc/improv-2-maya-sharma-oct-dec-2026",
@@ -53,7 +53,6 @@
    "brooklyn_cc/improv-3-tej-khanna-oct-dec-2026-sunday",
    "brooklyn_cc/improv-4-andy-junk-oct-dec-2026",
    "brooklyn_cc/improv-4-andy-junk-oct-dec-2026-sunday",
-   "brooklyn_cc/improv-drop-in-andy-bcc-october-10th",
    "brooklyn_cc/improv-drop-in-andy-bcc-october-17th",
    "brooklyn_cc/improv-level-2-miranda-rozas-oct-dec-2026",
    "brooklyn_cc/improv-level-3-colin-oct-dec-2026",
@@ -72,11 +71,12 @@
    "brooklyn_cc/stand-up-2-shalewa-oct-dec-2026",
    "brooklyn_cc/stand-up-intensive-baron-vaughn-november-weekend",
    "brooklyn_cc/start-with-nothing-natasha-vaynblat-oct",
-   "brooklyn_cc/start-with-nothing-natasha-vaynblat-sep",
    "brooklyn_cc/tony-stop-fighting-improv",
-   "brooklyn_cc/use-your-dang-voice-noelle-cbjsg"
+   "brooklyn_cc/use-your-dang-voice-noelle-cbjsg",
+   "brooklyn_cc/workshop-anya-kathleen-october"
   ],
-  "updated": "2026-10-11T07:23:11.470230+00:00"
+  "new_at": "2026-10-12T03:24:17.453440+00:00",
+  "updated": "2026-10-12T03:24:17.453440+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -125,7 +125,7 @@
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "updated": "2026-10-11T07:23:11.470230+00:00"
+  "updated": "2026-10-12T03:24:17.453440+00:00"
  },
  "logan_square": {
   "ids": [
@@ -201,7 +201,7 @@
    "magnet/12063"
   ],
   "new_at": "2026-10-11T07:23:11.470230+00:00",
-  "updated": "2026-10-11T07:23:11.470230+00:00"
+  "updated": "2026-10-12T03:24:17.453440+00:00"
  },
  "second_city": {
   "ids": [
@@ -307,7 +307,7 @@
    "second_city/46561"
   ],
   "new_at": "2026-10-10T11:22:05.408506+00:00",
-  "updated": "2026-10-11T07:23:11.470230+00:00"
+  "updated": "2026-10-12T03:24:17.453440+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -369,7 +369,7 @@
    "43482"
   ],
   "new_at": "2026-10-12T01:36:11.677181+00:00",
-  "updated": "2026-10-12T03:22:11.099328+00:00"
+  "updated": "2026-10-12T03:24:11.047020+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -444,7 +444,7 @@
    "43426"
   ],
   "new_at": "2026-10-11T18:07:36.031363+00:00",
-  "updated": "2026-10-12T03:22:11.099328+00:00"
+  "updated": "2026-10-12T03:24:11.047020+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -466,7 +466,7 @@
    "43396"
   ],
   "new_at": "2026-10-11T17:45:36.185643+00:00",
-  "updated": "2026-10-12T03:22:11.099328+00:00"
+  "updated": "2026-10-12T03:24:11.047020+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -477,12 +477,10 @@
    "wgis_la/1806",
    "wgis_la/1807",
    "wgis_la/1810",
-   "wgis_la/1813",
    "wgis_la/1820",
    "wgis_la/1827",
    "wgis_la/1828",
    "wgis_la/1829",
-   "wgis_la/1835",
    "wgis_la/1836",
    "wgis_la/1837",
    "wgis_la/1838",
@@ -510,7 +508,7 @@
    "wgis_la/1877"
   ],
   "new_at": "2026-10-11T07:23:11.470230+00:00",
-  "updated": "2026-10-11T07:23:11.470230+00:00"
+  "updated": "2026-10-12T03:24:17.453440+00:00"
  },
  "wgis_ny": {
   "ids": [
