@@ -1,17 +1,14 @@
 {
  "annoyance": {
   "ids": [
-   "annoyance/ap1-sundays-with-jillian-mueller-12cb3b2c-cbb3-4918-b033-e7be5555bf0d",
-   "annoyance/ap3-sundays-with-johanna-medrano",
    "annoyance/crass2-mondays-with-sam-locke",
    "annoyance/fall-intensive-part-1-november-9-13",
    "annoyance/ig2-wednesdays-with-face-off-unlimited-698986e5-1933-497b-a781-ed601a4970c8",
-   "annoyance/mi1-sundays-with-lily-ludwig",
    "annoyance/standup-sundays-with-st-james-jackson",
    "annoyance/workshop-drop-in-improv-classes"
   ],
   "new_at": "2026-10-12T03:24:17.453440+00:00",
-  "updated": "2026-10-19T15:35:21.241396+00:00"
+  "updated": "2026-10-20T11:36:37.031434+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -23,8 +20,8 @@
    "brooklyn_cc/clown-2-chris-manley-oct-dec-2026",
    "brooklyn_cc/clown-2-chris-manley-oct-dec-2026-thurs",
    "brooklyn_cc/clown-3-tallie-oct-dec-2026",
-   "brooklyn_cc/clown-town-level-up",
    "brooklyn_cc/crafting-characters-nick-mestad-0oct-dec-2026",
+   "brooklyn_cc/drop-in-november-10th",
    "brooklyn_cc/drop-in-october-24th",
    "brooklyn_cc/drop-in-october-27th",
    "brooklyn_cc/improv-1-kenny-oct-dec-2026",
@@ -45,6 +42,7 @@
    "brooklyn_cc/improv-drop-in-andy-bcc-october-29th",
    "brooklyn_cc/improv-level-2-miranda-rozas-oct-dec-2026",
    "brooklyn_cc/improvised-sketch-disco-horses",
+   "brooklyn_cc/intro-to-clown-riley-soloner-november-3rd",
    "brooklyn_cc/musical-improv-1-oct-dec-2026",
    "brooklyn_cc/musical-improv-3-oct-dec-2026",
    "brooklyn_cc/pilot-writing-rich-talarico-oct-dec-2026",
@@ -62,8 +60,8 @@
    "brooklyn_cc/use-your-dang-voice-noelle-cbjsg",
    "brooklyn_cc/workshop-anya-kathleen-october"
   ],
-  "new_at": "2026-10-19T15:35:21.241396+00:00",
-  "updated": "2026-10-19T15:35:21.241396+00:00"
+  "new_at": "2026-10-20T11:36:37.031434+00:00",
+  "updated": "2026-10-20T11:36:37.031434+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -87,7 +85,6 @@
    "io_chicago/io-improv-level-3-mondays-from-7-10pm-w-matty-vergun",
    "io_chicago/io-improv-level-3-saturdays-from-12-3pm-w-kennedy-baldwin",
    "io_chicago/io-improv-level-3-thursdays-from-7-10pm-w-andy-carey",
-   "io_chicago/io-improv-level-3-tuesdays-from-7-10pm-w-steve-plock",
    "io_chicago/io-improv-level-3-wednesdays-from-7-10pm-w-aram-rayzian",
    "io_chicago/io-improv-level-4-mondays-from-7-10pm-w-adonis-holmes",
    "io_chicago/io-improv-level-4-saturdays-from-12-3pm-w-clayton-margeson-a8a7580c-5143-4e39-89db-171571b8105a",
@@ -113,7 +110,7 @@
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
   "new_at": "2026-10-18T19:34:00.244676+00:00",
-  "updated": "2026-10-19T15:35:21.241396+00:00"
+  "updated": "2026-10-20T11:36:37.031434+00:00"
  },
  "logan_square": {
   "ids": [
@@ -125,8 +122,6 @@
   "ids": [
    "magnet/11979",
    "magnet/11980",
-   "magnet/11991",
-   "magnet/11993",
    "magnet/11999",
    "magnet/12000",
    "magnet/12002",
@@ -188,7 +183,7 @@
    "magnet/12065"
   ],
   "new_at": "2026-10-15T11:29:23.033297+00:00",
-  "updated": "2026-10-19T15:35:21.241396+00:00"
+  "updated": "2026-10-20T11:36:37.031434+00:00"
  },
  "second_city": {
   "ids": [
@@ -303,7 +298,7 @@
    "second_city/46586"
   ],
   "new_at": "2026-10-19T15:35:21.241396+00:00",
-  "updated": "2026-10-19T15:35:21.241396+00:00"
+  "updated": "2026-10-20T11:36:37.031434+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -353,7 +348,7 @@
    "43497"
   ],
   "new_at": "2026-10-13T19:52:33.828215+00:00",
-  "updated": "2026-10-20T11:34:26.014193+00:00"
+  "updated": "2026-10-20T11:36:26.014455+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -418,7 +413,7 @@
    "43635"
   ],
   "new_at": "2026-10-19T19:45:27.041032+00:00",
-  "updated": "2026-10-20T11:34:26.014193+00:00"
+  "updated": "2026-10-20T11:36:26.014455+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -435,7 +430,7 @@
    "43396"
   ],
   "new_at": "2026-10-11T17:45:36.185643+00:00",
-  "updated": "2026-10-20T11:34:26.014193+00:00"
+  "updated": "2026-10-20T11:36:26.014455+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -476,13 +471,13 @@
    "wgis_la/1877"
   ],
   "new_at": "2026-10-17T23:32:58.289387+00:00",
-  "updated": "2026-10-19T15:35:21.241396+00:00"
+  "updated": "2026-10-20T11:36:37.031434+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1880"
   ],
   "new_at": "2026-10-17T23:32:58.289387+00:00",
-  "updated": "2026-10-19T15:35:21.241396+00:00"
+  "updated": "2026-10-20T11:36:37.031434+00:00"
  }
 }
