@@ -30,7 +30,7 @@
    "annoyance/workshop-drop-in-improv-classes"
   ],
   "new_at": "2026-10-27T03:46:22.663092+00:00",
-  "updated": "2026-10-27T03:46:22.663092+00:00"
+  "updated": "2026-10-27T23:47:51.965528+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -76,11 +76,10 @@
    "brooklyn_cc/stand-up-1-sara-oct-dec-2026",
    "brooklyn_cc/stand-up-1-sara-oct-dec-2026-sunday",
    "brooklyn_cc/stand-up-2-joann-oct-dec-2026",
-   "brooklyn_cc/stand-up-intensive-baron-vaughn-november-weekend",
-   "brooklyn_cc/use-your-dang-voice-noelle-cbjsg"
+   "brooklyn_cc/stand-up-intensive-baron-vaughn-november-weekend"
   ],
   "new_at": "2026-10-27T03:46:22.663092+00:00",
-  "updated": "2026-10-27T03:46:22.663092+00:00"
+  "updated": "2026-10-27T23:47:51.965528+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -107,7 +106,6 @@
    "io_chicago/io-improv-level-4-thursdays-from-7-10pm-w-mary-tilden",
    "io_chicago/io-improv-level-4-wednesdays-from-7-10pm-w-craig-uhlir",
    "io_chicago/io-improv-level-5-mondays-from-7-10pm-w-lisa-burton",
-   "io_chicago/io-improv-level-5-saturdays-from-12-3pm-w-eddie-pina-b848096c-f9e1-4b76-a5fe-d76854f99edc",
    "io_chicago/io-improv-level-5-thursdays-from-7-10pm-w-james-dugan",
    "io_chicago/io-improv-level-5-tuesdays-from-7-10pm-w-nicole-carter",
    "io_chicago/music-improv-3-m-sunday-from-12-3pm-w-lisa-burton",
@@ -126,7 +124,7 @@
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
   "new_at": "2026-10-27T03:46:22.663092+00:00",
-  "updated": "2026-10-27T03:46:22.663092+00:00"
+  "updated": "2026-10-27T23:47:51.965528+00:00"
  },
  "logan_square": {
   "ids": [
@@ -190,7 +188,7 @@
    "magnet/12065"
   ],
   "new_at": "2026-10-15T11:29:23.033297+00:00",
-  "updated": "2026-10-27T03:46:22.663092+00:00"
+  "updated": "2026-10-27T23:47:51.965528+00:00"
  },
  "second_city": {
   "ids": [
@@ -296,6 +294,7 @@
    "second_city/46582",
    "second_city/46584",
    "second_city/46586",
+   "second_city/46608",
    "second_city/46609",
    "second_city/46610",
    "second_city/46611",
@@ -335,8 +334,8 @@
    "second_city/46653",
    "second_city/46654"
   ],
-  "new_at": "2026-10-27T03:46:22.663092+00:00",
-  "updated": "2026-10-27T03:46:22.663092+00:00"
+  "new_at": "2026-10-27T23:47:51.965528+00:00",
+  "updated": "2026-10-27T23:47:51.965528+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -398,7 +397,7 @@
    "43881"
   ],
   "new_at": "2026-10-27T18:51:20.113652+00:00",
-  "updated": "2026-10-27T23:45:40.107808+00:00"
+  "updated": "2026-10-27T23:47:40.032542+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -461,7 +460,7 @@
    "43635"
   ],
   "new_at": "2026-10-22T22:17:49.403066+00:00",
-  "updated": "2026-10-27T23:45:40.107808+00:00"
+  "updated": "2026-10-27T23:47:40.032542+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -474,7 +473,7 @@
    "43760"
   ],
   "new_at": "2026-10-20T21:00:45.785678+00:00",
-  "updated": "2026-10-27T23:45:40.107808+00:00"
+  "updated": "2026-10-27T23:47:40.032542+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -489,7 +488,6 @@
    "wgis_la/1840",
    "wgis_la/1842",
    "wgis_la/1846",
-   "wgis_la/1847",
    "wgis_la/1850",
    "wgis_la/1851",
    "wgis_la/1855",
@@ -513,13 +511,13 @@
    "wgis_la/1890"
   ],
   "new_at": "2026-10-24T15:42:44.546539+00:00",
-  "updated": "2026-10-27T03:46:22.663092+00:00"
+  "updated": "2026-10-27T23:47:51.965528+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1880"
   ],
   "new_at": "2026-10-17T23:32:58.289387+00:00",
-  "updated": "2026-10-27T03:46:22.663092+00:00"
+  "updated": "2026-10-27T23:47:51.965528+00:00"
  }
 }
