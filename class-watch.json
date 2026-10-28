@@ -30,7 +30,7 @@
    "annoyance/workshop-drop-in-improv-classes"
   ],
   "new_at": "2026-10-27T03:46:22.663092+00:00",
-  "updated": "2026-10-27T23:47:51.965528+00:00"
+  "updated": "2026-10-28T19:49:12.912344+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -43,7 +43,6 @@
    "brooklyn_cc/clown-3-tallie-oct-dec-2026",
    "brooklyn_cc/crafting-characters-nick-mestad-0oct-dec-2026",
    "brooklyn_cc/drop-in-november-10th",
-   "brooklyn_cc/drop-in-october-27th",
    "brooklyn_cc/improv-1-kenny-oct-dec-2026",
    "brooklyn_cc/improv-1-molly-oct-dec-26-mon",
    "brooklyn_cc/improv-1-molly-oct-dec-26-sunday",
@@ -79,7 +78,7 @@
    "brooklyn_cc/stand-up-intensive-baron-vaughn-november-weekend"
   ],
   "new_at": "2026-10-27T03:46:22.663092+00:00",
-  "updated": "2026-10-27T23:47:51.965528+00:00"
+  "updated": "2026-10-28T19:49:12.912344+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -124,7 +123,7 @@
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
   "new_at": "2026-10-27T03:46:22.663092+00:00",
-  "updated": "2026-10-27T23:47:51.965528+00:00"
+  "updated": "2026-10-28T19:49:12.912344+00:00"
  },
  "logan_square": {
   "ids": [
@@ -185,10 +184,11 @@
    "magnet/12062",
    "magnet/12063",
    "magnet/12064",
-   "magnet/12065"
+   "magnet/12065",
+   "magnet/12070"
   ],
-  "new_at": "2026-10-15T11:29:23.033297+00:00",
-  "updated": "2026-10-27T23:47:51.965528+00:00"
+  "new_at": "2026-10-28T19:49:12.912344+00:00",
+  "updated": "2026-10-28T19:49:12.912344+00:00"
  },
  "second_city": {
   "ids": [
@@ -209,7 +209,6 @@
    "second_city/44820",
    "second_city/44821",
    "second_city/44822",
-   "second_city/46348",
    "second_city/46349",
    "second_city/46350",
    "second_city/46351",
@@ -227,13 +226,10 @@
    "second_city/46372",
    "second_city/46373",
    "second_city/46388",
-   "second_city/46390",
-   "second_city/46391",
    "second_city/46392",
    "second_city/46393",
    "second_city/46396",
    "second_city/46399",
-   "second_city/46400",
    "second_city/46402",
    "second_city/46404",
    "second_city/46405",
@@ -241,26 +237,20 @@
    "second_city/46409",
    "second_city/46448",
    "second_city/46449",
-   "second_city/46451",
    "second_city/46452",
    "second_city/46453",
-   "second_city/46454",
    "second_city/46455",
    "second_city/46458",
-   "second_city/46459",
    "second_city/46460",
    "second_city/46461",
    "second_city/46462",
    "second_city/46464",
-   "second_city/46465",
    "second_city/46466",
    "second_city/46467",
    "second_city/46468",
    "second_city/46469",
-   "second_city/46470",
    "second_city/46532",
    "second_city/46534",
-   "second_city/46542",
    "second_city/46545",
    "second_city/46547",
    "second_city/46548",
@@ -280,8 +270,6 @@
    "second_city/46564",
    "second_city/46565",
    "second_city/46567",
-   "second_city/46569",
-   "second_city/46571",
    "second_city/46573",
    "second_city/46574",
    "second_city/46575",
@@ -335,7 +323,7 @@
    "second_city/46654"
   ],
   "new_at": "2026-10-27T23:47:51.965528+00:00",
-  "updated": "2026-10-27T23:47:51.965528+00:00"
+  "updated": "2026-10-28T19:49:12.912344+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -405,7 +393,7 @@
    "44012"
   ],
   "new_at": "2026-10-28T00:43:40.403591+00:00",
-  "updated": "2026-10-28T19:47:00.589635+00:00"
+  "updated": "2026-10-28T19:48:59.963800+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -476,7 +464,7 @@
    "44022"
   ],
   "new_at": "2026-10-28T01:43:39.862909+00:00",
-  "updated": "2026-10-28T19:47:00.589635+00:00"
+  "updated": "2026-10-28T19:48:59.963800+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -493,7 +481,7 @@
    "44061"
   ],
   "new_at": "2026-10-28T01:47:39.841749+00:00",
-  "updated": "2026-10-28T19:47:00.589635+00:00"
+  "updated": "2026-10-28T19:48:59.963800+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -507,7 +495,6 @@
    "wgis_la/1838",
    "wgis_la/1840",
    "wgis_la/1842",
-   "wgis_la/1846",
    "wgis_la/1850",
    "wgis_la/1851",
    "wgis_la/1855",
@@ -531,13 +518,13 @@
    "wgis_la/1890"
   ],
   "new_at": "2026-10-24T15:42:44.546539+00:00",
-  "updated": "2026-10-27T23:47:51.965528+00:00"
+  "updated": "2026-10-28T19:49:12.912344+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1880"
   ],
   "new_at": "2026-10-17T23:32:58.289387+00:00",
-  "updated": "2026-10-27T23:47:51.965528+00:00"
+  "updated": "2026-10-28T19:49:12.912344+00:00"
  }
 }
