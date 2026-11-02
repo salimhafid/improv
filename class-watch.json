@@ -32,7 +32,7 @@
    "annoyance/workshop-you-already-did-the-funny-thing-with-jeff-quintana"
   ],
   "new_at": "2026-10-29T15:50:30.412872+00:00",
-  "updated": "2026-11-01T23:54:53.054189+00:00"
+  "updated": "2026-11-02T19:56:23.418353+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -78,7 +78,7 @@
    "brooklyn_cc/stand-up-intensive-baron-vaughn-november-weekend"
   ],
   "new_at": "2026-10-27T03:46:22.663092+00:00",
-  "updated": "2026-11-01T23:54:53.054189+00:00"
+  "updated": "2026-11-02T19:56:23.418353+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -126,14 +126,14 @@
    "io_chicago/workshop-old-school-longform-techniques-with-liz-allen"
   ],
   "new_at": "2026-11-01T03:53:52.905172+00:00",
-  "updated": "2026-11-01T23:54:53.054189+00:00"
+  "updated": "2026-11-02T19:56:23.418353+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/lsi-level-1-winter-intensive-2027"
   ],
   "new_at": "2026-10-29T15:50:30.412872+00:00",
-  "updated": "2026-11-01T23:54:53.054189+00:00"
+  "updated": "2026-11-02T19:56:23.418353+00:00"
  },
  "magnet": {
   "ids": [
@@ -190,13 +190,11 @@
    "magnet/12070"
   ],
   "new_at": "2026-11-01T23:54:53.054189+00:00",
-  "updated": "2026-11-01T23:54:53.054189+00:00"
+  "updated": "2026-11-02T19:56:23.418353+00:00"
  },
  "second_city": {
   "ids": [
    "second_city/44613",
-   "second_city/44617",
-   "second_city/44618",
    "second_city/44620",
    "second_city/44624",
    "second_city/44628",
@@ -208,22 +206,12 @@
    "second_city/46357",
    "second_city/46359",
    "second_city/46363",
-   "second_city/46368",
-   "second_city/46372",
    "second_city/46388",
-   "second_city/46396",
    "second_city/46399",
-   "second_city/46402",
    "second_city/46404",
-   "second_city/46405",
-   "second_city/46409",
    "second_city/46448",
    "second_city/46449",
    "second_city/46453",
-   "second_city/46458",
-   "second_city/46462",
-   "second_city/46468",
-   "second_city/46469",
    "second_city/46545",
    "second_city/46547",
    "second_city/46548",
@@ -262,7 +250,6 @@
    "second_city/46616",
    "second_city/46618",
    "second_city/46620",
-   "second_city/46625",
    "second_city/46627",
    "second_city/46628",
    "second_city/46629",
@@ -290,10 +277,11 @@
    "second_city/46651",
    "second_city/46652",
    "second_city/46653",
-   "second_city/46654"
+   "second_city/46654",
+   "second_city/46660"
   ],
-  "new_at": "2026-10-29T15:50:30.412872+00:00",
-  "updated": "2026-11-01T23:54:53.054189+00:00"
+  "new_at": "2026-11-02T19:56:23.418353+00:00",
+  "updated": "2026-11-02T19:56:23.418353+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -361,7 +349,7 @@
    "44171"
   ],
   "new_at": "2026-11-02T19:30:06.129477+00:00",
-  "updated": "2026-11-02T19:54:06.488787+00:00"
+  "updated": "2026-11-02T19:56:06.455678+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -425,7 +413,7 @@
    "44022"
   ],
   "new_at": "2026-10-29T19:32:27.229455+00:00",
-  "updated": "2026-11-02T19:54:06.488787+00:00"
+  "updated": "2026-11-02T19:56:06.455678+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -442,13 +430,12 @@
    "44061"
   ],
   "new_at": "2026-10-28T01:47:39.841749+00:00",
-  "updated": "2026-11-02T19:54:06.488787+00:00"
+  "updated": "2026-11-02T19:56:06.455678+00:00"
  },
  "wgis_la": {
   "ids": [
    "wgis_la/1790",
    "wgis_la/1800",
-   "wgis_la/1807",
    "wgis_la/1810",
    "wgis_la/1820",
    "wgis_la/1840",
@@ -480,13 +467,13 @@
    "wgis_la/1896"
   ],
   "new_at": "2026-11-01T23:54:53.054189+00:00",
-  "updated": "2026-11-01T23:54:53.054189+00:00"
+  "updated": "2026-11-02T19:56:23.418353+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1880"
   ],
   "new_at": "2026-10-17T23:32:58.289387+00:00",
-  "updated": "2026-11-01T23:54:53.054189+00:00"
+  "updated": "2026-11-02T19:56:23.418353+00:00"
  }
 }
