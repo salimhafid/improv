@@ -25,14 +25,27 @@
    "annoyance/crass2-tuesdays-with-tbd-t127",
    "annoyance/creating-characters-crafting-a-5-minute-solo-set-tuesdays-with-max-kantor-t127",
    "annoyance/fall-intensive-part-1-november-9-13",
+   "annoyance/fall-intensive-part-1-october-4-8",
+   "annoyance/fall-intensive-part-1-september-13-17",
+   "annoyance/fall-intensive-part-2-october-11-15",
+   "annoyance/fall-intensive-part-2-september-20-24",
    "annoyance/mi1-thursdays-with-tbd-t127",
    "annoyance/mi2-sundays-with-tbd-t127",
    "annoyance/standup-saturdays-with-tbd-t127",
+   "annoyance/summer-intensive-part-1-august-9-13",
+   "annoyance/summer-intensive-part-1-july-5-9",
+   "annoyance/summer-intensive-part-1-june-7-11",
+   "annoyance/summer-intensive-part-1-may-10-14",
+   "annoyance/summer-intensive-part-2-august-16-20",
+   "annoyance/summer-intensive-part-2-july-12-16",
+   "annoyance/summer-intensive-part-2-june-14-18",
+   "annoyance/summer-intensive-part-2-may-17-21",
+   "annoyance/variety-alternative-comedy-saturdays-with-danny-wightkin-t127",
    "annoyance/workshop-drop-in-improv-classes",
    "annoyance/workshop-you-already-did-the-funny-thing-with-jeff-quintana"
   ],
-  "new_at": "2026-10-29T15:50:30.412872+00:00",
-  "updated": "2026-11-05T08:00:58.802619+00:00"
+  "new_at": "2026-11-06T04:02:53.469653+00:00",
+  "updated": "2026-11-06T04:02:53.469653+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -78,7 +91,7 @@
    "brooklyn_cc/stand-up-intensive-baron-vaughn-november-weekend"
   ],
   "new_at": "2026-10-27T03:46:22.663092+00:00",
-  "updated": "2026-11-05T08:00:58.802619+00:00"
+  "updated": "2026-11-06T04:02:53.469653+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -127,14 +140,14 @@
    "io_chicago/workshop-old-school-longform-techniques-with-liz-allen"
   ],
   "new_at": "2026-11-04T11:59:19.465424+00:00",
-  "updated": "2026-11-05T08:00:58.802619+00:00"
+  "updated": "2026-11-06T04:02:53.469653+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/lsi-level-1-winter-intensive-2027"
   ],
   "new_at": "2026-10-29T15:50:30.412872+00:00",
-  "updated": "2026-11-05T08:00:58.802619+00:00"
+  "updated": "2026-11-06T04:02:53.469653+00:00"
  },
  "magnet": {
   "ids": [
@@ -187,7 +200,7 @@
    "magnet/12072"
   ],
   "new_at": "2026-11-05T08:00:58.802619+00:00",
-  "updated": "2026-11-05T08:00:58.802619+00:00"
+  "updated": "2026-11-06T04:02:53.469653+00:00"
  },
  "second_city": {
   "ids": [
@@ -296,7 +309,7 @@
    "second_city/46722"
   ],
   "new_at": "2026-11-05T08:00:58.802619+00:00",
-  "updated": "2026-11-05T08:00:58.802619+00:00"
+  "updated": "2026-11-06T04:02:53.469653+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -359,7 +372,7 @@
    "44182"
   ],
   "new_at": "2026-11-03T21:32:24.769069+00:00",
-  "updated": "2026-11-06T04:00:35.789826+00:00"
+  "updated": "2026-11-06T04:02:36.083096+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -430,7 +443,7 @@
    "44309"
   ],
   "new_at": "2026-11-05T21:03:55.242814+00:00",
-  "updated": "2026-11-06T04:00:35.789826+00:00"
+  "updated": "2026-11-06T04:02:36.083096+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -451,7 +464,7 @@
    "44288"
   ],
   "new_at": "2026-11-05T20:49:55.103949+00:00",
-  "updated": "2026-11-06T04:00:35.789826+00:00"
+  "updated": "2026-11-06T04:02:36.083096+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -493,16 +506,22 @@
    "wgis_la/1905",
    "wgis_la/1906",
    "wgis_la/1907",
-   "wgis_la/1908"
+   "wgis_la/1908",
+   "wgis_la/1912",
+   "wgis_la/1913",
+   "wgis_la/1914",
+   "wgis_la/1915",
+   "wgis_la/1916",
+   "wgis_la/1918"
   ],
-  "new_at": "2026-11-04T11:59:19.465424+00:00",
-  "updated": "2026-11-05T08:00:58.802619+00:00"
+  "new_at": "2026-11-06T04:02:53.469653+00:00",
+  "updated": "2026-11-06T04:02:53.469653+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1880"
   ],
   "new_at": "2026-10-17T23:32:58.289387+00:00",
-  "updated": "2026-11-05T08:00:58.802619+00:00"
+  "updated": "2026-11-06T04:02:53.469653+00:00"
  }
 }
