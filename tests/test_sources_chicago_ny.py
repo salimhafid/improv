@@ -403,21 +403,6 @@ class BrooklynCCClassTests(unittest.TestCase):
         self.assertEqual(brooklyn_cc._class_start("FAD Workshop (Oct 3, 2026)"), "2026-10-03")
         self.assertIsNone(brooklyn_cc._class_start("Improv 201 w/ X (Aug-Oct '26)"))
 
-    def test_fetch_classes_sets_image_and_start(self):
-        page = '<a href="https://www.brooklyncc.com/class-registration/drop-in">x</a>'
-        coll = {"items": [{"fullUrl": "/class-registration/drop-in",
-                           "title": "Drop-In Improv w/ Jane Doe (Saturday, September 12th, 2026)",
-                           "assetUrl": "https://img.test/c.jpg", "body": "<p>Come play.</p>",
-                           "variants": [{"priceMoney": {"value": "25.00"}, "unlimited": True}]}]}
-        with patch.object(brooklyn_cc, "fetch_html", return_value=page), \
-             patch.object(brooklyn_cc, "fetch_json", return_value=coll):
-            (c,) = brooklyn_cc.fetch_classes()
-        self.assertEqual(c["id"], "brooklyn_cc/drop-in")
-        self.assertEqual(c["image"], "https://img.test/c.jpg")
-        self.assertEqual(c["start"], "2026-09-12")
-        self.assertEqual(c["instructor"], "Jane Doe")
-        self.assertEqual(c["price"], "$25.00")
-
 
 if __name__ == "__main__":
     unittest.main()

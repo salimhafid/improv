@@ -10,7 +10,10 @@ import re
 import time
 from datetime import datetime, timedelta
 
-from common import clean, fetch_json, local_today, make_class, make_show, safe_url, strip_html
+from bs4 import BeautifulSoup
+
+from common import (block_text, clean, fetch_json, local_today, make_class, make_show, safe_url,
+                    strip_html)
 
 API = "https://www.crowdwork.com/api/v2/%s/%s?cache=1"
 
@@ -197,6 +200,171 @@ def fetch_shows(slug: str, source: str, org: str, city: str, *, city_from_tz: bo
     return shows
 
 
+# ---- class-only fields ------------------------------------------------------
+# The classes API has no instructor field and no end time; everything below is
+# derived from what an item does carry (name, dates, location, cost_tiers,
+# description.body). The public event page adds nothing to these.
+
+# A teacher is published only in the class name: "... w/ Damian Anaya",
+# "... with Max Kantor T127" (a trailing term code). Only a tail made of
+# capitalised 2-3 word names counts, so "with TBD", "with 3 SQUARE" (a team)
+# or "with class show" yield nothing rather than a wrong name.
+_WITH_RE = re.compile(r"^.*(?:\bw/|\bwith)\s*(.+?)(?:\s+T\d+)?\s*$")
+_NAME_RE = re.compile(r"[A-Z][A-Za-z.'\u2019-]+(?: [A-Z][A-Za-z.'\u2019-]+){1,2}")
+_NOT_A_NAME = {"tbd", "tba", "staff", "guest", "guests", "friends", "show", "team", "class",
+               "the", "improv", "comedy", "music", "live"}
+
+
+def _instructor(title: str) -> str:
+    m = _WITH_RE.match(title)
+    if not m:
+        return ""
+    names = re.split(r"\s*(?:,|&|\band\b)\s*", m.group(1))
+    for name in names:
+        if not _NAME_RE.fullmatch(name) or any(w.lower() in _NOT_A_NAME for w in name.split()):
+            return ""
+    return ", ".join(names)
+
+
+_STATE_RE = re.compile(r"[A-Z]{2}(?: \d{5}(?:-\d{4})?)?")
+
+
+def _location(it: dict, venue: str, city: str) -> str:
+    """One line from the API's `location`, which is "<venue> - <address>,
+    <city>, <state zip>" with whatever the theatre typed: iO's address field
+    already ends in the city and state (so they come twice), The Annoyance's
+    city is blank ("851 W Belmont Ave, IL")."""
+    loc = clean(it.get("location")) if isinstance(it.get("location"), str) else ""
+    if not loc:
+        return ""
+    room = ""
+    if venue and loc.startswith(venue + " - "):
+        room, loc = venue, loc[len(venue) + 3:]
+    parts = loc.rsplit(", ", 2)
+    if len(parts) == 3 and _STATE_RE.fullmatch(parts[2]) and parts[1].lower() in parts[0].lower():
+        loc = parts[0]                      # the address already names the city
+    elif city.lower() not in loc.lower():
+        head, _, state = loc.rpartition(", ")
+        if head and _STATE_RE.fullmatch(state):
+            loc = f"{head}, {city}, {state}"
+    return f"{room}, {loc}" if room else loc
+
+
+def _clock(dt: datetime) -> str:
+    return dt.strftime("%-I:%M%p" if dt.minute else "%-I%p").lower()
+
+
+_MORE_RE = re.compile(r"\+\s*(\d+)\s+more")
+
+
+def _grouping(it: dict) -> tuple[bool, int]:
+    """(separate, more) from `grouped_dates`. `grouped` False marks dates
+    sold one at a time (a weekly drop-in), not the sessions of one course.
+    `message` " + 4 more" counts the later sessions of a run, which is all a
+    far-out intensive says about it while its `dates` list is still empty."""
+    gd = it.get("grouped_dates")
+    if not isinstance(gd, dict):
+        return False, 0
+    m = _MORE_RE.search(gd["message"]) if isinstance(gd.get("message"), str) else None
+    return gd.get("grouped") is False, int(m.group(1)) if m else 0
+
+
+def _schedule(run: list[datetime], first: datetime, today_year: int, monthly: bool,
+              unit: str = "sessions") -> str:
+    """One line for a class's whole run (`run` sorted, `first` its first
+    upcoming session): the meeting pattern, the date range and the number of
+    sessions, e.g. "Mondays 7pm · Oct 19 - Dec 14 · 8 sessions". A single
+    date keeps the long "Monday, November 9 @ 7:00 PM" form. The API has no
+    end time, so none is shown."""
+    if len(run) < 2:
+        return first.strftime("%A, %B %-d @ %-I:%M %p")
+    same_time = len({d.time() for d in run}) == 1
+    if same_time and len({d.weekday() for d in run}) == 1:
+        lead = f"{run[0].strftime('%A')}s {_clock(run[0])}" + (" monthly" if monthly else "")
+    elif same_time and all((b.date() - a.date()).days == 1 for a, b in zip(run, run[1:])):
+        lead = f"{run[0].strftime('%a')}-{run[-1].strftime('%a')} {_clock(run[0])}"
+    elif len(run) <= 3:
+        return ", ".join(f"{d.strftime('%a %b %-d')} {_clock(d)}" for d in run)
+    else:
+        lead = ""
+    a, b = run[0], run[-1]
+    if a.year != b.year:
+        span = f"{a.strftime('%b %-d, %Y')} - {b.strftime('%b %-d, %Y')}"
+    else:
+        span = f"{a.strftime('%b %-d')} - {b.strftime('%b %-d')}"
+        if b.year != today_year:
+            span += f", {b.year}"
+    return " \u00b7 ".join(x for x in (lead, span, f"{len(run)} {unit}") if x)
+
+
+# A tier that is one instalment ("Payment Plan": half the tuition), not a price.
+_PART_PAYMENT_RE = re.compile(r"payment plan|deposit|instal", re.I)
+
+
+def _class_price(it: dict, formatted: str) -> str:
+    """The API says "Multiple prices" when a class has several tiers; show
+    the range of the paid ones instead (what the checkout lists; the zero
+    tiers are code-locked scholar/intern seats)."""
+    tiers = it.get("cost_tiers")
+    if formatted.strip().lower() != "multiple prices" or not isinstance(tiers, list):
+        return formatted
+    cents = sorted({t["cost_after_fees"] for t in tiers if isinstance(t, dict)
+                    and isinstance(t.get("cost_after_fees"), (int, float))
+                    and t["cost_after_fees"] > 0
+                    and not _PART_PAYMENT_RE.search(f"{t.get('name') or ''}")})
+    if not cents:
+        return formatted
+    lo, hi = (f"${c / 100:,.2f}" for c in (cents[0], cents[-1]))
+    return (lo if lo == hi else f"{lo} - {hi}") + " (includes fees)"
+
+
+# "LSI_Logo.png", "large_LSI_Logo.png": the school's own logo standing in for
+# artwork. Longer names ("Annoyance__Summer_Intensive_Circle_Logo.png") are
+# artwork made for the class and are kept.
+_SITE_LOGO_RE = re.compile(r"(?:(?:large|medium|thumb)_)?[A-Za-z0-9]+[_ -]+logo\.\w+", re.I)
+
+
+def _class_image(image):
+    """Class artwork only, never the school's logo."""
+    if image and _SITE_LOGO_RE.fullmatch(image.rsplit("/", 1)[-1]):
+        return None
+    return image
+
+
+# Lines that are about paying or navigating the site, not about the class.
+_BOILERPLATE_RE = re.compile(
+    r"convenience fees|refund|view all available days|please (?:ignore|disregard) |"
+    r"those pertain to our", re.I)
+_BIO_HEAD_RE = re.compile(r"(?:instructor|teacher) bios?\s*(?::|$)", re.I)
+_LABEL_RE = re.compile(r"[A-Z][A-Za-z /&-]{1,30}:")       # "Schedule:", "Prerequisite: None"
+
+
+def _class_description(it: dict, title: str) -> str:
+    """Paragraph-preserving description without the payment boilerplate, the
+    repeated title line and the teacher biography (an "Instructor Bio:"
+    heading and what follows it up to the next labelled section)."""
+    desc = it.get("description")
+    body = desc.get("body") if isinstance(desc, dict) else None
+    if not isinstance(body, str) or not body.strip():
+        return strip_html(it.get("description_short"))
+    lines: list[str] = []
+    in_bio = False
+    for line in block_text(BeautifulSoup(body, "lxml")).split("\n"):
+        line = clean(line)
+        if _BIO_HEAD_RE.match(line):
+            in_bio = True
+            continue
+        if in_bio:
+            if not _LABEL_RE.match(line):
+                continue
+            in_bio = False
+        if _BOILERPLATE_RE.search(line) or (not any(lines) and line.lower() == title.lower()):
+            continue
+        lines.append(line)
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    return text or strip_html(it.get("description_short"))
+
+
 def fetch_classes(slug: str, source: str, org: str, city: str) -> list[dict]:
     today = local_today(city)
     classes: list[dict] = []
@@ -217,14 +385,23 @@ def fetch_classes(slug: str, source: str, org: str, city: str) -> list[dict]:
             if not future:
                 continue
             start = future[0].isoformat()
-            schedule = future[0].strftime("%A, %B %-d @ %-I:%M %p")
+            # A course is described by its whole run; separately sold
+            # dates only by the ones still to come.
+            separate, more = _grouping(it)
+            schedule = _schedule(future if separate else run, future[0], today.year,
+                                 it.get("recurring") == "Monthly",
+                                 "dates" if separate else "sessions")
+            if len(run) == 1 and more:
+                schedule += f" \u00b7 {more + 1} sessions"
         else:
             start, schedule = None, ""
         classes.append(make_class(
             id=f"{source}/{c['slug']}", title=c["title"], url=c["url"],
-            schedule=schedule, start=start, price=c["cost"],
-            level=(c["tags"][0] if c["tags"] else ""), image=c["image"],
-            description=_full_description(it), is_full=_is_full(it),
+            instructor=_instructor(c["title"]), schedule=schedule, start=start,
+            price=_class_price(it, c["cost"]),
+            level=(c["tags"][0] if c["tags"] else ""), image=_class_image(c["image"]),
+            description=_class_description(it, c["title"]),
+            location=_location(it, c["venue"], city), is_full=_is_full(it),
             source=source, org=org, city=city,
         ))
     return classes

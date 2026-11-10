@@ -23,7 +23,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from common import clean, fetch_html, fetch_json, local_today, make_class, make_show, safe_url, strip_html
+from bs4 import BeautifulSoup
+
+from common import (block_text, clean, fetch_html, fetch_json, local_today, make_class, make_show,
+                    safe_url, strip_html)
 
 BASE = "https://www.secondcity.com"
 INDEX = f"{BASE}/shows/chicago"
@@ -285,12 +288,67 @@ def _no_open_seats(row: dict) -> bool:
         return False
 
 
+# Guest workshops name their teacher at the end of the title ("World Building
+# And Connections with Frank Caeti"); the core curriculum publishes no teacher
+# per section anywhere in this payload.
+_TITLE_TEACHER = re.compile(r"\bwith ((?:[A-Z][\w.'’-]+ ){1,2}[A-Z][\w.'’-]+)\s*$")
+_ABOUT_TEACHER = re.compile(r"about the (?:instructor|teacher)s?\b", re.I)
+# "… with The Second City" / "… with Second City Alumni" name the company.
+_NOT_A_PERSON = re.compile(r"^The\b|\bSecond City\b")
+_PREREQUISITE = re.compile(r"pre-?requisites?\b", re.I)
+
+
+def _class_instructor(title: str, description: str) -> str:
+    """The teacher named in the title, taken only when the class copy names
+    the same person, so "Improv with Friends" can never become a teacher."""
+    m = _TITLE_TEACHER.search(title or "")
+    name = m.group(1) if m else ""
+    if not name or name not in description or _NOT_A_PERSON.search(name):
+        return ""
+    return name
+
+
+def _class_description(html, instructor: str = "") -> str:
+    """The hero copy as paragraphs, cut where the teacher's biography starts:
+    an "About the instructor" heading, or (for a teacher known from the title)
+    a later paragraph opening "<Name> is …"."""
+    if not isinstance(html, str) or not html.strip():
+        return ""
+    paragraphs = [p for p in block_text(BeautifulSoup(html, "lxml")).split("\n\n") if p.strip()]
+    bio = (re.compile(r"(?:\S+ ){0,3}%s(?: \([^)]*\))? is\b" % re.escape(instructor))
+           if instructor else None)
+    keep: list[str] = []
+    for i, p in enumerate(paragraphs):
+        if _ABOUT_TEACHER.match(p) or (bio and keep and bio.match(p)):
+            # A prerequisite printed below the biography is about the class.
+            keep += [q for q in paragraphs[i + 1:] if _PREREQUISITE.match(q)]
+            break
+        keep.append(p)
+    return "\n\n".join(keep)
+
+
+def _class_location(row: dict, hero: dict) -> str:
+    """'Second City Training Center, 230 W. North Ave, Chicago' from the
+    section's Activenet site and the page's address line; 'Online' for a
+    virtual class; '' when the payload names neither a site nor a street."""
+    direction = clean(hero.get("direction"))
+    site = clean(row.get("site_name"))
+    if re.search(r"\b(?:virtual|online)\b", f"{direction} {site} {clean(row.get('activity_name'))}", re.I):
+        return "Online"
+    venue = re.sub(r"\s+Chicago$", "", site)
+    m = re.match(r"(\d.*?),?\s+Chicago\b", direction)   # drop the state / zip tail
+    street = m.group(1) if m else ""
+    if not (venue or street):
+        return ""
+    return ", ".join(x for x in (venue, street, "Chicago") if x)
+
+
 def fetch_classes(today: date | None = None) -> list[dict]:
     """Training-center catalog via the same Next.js data layer as shows:
     /_next/data/<buildId>/find-a-class/chicago.json returns every Chicago
     class page with its Activenet section rows (dates, weekly pattern, open
-    seats) plus hero metadata (description, image, price). One item per open,
-    not-yet-started section; two HTTP requests total."""
+    seats, site) plus hero metadata (description, image, price, address). One
+    item per open, not-yet-started section; two HTTP requests total."""
     today = today or local_today("Chicago")
     m = _BUILD_ID.search(fetch_html(FIND_A_CLASS))
     if not m:
@@ -313,7 +371,7 @@ def fetch_classes(today: date | None = None) -> list[dict]:
         price = clean(hero.get("price"))
         if price and not price.startswith("$") and price[0].isdigit():
             price = f"${price}"   # "395" / "395-675" → "$…"; "Free" stays as is
-        description = strip_html(hero.get("description"))
+        full_copy = strip_html(hero.get("description"))
         uri = node.get("uri") or ""
         url = f"{BASE}{uri}" if uri.startswith("/") else safe_url(uri)
         for row in rows:
@@ -324,16 +382,20 @@ def fetch_classes(today: date | None = None) -> list[dict]:
             start = _section_start(row)
             if not start or start[:10] < today.isoformat():
                 continue
+            title = clean(row.get("activity_name")) or clean(node.get("title"))
+            instructor = _class_instructor(title, full_copy)
             out.append(make_class(
                 id=f"second_city/{row.get('activity_id') or row.get('activity_number')}",
-                title=clean(row.get("activity_name")) or clean(node.get("title")),
+                title=title,
                 url=url,
+                instructor=instructor,
                 schedule=_section_schedule(row),
                 start=start,
                 price=price,
                 level=level,
                 image=image,
-                description=description[:2000],
+                description=_class_description(hero.get("description"), instructor)[:2000],
+                location=_class_location(row, hero),
                 is_full=_no_open_seats(row),
                 source="second_city", org="The Second City", city="Chicago",
             ))

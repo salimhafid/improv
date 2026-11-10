@@ -16,7 +16,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 
-from common import clean, fetch_html, local_today, make_class, make_show, safe_url
+from common import block_text, clean, fetch_html, local_today, make_class, make_show, safe_url
 
 CAL = "https://magnettheater.com/calendar/month/?date=%04d-%02d-01"
 CLASS_INDEX = "https://magnettheater.com/class/all-classes-in-session/"
@@ -219,8 +219,9 @@ def fetch_classes(today: date | None = None) -> list[dict]:
     per-discipline /class/<slug>/ page — upcoming sections open for enrollment
     only appear on the latter. All pages share the div.class-holder markup
     (instructor + type + schedule + dates + status); sections dedupe by their
-    WordPress id. No price is published anywhere, so price stays blank.
-    Sections whose run has already ended are dropped."""
+    WordPress id. The listings carry no price, description or location, so
+    those stay blank here and come from each section's own page
+    (class_detail). Sections whose run has already ended are dropped."""
     today = today or local_today("New York")
     index_soup = BeautifulSoup(fetch_html(CLASS_INDEX), "lxml")
     out: list[dict] = []
@@ -306,3 +307,80 @@ def _collect_cards(soup: BeautifulSoup, today: date,
             is_full=is_full,
             source="magnet", org="Magnet Theater", city="New York",
         ))
+
+
+# A session line's venue: "at Ripley Grier (520 8th Ave, 16th fl)" then
+# "(btw 36th & 37th Sts)", or "at Magnet Theater" then "(254 W. 29th Street)".
+# The street address is the parenthetical that opens with a house number;
+# cross streets and "studio space TBA …" notes are not one.
+_PAREN = re.compile(r"\(([^()]*)\)")
+
+
+def _session_location(li) -> str:
+    """One session's '<venue>, <street address>, New York' ('Online' for an
+    online session, '' while the room is still TBA)."""
+    strong = li.find("strong")
+    if strong:
+        strong.extract()
+    text = clean(li.get_text(" "))
+    venue = clean(re.sub(r"^at\b", "", _PAREN.sub("", text), flags=re.I)).strip(" ,-")
+    if re.search(r"\b(?:online|zoom|virtual)\b", text, re.I):
+        return "Online"
+    if not venue or re.match(r"(?:TBA|TBD)\b", venue, re.I):
+        return ""
+    address = next((clean(m) for m in _PAREN.findall(text) if re.match(r"\s*\d", m)), "")
+    return ", ".join(x for x in (venue, address, "New York") if x)
+
+
+# Application-only sections carry this "Applications CLOSED" sign in the
+# artwork slot (one reused upload, nothing in the markup tells it apart): it
+# is an enrollment notice, not class artwork.
+_STATUS_SIGNS = ("/2026/02/Screenshot-2026-02-09-at-11.09.54-AM.png",)
+
+
+def class_detail(url: str) -> dict | None:
+    """Fetch one class section's page → the fields the listing cards lack:
+    description (the 'Class Description' copy, never the instructor bio),
+    price (shown only while the section is open for enrollment, so in-session
+    sections have none), location (where most of its sessions meet, from the
+    full session schedule; the class-show venue is not the classroom) and the
+    class artwork, plus the instructor names. None when the fetch fails or
+    the page is not a class page, so it is retried next run."""
+    try:
+        soup = BeautifulSoup(fetch_html(url), "lxml")
+    except RuntimeError:
+        return None
+    root = soup.select_one("#class-details")
+    if not root or not root.select_one(".class-title"):
+        return None
+    out: dict = {}
+
+    body = root.select_one(".description-container .panel-body")
+    if body:
+        for el in body.select(".panel-header, hr"):
+            el.decompose()
+        out["description"] = block_text(body)
+
+    price = root.select_one(".class-register-container .price")
+    if price:
+        out["price"] = clean(price.get_text())
+
+    sessions = root.select_one("#class-schedule ol.schedule")   # first list = class sessions
+    places = [_session_location(li) for li in sessions.select("li")] if sessions else []
+    places = [p for p in places if p]
+    if places:
+        out["location"] = max(places, key=places.count)   # ties → the earliest
+
+    names: list[str] = []
+    for a in root.select(".instructor-title a"):
+        nm = clean(a.get_text())
+        if nm and nm not in names:
+            names.append(nm)
+    if names:
+        out["instructor"] = ", ".join(names)
+
+    img = root.select_one(".basic-info img")
+    image = safe_url(urljoin(url, img.get("src") or "")) if img else ""
+    if image and not image.endswith(_STATUS_SIGNS):
+        out["image"] = image
+    return out

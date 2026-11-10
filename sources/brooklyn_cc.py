@@ -1,23 +1,24 @@
-"""Brooklyn Comedy Collective adapter — Squarespace Events collection, exposed
-cleanly as JSON via the `?format=json` view."""
+"""Brooklyn Comedy Collective adapter. Shows: the Squarespace Events
+collection, exposed cleanly as JSON via the `?format=json` view. Classes:
+BCC's Crowdwork (Fourth Wall) box office, which the school's class pages embed
+since the Squarespace class-registration store was emptied (Nov 2026)."""
 from __future__ import annotations
 
 import re
-from datetime import datetime
-from urllib.parse import urlparse
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 
-from common import clean, fetch_html, fetch_json, make_class, make_show, safe_url, strip_html
+from common import block_text, clean, fetch_json, local_today, make_class, make_show, safe_url, strip_html
+
+from . import crowdwork
 
 URL = "https://www.brooklyncc.com/show-schedule?format=json"
 BASE = "https://www.brooklyncc.com"
-# Classes: the marketing page lists which class-registration products are
-# currently offered; the products collection carries the structured price/body.
-CLASSES_PAGE = "https://www.brooklyncc.com/comedy-classes"
-REG_COLLECTION = "https://www.brooklyncc.com/class-registration?format=json"
+# Classes: the theatre slug of the Crowdwork embeds on brooklyncc.com/comedy-classes.
+CROWDWORK_SLUG = "brooklyncomedycollective"
 NY = ZoneInfo("America/New_York")
 
 
@@ -75,26 +76,6 @@ def fetch() -> list[dict]:
 
 # MARK: Classes
 
-def _variant_price(it: dict) -> str:
-    """Squarespace stores the real price on the product's first paid variant;
-    the top-level priceMoney is often 0.00."""
-    for v in (it.get("variants") or []):
-        val = ((v.get("priceMoney") or {}).get("value")) or ""
-        if val and val not in ("0", "0.00"):
-            return f"${val}"
-    val = (it.get("priceMoney") or {}).get("value") or ""
-    return f"${val}" if val and val not in ("0", "0.00") else ""
-
-
-def _is_full(it: dict) -> bool:
-    """Sold out when every (limited) variant is out of stock — read from the
-    product's structured stock rather than fragile page badge text."""
-    variants = it.get("variants") or []
-    if not variants:
-        return False
-    return all((not v.get("unlimited")) and (v.get("qtyInStock") or 0) <= 0 for v in variants)
-
-
 def _class_level(title: str) -> str:
     """Coarse discipline bucket for grouping (Improv / Musical Improv / Stand-Up /
     Sketch / Clown / Drop-In / Intensive / Workshop). Matches the discipline
@@ -128,10 +109,11 @@ _TITLE_DATE = re.compile(r"\(\s*(?:[A-Za-z]+,\s*)?([A-Za-z]+ \d{1,2})(?:st|nd|rd
 
 
 def _class_start(title: str) -> str | None:
-    """Drop-ins and workshops carry their date in the title — '(Saturday,
-    September 12th, 2026)' — so they can age out of the feed. Multi-week
-    levels only say "(Aug-Oct '26)" and stay undated: there is no day to
-    start from, and a made-up first-of-month would drop them mid-run."""
+    """Fallback for a listing that publishes no session dates. Drop-ins and
+    workshops carry their date in the title — '(Saturday, September 12th,
+    2026)' — so they can age out of the feed. Multi-week levels only say
+    "(Aug-Oct '26)" and stay undated: there is no day to start from, and a
+    made-up first-of-month would drop them mid-run."""
     m = _TITLE_DATE.search(title)
     if not m:
         return None
@@ -145,59 +127,129 @@ def _class_schedule(title: str) -> str:
     return " · ".join(clean(p) for p in re.findall(r"\(([^)]+)\)", title) if clean(p))
 
 
-def fetch_classes() -> list[dict]:
-    # 1) Which class-registration products are currently offered (the marketing
-    #    page lists the live ones; the collection also holds archived products).
-    #    Hrefs are matched by path so a Squarespace template switch to absolute
-    #    URLs can't silently empty the set.
-    soup = BeautifulSoup(fetch_html(CLASSES_PAGE), "lxml")
-    current: set[str] = set()
-    for a in soup.select('a[href*="/class-registration/"]'):
-        path = urlparse(a.get("href", "")).path.rstrip("/")
-        if path.startswith("/class-registration/") and "gift" not in path:
-            current.add(path)
+# The class copy ends with labelled lines about the teacher ("Teacher: Andy
+# Junk", then "Bio:", "Testimonials:", "Accompanist:"); everything from the
+# first of them on is about the person, not the class.
+_TEACHER_LINE = re.compile(r"^Teachers?\s*:\s*(.+)$", re.I | re.M)
+_PEOPLE_LINE = re.compile(r"^(?:Teachers?|Bio|(?:Student )?Testimonials?|(?:Musical )?Accompanist)\s*:",
+                          re.I | re.M)
+_WHERE_LINE = re.compile(r"^Where\s*:\s*(.+)$", re.I | re.M)
+_ROOM_AND_STREET = re.compile(r"(.+?)\s*\(([^()]+)\)\.?")
+_TIME = r"\d{1,2}(?::\d{2})?\s*[ap]\.?m\.?"
+_TIME_RANGE = re.compile(rf"({_TIME})\s*(?:-|–|to)\s*({_TIME})", re.I)
 
-    # 2) Structured title/price/body/stock keyed by product url path, following
-    #    Squarespace pagination (the collection retains archived products and
-    #    grows without bound).
-    items: dict = {}
-    url = REG_COLLECTION
-    for _ in range(20):
-        data = fetch_json(url)
-        for it in (data.get("items") or []):
-            full = (it.get("fullUrl") or "").rstrip("/")
-            if full:
-                items[full] = it
-        next_page = (data.get("pagination") or {}).get("nextPageUrl")
-        if not next_page:
+
+def _class_copy(it: dict) -> str:
+    """The item's description body as paragraph-preserving plain text."""
+    desc = it.get("description")
+    body = desc.get("body") if isinstance(desc, dict) else None
+    if not isinstance(body, str) or not body.strip():
+        return ""
+    return block_text(BeautifulSoup(body, "lxml"))
+
+
+def _copy_teacher(copy: str) -> str:
+    m = _TEACHER_LINE.search(copy)
+    name = clean(m.group(1)) if m else ""
+    return "" if name.upper() in ("TBD", "TBA") else name
+
+
+def _class_description(copy: str) -> str:
+    m = _PEOPLE_LINE.search(copy)
+    return (copy[:m.start()] if m else copy).strip()
+
+
+def _street(text: str) -> str:
+    """'137 Montrose Ave, Brooklyn, NY 11206' / '144 Boerum St' → '<street>,
+    Brooklyn' (every BCC room is in East Williamsburg, Brooklyn)."""
+    street = re.sub(r",?\s*Brooklyn\b.*$", "", text, flags=re.I).strip(" ,")
+    return f"{street}, Brooklyn"
+
+
+def _class_location(it: dict, copy: str) -> str:
+    """One line from, in order: the copy's "Where: <room> (<street>)" line, the
+    item's own location ("<room> (<street>)", a bare street address, or the
+    school's standing "our classes meet at … in …" note for terms whose rooms
+    are assigned by email). "Online" for a virtual class; "" otherwise."""
+    listed = clean(it.get("location")) or clean(it.get("venue"))
+    if re.search(r"\b(?:virtual|online)\b", listed, re.I) or re.match(
+            r"\s*\[(?:virtual|online)\]", clean(it.get("name")), re.I):
+        return "Online"
+    where = _WHERE_LINE.search(copy)
+    for text in (clean(where.group(1)) if where else "", listed):
+        m = _ROOM_AND_STREET.fullmatch(text)
+        if m and re.match(r"\d", m.group(2)):
+            return f"{m.group(1)}, {_street(m.group(2))}"
+    if re.match(r"\d+\w* \S", listed) and len(listed) <= 60:
+        return _street(listed)
+    m = re.search(r"\bmeet at (.+?) in ([^.]+)\.", listed)
+    return f"{m.group(1)}, {m.group(2)}" if m else ""
+
+
+def _clock(text: str) -> str:
+    """'7:00 PM' / '3:30pm' → '7pm' / '3:30pm'."""
+    return re.sub(r"[\s.]", "", text).lower().replace(":00", "")
+
+
+def _sessions_schedule(run: list[datetime], copy: str) -> str:
+    """'Mondays 7pm-10pm · Jan 4 - Feb 22 · 7 sessions' from every session the
+    listing publishes; 'Thursday, Nov 12 · 7pm-9:30pm' for a single one. The
+    end time comes from the copy, and only from a time range that starts when
+    the listed sessions do."""
+    first = run[0]
+    times = _clock(first.strftime("%-I:%M%p"))
+    for m in _TIME_RANGE.finditer(copy):
+        if _clock(m.group(1)) == times:
+            times = f"{times}-{_clock(m.group(2))}"
             break
-        url = next_page if next_page.startswith("http") else BASE + next_page
+    if len(run) == 1:
+        return f"{first.strftime('%A, %b %-d')} · {times}"
+    span = f"{first.strftime('%b %-d')} - {run[-1].strftime('%b %-d')}"
+    weekly = all(d.weekday() == first.weekday() and d.time() == first.time() for d in run)
+    return " · ".join(x for x in (f"{first.strftime('%A')}s {times}" if weekly else "",
+                                  span, f"{len(run)} sessions") if x)
 
-    if current and not (current & set(items)):
-        # Every linked product missing from the collection JSON can only mean
-        # the URL scheme or collection moved — raise so last-good data carries.
-        raise RuntimeError("brooklyn_cc: no marketing-page class link matches the collection JSON")
 
+def fetch_classes(today: date | None = None) -> list[dict]:
+    """Every active class in BCC's Crowdwork catalog; one request. Each item
+    carries all of its session dates, its price, room and the class copy, so
+    rows are complete here (no per-class pages). Ids use Crowdwork's numeric
+    id: the URL slug changes whenever the school retitles a class, which
+    would re-alert it."""
+    today = today or local_today("New York")
     out: list[dict] = []
-    for href in sorted(current):
-        it = items.get(href)
-        if not it:
+    for it in crowdwork._fetch(CROWDWORK_SLUG, "classes"):
+        if not isinstance(it, dict):
             continue
-        title = clean(it.get("title"))
-        if not title:
+        c = crowdwork._common(it)
+        title = c["title"]
+        if not c["active"] or not title:
             continue
+        copy = _class_copy(it)
+        dates = it.get("dates")
+        candidates = [c["next_date"]] + (dates if isinstance(dates, list) else [])
+        run = sorted({d for d in (crowdwork._parse_local(x) for x in candidates) if d})
+        if run:
+            upcoming = [d for d in run if d.date() >= today]
+            if not upcoming:
+                continue    # the run is over
+            start, schedule = upcoming[0].isoformat(), _sessions_schedule(run, copy)
+        else:
+            # No session dates published: undated unless the title names a day.
+            start, schedule = _class_start(title), _class_schedule(title)
         out.append(make_class(
-            id=f"brooklyn_cc/{href.rstrip('/').split('/')[-1]}",
+            id=f"brooklyn_cc/{clean(it.get('id')) or c['slug']}",
             title=title,
-            url=safe_url(BASE + href),
-            instructor=_class_instructor(title),
-            schedule=_class_schedule(title),
-            start=_class_start(title),  # Squarespace products carry no structured date
-            price=_variant_price(it),
+            url=c["url"],
+            instructor=_copy_teacher(copy) or _class_instructor(title),
+            schedule=schedule,
+            start=start,
+            price=clean(c["cost"]),
             level=_class_level(title),
-            image=safe_url(it.get("assetUrl")) or None,
-            description=strip_html(it.get("body")) or strip_html(it.get("excerpt")),
-            is_full=_is_full(it),
+            image=c["image"],
+            description=_class_description(copy) or strip_html(it.get("description_short")),
+            location=_class_location(it, copy),
+            is_full=crowdwork._is_full(it),
             source="brooklyn_cc", org="Brooklyn Comedy Collective", city="New York",
         ))
     return out
