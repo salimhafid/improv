@@ -341,6 +341,118 @@ class ClassesAggregateTests(AggregatorHarness):
         self.assertEqual([c["title"] for c in payload["classes"]], [None, "B"])
 
 
+class ClassDetailEnrichmentTests(AggregatorHarness):
+    """A class source with a `detail` function gets each class's page fetched
+    once; later runs copy the fields from the previous payload by class id."""
+
+    @staticmethod
+    def _row(cid, **kw):
+        return make_class(id=f"x/{cid}", title=f"Class {cid}", url=f"https://x.test/{cid}",
+                          start="2026-08-01", source="x", org="O", city="Chicago", **kw)
+
+    def _run(self, fetch, detail, **kw):
+        src = [{"id": "x", "org": "O", "city": "Chicago", "fetch": fetch, "detail": detail}]
+        with patch.object(classes_mod, "CLASS_SOURCES", src):
+            return classes_mod.aggregate_classes(**kw)
+
+    def test_detail_fills_only_fields_the_listing_left_empty(self):
+        fetch = lambda: [self._row(1, schedule="Mondays 7pm", price="")]
+        detail = Mock(return_value={"description": "About it", "location": "Room 2",
+                                    "schedule": "from the page", "price": "$50"})
+        row = self._run(fetch, detail, now=NOW)["classes"][0]
+        self.assertEqual(row["description"], "About it")
+        self.assertEqual(row["location"], "Room 2")
+        self.assertEqual(row["price"], "$50")
+        self.assertEqual(row["schedule"], "Mondays 7pm")    # the listing's wins
+        self.assertTrue(row["detail_done"])
+        detail.assert_called_once_with("https://x.test/1")
+
+    def test_second_run_reuses_the_previous_payload(self):
+        fetch = lambda: [self._row(1), self._row(2)]
+        detail = Mock(side_effect=lambda url: {"description": f"desc {url}"})
+        storage.save_classes(self._run(fetch, detail, now=NOW))
+        self.assertEqual(detail.call_count, 2)
+        # A day later the source is due again: nothing is refetched, and a
+        # class that appeared since is the only page requested.
+        fetch = lambda: [self._row(1), self._row(2), self._row(3)]
+        payload = self._run(fetch, detail, now=NOW + timedelta(days=1))
+        self.assertEqual(detail.call_count, 3)
+        self.assertEqual({c["id"]: c["description"] for c in payload["classes"]},
+                         {f"x/{i}": f"desc https://x.test/{i}" for i in (1, 2, 3)})
+
+    def test_failed_fetch_is_left_unflagged_and_retried(self):
+        fetch = lambda: [self._row(1), self._row(2)]
+        def flaky(url):
+            if url.endswith("/1"):
+                raise RuntimeError("blocked")
+            return None                                   # could not fetch
+        first = self._run(fetch, flaky, now=NOW)
+        self.assertTrue(all("detail_done" not in c for c in first["classes"]))
+        storage.save_classes(first)
+        detail = Mock(return_value={"description": "now there"})
+        second = self._run(fetch, detail, now=NOW + timedelta(days=1))
+        self.assertEqual(detail.call_count, 2)
+        self.assertTrue(all(c["description"] == "now there" for c in second["classes"]))
+
+    def test_page_with_nothing_to_add_still_converges(self):
+        fetch = lambda: [self._row(1)]
+        detail = Mock(return_value={})
+        storage.save_classes(self._run(fetch, detail, now=NOW))
+        self._run(fetch, detail, now=NOW + timedelta(days=1))
+        detail.assert_called_once()
+
+    def test_refresh_details_refetches_everything(self):
+        fetch = lambda: [self._row(1)]
+        detail = Mock(return_value={"description": "old"})
+        storage.save_classes(self._run(fetch, detail, now=NOW))
+        detail.return_value = {"description": "new"}
+        with patch.dict(os.environ, {"REFRESH_DETAILS": "1"}):
+            payload = self._run(fetch, detail, now=NOW + timedelta(days=1))
+        self.assertEqual(detail.call_count, 2)
+        self.assertEqual(payload["classes"][0]["description"], "new")
+
+    def test_budget_caps_pages_per_run(self):
+        fetch = lambda: [self._row(i) for i in range(5)]
+        detail = Mock(return_value={"description": "d"})
+        with patch.object(classes_mod, "_DETAIL_BUDGET", 2):
+            payload = self._run(fetch, detail, now=NOW)
+        self.assertEqual(detail.call_count, 2)
+        self.assertEqual(sum(1 for c in payload["classes"] if c.get("detail_done")), 2)
+
+    def test_deadline_stops_new_fetches(self):
+        def slow(url):
+            time.sleep(0.2)
+            return {"description": "d"}
+        items = [self._row(i) for i in range(3)]
+        with patch.object(classes_mod, "_DETAIL_WORKERS", 1):
+            attempted = classes_mod._enrich_details(items, slow, {}, 10,
+                                                    deadline=time.monotonic() + 0.05)
+        self.assertEqual(attempted, 1)
+        self.assertEqual([bool(c.get("detail_done")) for c in items], [True, False, False])
+
+    def test_detail_overrides_replace_the_listing_value_and_survive_a_rerun(self):
+        fetch = lambda: [self._row(1, schedule="short", price="$5")]
+        detail = Mock(return_value={"schedule": "full schedule", "price": "$9"})
+        src = [{"id": "x", "org": "O", "city": "Chicago", "fetch": fetch, "detail": detail,
+                "detail_overrides": ("schedule",)}]
+        with patch.object(classes_mod, "CLASS_SOURCES", src):
+            first = classes_mod.aggregate_classes(now=NOW)
+            storage.save_classes(first)
+            second = classes_mod.aggregate_classes(now=NOW + timedelta(days=1))
+        for payload in (first, second):
+            self.assertEqual(payload["classes"][0]["schedule"], "full schedule")
+            self.assertEqual(payload["classes"][0]["price"], "$5")
+        detail.assert_called_once()
+
+    def test_source_without_detail_is_untouched(self):
+        fetch = lambda: [self._row(1)]
+        with patch.object(classes_mod, "CLASS_SOURCES",
+                          [{"id": "x", "org": "O", "city": "Chicago", "fetch": fetch}]):
+            row = classes_mod.aggregate_classes(now=NOW)["classes"][0]
+        self.assertNotIn("detail_done", row)
+        self.assertEqual(row["location"], "")
+
+
 class ClassesWatcherForceTests(AggregatorHarness):
     """A class source is forced due when the class watcher's state says it saw
     new classes there ("new_at") after that source's last scrape — the push

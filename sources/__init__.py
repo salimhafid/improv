@@ -1,6 +1,9 @@
 """Source registries. SOURCES = show adapters; CLASS_SOURCES = class adapters.
 Each entry has a stable id, display org, city, and a `fetch()` returning
-normalized dicts. The aggregators run them resiliently with per-source cadence."""
+normalized dicts. The aggregators run them resiliently with per-source cadence.
+A class source may add `detail` (its per-class page scraper, see classes.py) and
+`detail_overrides`: detail fields that replace the listing's value instead of
+only filling a blank (WGIS: the page's schedule has the date range and hours)."""
 from __future__ import annotations
 
 from . import annoyance, brooklyn_cc, io_chicago, logan_square, magnet, playground, second_city, ucb, ucb_classes, wgis
@@ -22,11 +25,13 @@ SOURCES = [
 CLASS_SOURCES = [
     {"id": "ucb_ny", "org": "UCB", "city": "New York", "fetch": ucb_classes.fetch_ny},
     {"id": "brooklyn_cc", "org": "Brooklyn Comedy Collective", "city": "New York", "fetch": brooklyn_cc.fetch_classes},
-    {"id": "magnet", "org": "Magnet Theater", "city": "New York", "fetch": magnet.fetch_classes},
-    {"id": "wgis_ny", "org": "WGIS", "city": "New York", "fetch": wgis.fetch_classes_ny},
+    {"id": "magnet", "org": "Magnet Theater", "city": "New York", "fetch": magnet.fetch_classes, "detail": magnet.class_detail},
+    {"id": "wgis_ny", "org": "WGIS", "city": "New York", "fetch": wgis.fetch_classes_ny, "detail": wgis.class_detail,
+     "detail_overrides": ("schedule",)},
     {"id": "ucb_la", "org": "UCB", "city": "Los Angeles", "fetch": ucb_classes.fetch_la},
     {"id": "ucb_online", "org": "UCB", "city": "Online", "fetch": ucb_classes.fetch_online},
-    {"id": "wgis_la", "org": "WGIS", "city": "Los Angeles", "fetch": wgis.fetch_classes_la},
+    {"id": "wgis_la", "org": "WGIS", "city": "Los Angeles", "fetch": wgis.fetch_classes_la, "detail": wgis.class_detail,
+     "detail_overrides": ("schedule",)},
     {"id": "annoyance", "org": "The Annoyance", "city": "Chicago", "fetch": annoyance.fetch_classes},
     {"id": "io_chicago", "org": "iO Theater", "city": "Chicago", "fetch": io_chicago.fetch_classes},
     {"id": "second_city", "org": "The Second City", "city": "Chicago", "fetch": second_city.fetch_classes},

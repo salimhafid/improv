@@ -265,7 +265,7 @@ def make_class(**kw) -> dict:
     base = {
         "id": "", "title": "", "url": "", "instructor": "", "schedule": "",
         "start": None, "price": "", "level": "", "image": None, "description": "",
-        "is_full": False, "source": "", "org": "", "city": "",
+        "location": "", "is_full": False, "source": "", "org": "", "city": "",
     }
     base.update(kw)
     return base
