@@ -45,7 +45,7 @@
    "annoyance/workshop-you-already-did-the-funny-thing-with-jeff-quintana"
   ],
   "new_at": "2026-11-06T04:02:53.469653+00:00",
-  "updated": "2026-11-09T12:07:19.098009+00:00"
+  "updated": "2026-11-10T08:08:43.907000+00:00"
  },
  "brooklyn_cc": {
   "ids": [
@@ -99,10 +99,6 @@
    "io_chicago/drop-in-improv-with-gretchen-eng",
    "io_chicago/fall-one-week-intensive-2027",
    "io_chicago/io-improv-level-1-mondays-from-7-10pm-w-damian-anaya",
-   "io_chicago/io-improv-level-1-saturdays-from-12-3pm-w-andy-bolduc-b960c49a-5a54-450a-aba3-d6519f10df95",
-   "io_chicago/io-improv-level-1-thursdays-from-7-10pm-w-allen-lucas",
-   "io_chicago/io-improv-level-1-tuesdays-from-7-10pm-w-chris-littrell",
-   "io_chicago/io-improv-level-1-wednesdays-from-7-10pm-w-tj-king-025df914-8b8d-4005-b785-405c3bb09fab",
    "io_chicago/io-improv-level-2-mondays-from-7-10pm-w-nick-rowley",
    "io_chicago/io-improv-level-2-saturdays-from-12-3pm-w-nicole-carter",
    "io_chicago/io-improv-level-2-thursdays-from-7-10pm-w-jess-rogers",
@@ -135,14 +131,14 @@
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
   "new_at": "2026-11-07T00:04:09.262310+00:00",
-  "updated": "2026-11-09T12:07:19.098009+00:00"
+  "updated": "2026-11-10T08:08:43.907000+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/lsi-level-1-winter-intensive-2027"
   ],
   "new_at": "2026-10-29T15:50:30.412872+00:00",
-  "updated": "2026-11-09T12:07:19.098009+00:00"
+  "updated": "2026-11-10T08:08:43.907000+00:00"
  },
  "magnet": {
   "ids": [
@@ -166,6 +162,7 @@
    "magnet/12034",
    "magnet/12035",
    "magnet/12036",
+   "magnet/12038",
    "magnet/12040",
    "magnet/12041",
    "magnet/12042",
@@ -198,10 +195,13 @@
    "magnet/12079",
    "magnet/12080",
    "magnet/12081",
-   "magnet/12082"
+   "magnet/12082",
+   "magnet/12083",
+   "magnet/12084",
+   "magnet/12085"
   ],
-  "new_at": "2026-11-09T12:07:19.098009+00:00",
-  "updated": "2026-11-09T12:07:19.098009+00:00"
+  "new_at": "2026-11-10T08:08:43.907000+00:00",
+  "updated": "2026-11-10T08:08:43.907000+00:00"
  },
  "second_city": {
   "ids": [
@@ -309,7 +309,7 @@
    "second_city/46724"
   ],
   "new_at": "2026-11-07T00:04:09.262310+00:00",
-  "updated": "2026-11-09T12:07:19.098009+00:00"
+  "updated": "2026-11-10T08:08:43.907000+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -382,7 +382,7 @@
    "44444"
   ],
   "new_at": "2026-11-06T22:01:53.799999+00:00",
-  "updated": "2026-11-10T08:06:33.734022+00:00"
+  "updated": "2026-11-10T08:08:33.618499+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -452,7 +452,7 @@
    "44489"
   ],
   "new_at": "2026-11-09T22:51:52.710590+00:00",
-  "updated": "2026-11-10T08:06:33.734022+00:00"
+  "updated": "2026-11-10T08:08:33.618499+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -473,7 +473,7 @@
    "44479"
   ],
   "new_at": "2026-11-09T22:51:52.710590+00:00",
-  "updated": "2026-11-10T08:06:33.734022+00:00"
+  "updated": "2026-11-10T08:08:33.618499+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -522,16 +522,19 @@
    "wgis_la/1914",
    "wgis_la/1915",
    "wgis_la/1916",
-   "wgis_la/1918"
+   "wgis_la/1918",
+   "wgis_la/1920",
+   "wgis_la/1921",
+   "wgis_la/1922"
   ],
-  "new_at": "2026-11-09T12:07:19.098009+00:00",
-  "updated": "2026-11-09T12:07:19.098009+00:00"
+  "new_at": "2026-11-10T08:08:43.907000+00:00",
+  "updated": "2026-11-10T08:08:43.907000+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1880"
   ],
   "new_at": "2026-10-17T23:32:58.289387+00:00",
-  "updated": "2026-11-09T12:07:19.098009+00:00"
+  "updated": "2026-11-10T08:08:43.907000+00:00"
  }
 }
