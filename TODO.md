@@ -5,6 +5,22 @@ READY_FOR_DISTRIBUTION; 1.7 (27) carries the class-alert fixes below plus the
 unreleased notification-delivery diagnostics; 1.8 (28) puts class alerts
 behind a $9.99 in-app purchase and is not yet uploaded).
 
+## Class details + alert deep links (2026-11-10, branch `class-details-alert-links`, uncommitted)
+
+- [ ] Commit, merge and push. The next scrape then publishes descriptions,
+      full schedules and `location` for every class (per-class pages for
+      Magnet and WGIS are fetched once and cached via `detail_done`).
+- [ ] Brooklyn CC classes moved from the dead Squarespace collection to
+      Crowdwork, so every BCC class id changed: the first watcher scan after
+      the merge sends BCC subscribers one "N new classes" summary push.
+- [ ] CloudKit: `ClassAlert` gains a string field `url`. Teach development with
+      `gh workflow run class-watch.yml -f mode=test`, then "Deploy Schema
+      Changes" in CloudKit Console. Until then the watcher resends production
+      records without the url (no alert is lost) and logs a schema warning.
+- [ ] Ship an app build past 28: a tapped alert opens the class, or the
+      listing URL in the in-app browser when the class is not in the feed yet;
+      the class page shows the location.
+
 ## Release
 
 - [x] **Ship 1.5** — done 2026-09-07 via `tools/asc_release.py`: version 1.5
