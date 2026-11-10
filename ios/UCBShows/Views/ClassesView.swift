@@ -9,7 +9,11 @@ struct ClassesView: View {
     @Environment(ClassAlertsStore.self) private var alertsStore
     @Environment(AppState.self) private var app
     @Environment(\.horizontalSizeClass) private var hSize
-    @State private var showAlerts = false
+    /// The one sheet this tab presents. A single item rather than a flag per
+    /// sheet: an alert tap's listing page has to be able to take over from
+    /// the Class Alerts settings, and two `.sheet`s on one presenter can't
+    /// both be up — changing the item swaps them.
+    @State private var sheet: ActiveSheet?
     @State private var query = ""
     @State private var expandedSchool: String?
     @State private var expandedSubjects: Set<String> = []
@@ -26,6 +30,20 @@ struct ClassesView: View {
     /// than part of the target so a tab switch — which cancels the lookup and
     /// restarts it on return — resumes the same budget instead of a new one.
     @State private var pendingAlert: PendingAlert?
+
+    private enum ActiveSheet: Identifiable {
+        /// The Class Alerts settings (the bell).
+        case alerts
+        /// A tapped alert's listing on the school's website.
+        case listing(WebLink)
+
+        var id: String {
+            switch self {
+            case .alerts: "alerts"
+            case .listing(let link): link.id.uuidString
+            }
+        }
+    }
 
     private struct PendingAlert: Equatable {
         let target: ClassAlertTarget
@@ -97,8 +115,11 @@ struct ClassesView: View {
                 ShowDetailView(show: show, namespace: zoom)
             }
             .searchable(text: $query, prompt: searchPrompt)
-            .sheet(isPresented: $showAlerts) {
-                ClassAlertsView()
+            .sheet(item: $sheet) { sheet in
+                switch sheet {
+                case .alerts: ClassAlertsView()
+                case .listing(let link): SafariView(url: link.url).ignoresSafeArea()
+                }
             }
             .refreshable { await store.refresh() }
             .onSwipeRight {
@@ -289,8 +310,9 @@ struct ClassesView: View {
 
     // MARK: Class-alert deep link
 
-    /// Open the class a tapped alert names (`AppState.classAlertTarget`),
-    /// waiting for it to reach the feed when the alert beat the feed there.
+    /// Open the class a tapped alert names (`AppState.classAlertTarget`).
+    /// When the alert beat the feed there, open its listing on the school's
+    /// website instead — or, for an alert with no link, wait for the class.
     /// Runs as the `.task` keyed on the target, so it is cancelled and
     /// restarted whenever the target changes, and cancelled when the tab
     /// goes away.
@@ -299,6 +321,9 @@ struct ClassesView: View {
             withAnimation(.snappy(duration: 0.25)) { self.pendingAlert = nil }
         }
         guard let target else { return }
+        // A listing still up is an earlier tap's (presenting it consumed that
+        // target): this tap must not land behind it.
+        if case .listing = sheet { sheet = nil }
         // Record still on its way (bounded at ~10 s): land on the school
         // now; the resolved target re-runs this task.
         if target.isProvisional {
@@ -326,6 +351,10 @@ struct ClassesView: View {
         await store.refresh(force: true)
         if Task.isCancelled { return }
         if let item = store.item(for: target) { open(item, for: target); return }
+
+        // Not published in the app yet, but the alert says where it is on
+        // the school's site: that page now beats a wait for the feed.
+        if let url = target.url { openListing(url, for: target); return }
 
         if pendingAlert == nil {
             // Only a fresh alert's class can still be on its way. An old
@@ -365,6 +394,24 @@ struct ClassesView: View {
             }
         }
         path = NavigationPath([item])
+        sheet = nil   // the Class Alerts settings would otherwise cover it
+        if pendingAlert != nil {
+            withAnimation(.snappy(duration: 0.25)) { pendingAlert = nil }
+        }
+        consume(target)
+    }
+
+    /// The alerted class isn't in the feed: show its listing page in the
+    /// in-app browser, over the school's folder. The stack goes back to its
+    /// root first, as in `open`, and for the same reason plus one: a pushed
+    /// page's own sheet (a class's Register page) would hold this one back,
+    /// and leaves with its page. Replaces the Class Alerts settings if they
+    /// are up (see `sheet`). Only reached from the alert task, which runs
+    /// while the tab is on screen, so there is always a presenter.
+    private func openListing(_ url: URL, for target: ClassAlertTarget) {
+        revealFolder(target.school)
+        if !path.isEmpty { path = NavigationPath() }
+        sheet = .listing(WebLink(url: url))
         if pendingAlert != nil {
             withAnimation(.snappy(duration: 0.25)) { pendingAlert = nil }
         }
@@ -455,7 +502,7 @@ struct ClassesView: View {
     private var alertsToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Button {
-                showAlerts = true
+                sheet = .alerts
             } label: {
                 Image(systemName: alertsStore.activeCount > 0 ? "bell.badge.fill" : "bell")
                     .foregroundStyle(Theme.accent)

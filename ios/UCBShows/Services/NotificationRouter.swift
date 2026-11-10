@@ -87,9 +87,10 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     /// carries the record and subscription ids: the subscriptions'
     /// notification info is fixed to title/body/sound, and the record schema
     /// is fixed in production, so the record is the one place the class ids
-    /// live. Any failure (no record id, offline, timeout, no such record)
-    /// resolves to the provisional school with no ids, which the Classes tab
-    /// treats as "open the school's folder".
+    /// live — and, on per-class records, the class's listing `url`. Any
+    /// failure (no record id, offline, timeout, no such record) resolves to
+    /// the provisional school with no ids, which the Classes tab treats as
+    /// "open the school's folder".
     func resolve(_ tap: ClassAlertTap, provisional: ClassAlertTarget) async -> ClassAlertTarget {
         let unresolved = provisional.resolved(school: nil, classIDs: nil, pushBody: nil)
         guard let name = tap.recordName, !name.isEmpty else { return unresolved }
@@ -110,6 +111,7 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
             return provisional.resolved(school: record["school"] as? String,
                                         classIDs: record["classIDs"] as? String,
                                         pushBody: record["pushBody"] as? String,
+                                        url: record["url"] as? String,
                                         alertedAt: record.creationDate)
         } catch {
             return unresolved

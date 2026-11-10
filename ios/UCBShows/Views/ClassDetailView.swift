@@ -33,6 +33,9 @@ struct ClassDetailView: View {
                         if !item.schedule.isEmpty {
                             Label(item.schedule, systemImage: "calendar")
                         }
+                        if !item.location.isEmpty {
+                            Label(item.location, systemImage: "mappin.and.ellipse")
+                        }
                         if !item.price.isEmpty {
                             Label(item.price, systemImage: "tag")
                         }

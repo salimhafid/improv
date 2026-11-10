@@ -55,15 +55,32 @@ struct ClassAlertTarget: Equatable {
     /// When the alert was sent: its record's CloudKit `creationDate` (system
     /// metadata, not a record field). Nil until resolved, or if unknown.
     var alertedAt: Date?
+    /// The class's listing page on the school's website (the record's `url`),
+    /// opened in the in-app browser when the class hasn't reached the feed.
+    /// Nil for flood summaries and records written before the field existed.
+    var url: URL?
 
     init(id: UUID = UUID(), school: String?, classIDs: [String] = [],
-         titleHint: String? = nil, isProvisional: Bool = false, alertedAt: Date? = nil) {
+         titleHint: String? = nil, isProvisional: Bool = false, alertedAt: Date? = nil,
+         url: URL? = nil) {
         self.id = id
         self.school = school
         self.classIDs = classIDs
         self.titleHint = titleHint
         self.isProvisional = isProvisional
         self.alertedAt = alertedAt
+        self.url = url
+    }
+
+    /// The record's `url` field as something the in-app browser can open:
+    /// trimmed, http/https with a host. Anything else (missing, empty, another
+    /// scheme, not a URL) is nil.
+    static func listingURL(_ field: String?) -> URL? {
+        guard let text = field?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
+              let url = URL(string: text), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else { return nil }
+        return url
     }
 
     /// Whether the alert went out within `window` of `now` — i.e. whether its
@@ -101,10 +118,12 @@ struct ClassAlertTarget: Equatable {
     /// missing, or the fetch failed). Keeps the tap's `id`; the record's
     /// school wins over the one inferred from the subscription id;
     /// `classIDs` is the record's comma-separated list, trimmed, empty
-    /// entries dropped; the hint is the body's first line; `alertedAt` is the
-    /// record's creation date.
+    /// entries dropped; the hint is the body's first line; `url` is the
+    /// record's listing link (see `listingURL`); `alertedAt` is the record's
+    /// creation date.
     func resolved(school recordSchool: String?, classIDs field: String?,
-                  pushBody: String?, alertedAt: Date? = nil) -> ClassAlertTarget {
+                  pushBody: String?, url urlField: String? = nil,
+                  alertedAt: Date? = nil) -> ClassAlertTarget {
         let trimmedSchool = recordSchool?.trimmingCharacters(in: .whitespacesAndNewlines)
         let ids = (field ?? "").split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -117,7 +136,8 @@ struct ClassAlertTarget: Equatable {
             classIDs: ids,
             titleHint: firstLine.flatMap { $0.isEmpty ? nil : $0 },
             isProvisional: false,
-            alertedAt: alertedAt)
+            alertedAt: alertedAt,
+            url: Self.listingURL(urlField))
     }
 }
 

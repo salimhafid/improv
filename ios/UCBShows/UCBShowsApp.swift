@@ -120,6 +120,15 @@ struct UCBShowsApp: App {
                         notifications.onClassAlert?(ClassAlertTap(
                             recordName: record, subscriptionID: env["UITEST_CLASS_ALERT_SUB"]))
                     }
+                    // The same tap already resolved, with no CloudKit: what
+                    // the record fetch above hands over, built from the
+                    // environment (class ids, listing url, school).
+                    if let ids = env["UITEST_CLASS_ALERT_IDS"] {
+                        app.activeTab = 2
+                        app.classAlertTarget = ClassAlertTarget(school: env["UITEST_CLASS_ALERT_SCHOOL"])
+                            .resolved(school: nil, classIDs: ids, pushBody: nil,
+                                      url: env["UITEST_CLASS_ALERT_URL"], alertedAt: Date())
+                    }
                     #endif
                     // The class-alert purchase gate, wired before arming so the
                     // launch reconcile already consults it (undecided holds the

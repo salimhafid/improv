@@ -285,6 +285,19 @@ func testClassItemDecoding() {
     checkEqual(odd.rawID, "", "a numeric id drops to the default")
     check(!odd.isFull, "a string is_full drops to false")
     checkEqual(odd.instructor, "", "a null instructor drops to empty")
+
+    // Location: the feed's one-line "where it meets".
+    checkEqual(classItem(["location": "UCB Training Center, 242 E 14th St, New York"]).location,
+               "UCB Training Center, 242 E 14th St, New York", "location decodes as published")
+    checkEqual(classItem(["location": "Online"]).location, "Online", "an online class says Online")
+    checkEqual(classItem(["title": "Old feed"]).location, "", "a feed without location -> empty")
+    checkEqual(classItem(["location": ""]).location, "", "an empty location stays empty")
+    checkEqual(classItem(["location": "  \n"]).location, "", "a blank location -> empty")
+    let oddPlace = classItem(["title": "Odd place", "location": ["room": "B"]])
+    checkEqual(oddPlace.location, "", "a wrong-typed location drops to empty")
+    checkEqual(oddPlace.title, "Odd place", "...and keeps the row")
+    checkEqual(classItem(["location": 14]).location, "", "a numeric location drops to empty")
+    checkEqual(classItem(["location": NSNull()]).location, "", "a null location drops to empty")
 }
 
 func testShowDecodingAndDayKey() {
@@ -754,6 +767,33 @@ func testClassAlertTargets() {
                ["ucb_ny/1", "ucb_ny/2"], "a flood summary keeps every id")
     check(ClassAlertTarget(school: "ucb_ny") != ClassAlertTarget(school: "ucb_ny"),
           "two taps on the same alert are distinct targets")
+
+    // The record's listing url: what opens when the class isn't in the feed.
+    func listing(_ field: String?) -> ClassAlertTarget {
+        provisional.resolved(school: "ucb_la", classIDs: "ucb_la/41719", pushBody: "Harold", url: field)
+    }
+    checkEqual(listing("https://ucbcomedy.com/class/41719").url?.absoluteString,
+               "https://ucbcomedy.com/class/41719", "an https listing url is kept")
+    checkEqual(listing("http://example.com/classes?id=7").url?.absoluteString,
+               "http://example.com/classes?id=7", "an http listing url is kept")
+    checkEqual(listing("  https://ucbcomedy.com/class/41719 \n").url?.absoluteString,
+               "https://ucbcomedy.com/class/41719", "the listing url is trimmed")
+    checkEqual(listing("HTTPS://ucbcomedy.com/x").url?.absoluteString, "HTTPS://ucbcomedy.com/x",
+               "the scheme check ignores case")
+    for bad in [nil, "", "   ", "javascript:alert(1)", "ucbshows://class/1", "file:///etc/hosts",
+                "mailto:a@example.com", "tel:5551234", "ucbcomedy.com/class/41719", "not a url",
+                "https://", "https:///class/1", "/class/41719"] as [String?] {
+        checkEqual(listing(bad).url, nil, "no listing url from \(bad ?? "nil")")
+    }
+    let linked = listing("https://ucbcomedy.com/class/41719")
+    checkEqual(linked.id, provisional.id, "a listing url leaves the tap's id alone")
+    checkEqual(linked.school, "ucb_la", "...and the school")
+    checkEqual(linked.classIDs, ["ucb_la/41719"], "...and the class ids")
+    checkEqual(linked.titleHint, "Harold", "...and the hint")
+    check(!linked.isProvisional, "...and is resolved")
+    checkEqual(resolved.url, nil, "a record without a url resolves to none")
+    checkEqual(failed.url, nil, "a failed fetch has no url")
+    checkEqual(provisional.url, nil, "a provisional target has no url")
 
     // Alert age: only a fresh alert's missing class is worth waiting for.
     let sent = fixedNow.addingTimeInterval(-5 * 60)

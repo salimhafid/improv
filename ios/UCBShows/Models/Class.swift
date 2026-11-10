@@ -38,6 +38,9 @@ struct ClassItem: Decodable, Identifiable, Hashable {
     let level: String
     let imageString: String?
     let classDescription: String
+    /// Where the class meets, one line ("Online" for an online class); empty
+    /// when the school doesn't say.
+    let location: String
     let isFull: Bool
     let source: String
     let org: String
@@ -70,6 +73,7 @@ struct ClassItem: Decodable, Identifiable, Hashable {
         case level
         case imageString = "image"
         case classDescription = "description"
+        case location
         case isFull = "is_full"
         case source
         case org
@@ -90,6 +94,8 @@ struct ClassItem: Decodable, Identifiable, Hashable {
         level = (try? c.decodeIfPresent(String.self, forKey: .level)) ?? ""
         imageString = Self.nonEmpty(try? c.decodeIfPresent(String.self, forKey: .imageString))
         classDescription = (try? c.decodeIfPresent(String.self, forKey: .classDescription)) ?? ""
+        location = ((try? c.decodeIfPresent(String.self, forKey: .location)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         isFull = (try? c.decodeIfPresent(Bool.self, forKey: .isFull)) ?? false
         source = (try? c.decodeIfPresent(String.self, forKey: .source)) ?? ""
         org = (try? c.decodeIfPresent(String.self, forKey: .org)) ?? ""

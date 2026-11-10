@@ -19,6 +19,15 @@ import SwiftUI
 ///   UITEST_CLASS_ALERT_RECORD — a ClassAlert record name: replay a tap on that
 ///                             alert at launch (read in UCBShowsApp; pair with
 ///                             UITEST_CLASS_ALERT_SUB for the subscription id)
+///   UITEST_CLASS_ALERT_IDS  — comma-separated feed ids (a ClassAlert record's
+///                             classIDs, e.g. "ucb_ny/43407"): replay an
+///                             already-resolved alert tap at launch, with no
+///                             CloudKit fetch (read in UCBShowsApp)
+///   UITEST_CLASS_ALERT_URL  — with UITEST_CLASS_ALERT_IDS: the record's url, the
+///                             listing opened in the in-app browser when the one
+///                             class named isn't in the feed
+///   UITEST_CLASS_ALERT_SCHOOL — with UITEST_CLASS_ALERT_IDS: the record's school
+///                             id (e.g. "ucb_ny"), whose folder is revealed
 struct UITestTabSelection: ViewModifier {
     @Binding var selection: Int
 
