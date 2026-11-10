@@ -258,6 +258,43 @@ class CategoryScanTests(unittest.TestCase):
         self.assertTrue(all(a["categories"] == ["all"] and a["category"] == "all" for a in alerts.values()))
 
 
+class ListingUrlScanTests(unittest.TestCase):
+    def test_ucb_scan_carries_the_registration_url_and_tolerates_a_malformed_event(self):
+        events = [
+            {"EventID": 43407, "Name": "Improv 101", "Tags": ["LOC_NY", "CTG_Improv"],
+             "ViewUri": "https://ucbcomedy.arlo.co/w/courses/12-improv-101?arlo_id=12"},
+            # No course-template URL: registration_url raises, the class is
+            # still scanned and alerted, just without a listing.
+            {"EventID": 43408, "Name": "Sketch 101", "Tags": ["LOC_NY", "CTG_Sketch"]},
+        ]
+        state = {school: {"ids": []} for _, school in watcher.UCB_LOCATIONS}
+        with patch("sources.ucb_classes.raw_events", return_value=events):
+            scanned = watcher.scan_ucb()
+        from sources.ucb_classes import registration_url
+        self.assertEqual(scanned["ucb_ny"]["43407"]["url"], registration_url(events[0]))
+        self.assertTrue(scanned["ucb_ny"]["43407"]["url"].startswith("https://"))
+        self.assertEqual(scanned["ucb_ny"]["43408"]["url"], "")
+        alerts = {a["classIDs"]: a for a in diff_and_alert(scanned, state, per_category=True)}
+        self.assertEqual(alerts["ucb_ny/43407"]["url"], registration_url(events[0]))
+        self.assertEqual(alerts["ucb_ny/43408"]["url"], "")
+        self.assertEqual(alerts["ucb_ny/43408"]["pushTitle"], "New class at UCB New York")
+        self.assertNotIn("url", state["ucb_ny"], "state keeps ids only")
+
+    def test_non_ucb_scan_carries_the_adapter_url(self):
+        sources = [{"id": "magnet", "fetch": lambda: [
+            {"id": "magnet/1", "title": "Level One", "url": "https://magnettheater.com/classes/1"},
+            {"id": "magnet/2", "title": "Level Two"},
+            {"id": "magnet/3", "title": "Level Three", "url": None},
+        ]}]
+        with patch("sources.CLASS_SOURCES", sources):
+            scanned = watcher.scan_others()
+        self.assertEqual({cid: m["url"] for cid, m in scanned["magnet"].items()},
+                         {"magnet/1": "https://magnettheater.com/classes/1", "magnet/2": "", "magnet/3": ""})
+        alerts = {a["classIDs"]: a for a in diff_and_alert(scanned, {"magnet": {"ids": []}}, per_category=False)}
+        self.assertEqual(alerts["magnet/1"]["url"], "https://magnettheater.com/classes/1")
+        self.assertEqual(alerts["magnet/2"]["url"], "")
+
+
 def _ucb(title, categories, cid, when="2026-11-01", school="ucb_ny", **extra):
     """A scanned UCB class as scan_ucb() shapes it: bare EventID key, feed id."""
     return cid, {"title": title, "when": when, "categories": categories,
@@ -472,8 +509,15 @@ class ComposeTests(unittest.TestCase):
             "categories": ["sketch_electives", "featured_programs"], "count": 1,
             "pushTitle": "New class at UCB Los Angeles",
             "pushBody": "Sketch Lab\nMonika Smith\nSketch Electives",
-            "classIDs": "ucb_la/41719",
+            "classIDs": "ucb_la/41719", "url": "",
         })
+
+    def test_record_carries_the_listing_url_and_a_summary_has_none(self):
+        url = "https://ucbcomedy.com/course/?eventtemplate=12&event=41719"
+        self.assertEqual(compose("ucb_la", _item("41719", url=url))["url"], url)
+        self.assertEqual(compose("ucb_la", _item("41719", url=None))["url"], "")
+        items = [_item(str(i), f"T{i}", url=f"https://example.com/{i}") for i in range(6)]
+        self.assertEqual(compose_summary("ucb_ny", items)["url"], "")
 
     def test_summary_body_caps_at_three_titles(self):
         items = [_item(str(i), f"T{i}") for i in range(6)]
@@ -755,6 +799,253 @@ class SendAlertsRetryTests(unittest.TestCase):
         unsent, calls = self._run(parked, responder)
         self.assertEqual(calls, ["production", "production"])
         self.assertEqual(unsent, [parked[199]])
+
+
+_URL = "https://ucbcomedy.com/course/?eventtemplate=12&event=1"
+
+
+def _url_alert(cid="1", url=_URL):
+    return compose("ucb_ny", _item(cid, url=url))
+
+
+class SendAlertsUrlTests(unittest.TestCase):
+    """The record's url field, and environments whose schema lacks it."""
+
+    def setUp(self):
+        for name, value in (("KEY_ID", "key"), ("PRIVATE_KEY_PEM", "pem"), ("KEY_ID_PROD", ""),
+                            ("ENVIRONMENTS", ["production"])):
+            p = patch.object(watcher, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        p = patch.object(watcher, "_sign", return_value={})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _run(self, alerts, responder):
+        """responder(env, records) → response; returns (unsent, requests),
+        each request being (env, [fields of each record written])."""
+        import json
+        requests = []
+
+        def urlopen(req, timeout=None):
+            records = [op["record"] for op in json.loads(req.data)["operations"]]
+            env = req.full_url.split("/")[6]
+            requests.append((env, [r["fields"] for r in records]))
+            return responder(env, records)
+        with patch.object(watcher.urllib.request, "urlopen", side_effect=urlopen):
+            return watcher.send_alerts(alerts), requests
+
+    @staticmethod
+    def _accept(env, records):
+        return _FakeResponse({"records": [{"recordName": r["recordName"]} for r in records]})
+
+    @staticmethod
+    def _reject_url(env, records):
+        """A schema without the field: per-record error for records carrying it."""
+        return _FakeResponse({"records": [
+            dict({"recordName": r["recordName"]},
+                 **({"serverErrorCode": "BAD_REQUEST"} if "url" in r["fields"] else {}))
+            for r in records]})
+
+    def test_url_is_written_as_a_string_only_when_the_alert_has_one(self):
+        old = {k: v for k, v in _url_alert("3").items() if k != "url"}   # parked before url existed
+        unsent, requests = self._run([_url_alert("1"), _url_alert("2", url=""), old], self._accept)
+        self.assertEqual(unsent, [])
+        (_, (with_url, empty, legacy)), = requests
+        self.assertEqual(with_url["url"], {"value": _URL, "type": "STRING"})
+        expected = {"school", "category", "categories", "count", "pushTitle", "pushBody", "classIDs"}
+        self.assertEqual(set(empty), expected)
+        self.assertEqual(set(legacy), expected)
+        self.assertEqual({k: v for k, v in with_url.items() if k != "url"},
+                         dict(empty, classIDs={"value": "1", "type": "STRING"}),
+                         "nothing else about the record changes")
+
+    def test_record_rejected_with_url_is_resent_once_without_it(self):
+        with self.assertLogs("ucb.watcher", level="WARNING") as logs:
+            unsent, requests = self._run([_url_alert("1"), _url_alert("2", url=""), _url_alert("3")],
+                                         self._reject_url)
+        self.assertEqual(unsent, [], "no alert waits on the schema")
+        self.assertEqual([(env, len(fields)) for env, fields in requests],
+                         [("production", 3), ("production", 2)], "only the rejected records go again")
+        self.assertEqual([f["classIDs"]["value"] for f in requests[1][1]], ["1", "3"])
+        self.assertTrue(all("url" not in f for f in requests[1][1]))
+        schema = [m for m in logs.output if "CloudKit Console" in m]
+        self.assertEqual(len(schema), 1, "one schema warning per environment")
+        self.assertIn("production: 2 alert record(s)", schema[0])
+
+    def test_one_schema_warning_per_environment_across_batches(self):
+        alerts = [_url_alert(str(i)) for i in range(201)]
+        with patch.object(watcher, "ENVIRONMENTS", ["development", "production"]), \
+             self.assertLogs("ucb.watcher", level="WARNING") as logs:
+            unsent, requests = self._run(
+                alerts, lambda env, records: (self._accept if env == "development" else self._reject_url)(env, records))
+        self.assertEqual(unsent, [])
+        self.assertEqual([(env, len(fields)) for env, fields in requests],
+                         [("development", 200), ("development", 1),
+                          ("production", 200), ("production", 200), ("production", 1), ("production", 1)])
+        schema = [m for m in logs.output if "CloudKit Console" in m]
+        self.assertEqual(len(schema), 1)
+        self.assertIn("production: 201 alert record(s)", schema[0])
+
+    def test_http_4xx_resends_the_whole_request_without_url(self):
+        import io, urllib.error
+
+        def responder(env, records):
+            if any("url" in r["fields"] for r in records):
+                raise urllib.error.HTTPError("u", 400, "bad request", {}, io.BytesIO(b"unknown field url"))
+            return self._accept(env, records)
+        unsent, requests = self._run([_url_alert("1"), _url_alert("2", url="")], responder)
+        self.assertEqual(unsent, [], "the record without a url was in the rejected request too")
+        self.assertEqual([len(fields) for _, fields in requests], [2, 2])
+        self.assertTrue(all("url" not in f for f in requests[1][1]))
+
+    def test_second_rejection_is_parked_with_the_url_intact(self):
+        import io, urllib.error
+
+        def reject(env, records):
+            return _FakeResponse({"records": [{"recordName": r["recordName"], "serverErrorCode": "BAD_REQUEST"}
+                                              for r in records]})
+
+        def unauthorized(env, records):
+            raise urllib.error.HTTPError("u", 401, "auth", {}, io.BytesIO(b"bad key"))
+        for responder in (reject, unauthorized):
+            with self.subTest(responder=responder.__name__), self.assertLogs("ucb.watcher", level="WARNING") as logs:
+                alert = _url_alert()
+                unsent, requests = self._run([alert], responder)
+                self.assertEqual(unsent, [dict(alert, envs=["production"])])
+                self.assertEqual(len(requests), 2, "resent once, never looped")
+                self.assertFalse([m for m in logs.output if "CloudKit Console" in m],
+                                 "nothing went out without its url")
+
+    def test_uncertain_failures_are_never_resent(self):
+        import io, urllib.error
+
+        def server_error(env, records):
+            raise urllib.error.HTTPError("u", 503, "unavailable", {}, io.BytesIO(b"try later"))
+
+        def timeout(env, records):
+            raise TimeoutError("timed out")
+
+        def network(env, records):
+            raise urllib.error.URLError("connection reset")
+
+        def unacknowledged(env, records):
+            return _FakeResponse({"records": []})
+
+        def garbled(env, records):
+            return _FakeResponse({"unexpected": True})
+        for responder in (server_error, timeout, network, unacknowledged, garbled):
+            with self.subTest(responder=responder.__name__):
+                alert = _url_alert()
+                unsent, requests = self._run([alert], responder)
+                self.assertEqual(len(requests), 1, "the first write may have landed")
+                self.assertEqual(unsent, [dict(alert, envs=["production"])], "parked whole, url included")
+
+    def test_rejection_without_any_url_is_not_resent(self):
+        import io, urllib.error
+
+        def bad_request(env, records):
+            raise urllib.error.HTTPError("u", 400, "bad request", {}, io.BytesIO(b"no"))
+        for responder in (bad_request, lambda env, records: _FakeResponse({"records": [
+                {"recordName": r["recordName"], "serverErrorCode": "BAD_REQUEST"} for r in records]})):
+            unsent, requests = self._run([_url_alert(url="")], responder)
+            self.assertEqual(len(requests), 1)
+            self.assertEqual([a["envs"] for a in unsent], [["production"]])
+
+    def test_resend_only_covers_the_rejecting_environment_and_parked_url_retries(self):
+        alert = _url_alert()
+
+        def responder(env, records):
+            if env == "development":
+                raise TimeoutError("timed out")
+            return self._reject_url(env, records)
+        with patch.object(watcher, "ENVIRONMENTS", ["development", "production"]):
+            unsent, requests = self._run([alert], responder)
+            self.assertEqual([env for env, _ in requests], ["development", "production", "production"])
+            self.assertEqual(unsent, [dict(alert, envs=["development"])])
+            # The parked alert still carries its url on the next iteration.
+            unsent, requests = self._run(unsent, self._accept)
+        self.assertEqual(unsent, [])
+        (env, (fields,)), = requests
+        self.assertEqual((env, fields["url"]["value"]), ("development", _URL))
+
+
+class TestCloudKitUrlProbeTests(unittest.TestCase):
+    """--test writes a probe carrying url and tells a missing field from broken auth."""
+
+    def _probe(self, responder, envs=("production",)):
+        import json
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        pem = ec.generate_private_key(ec.SECP256R1()).private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption()).decode()
+        writes = []
+
+        def urlopen(req, timeout=None):
+            op = json.loads(req.data)["operations"][0]
+            if op["operationType"] == "delete":
+                writes.append("delete")
+                return _FakeResponse({"records": []})
+            writes.append(sorted(op["record"]["fields"]))
+            return responder(op["record"])
+        with patch.object(watcher, "KEY_ID", "key"), patch.object(watcher, "KEY_ID_PROD", ""), \
+             patch.object(watcher, "PRIVATE_KEY_PEM", pem), \
+             patch.object(watcher.urllib.request, "urlopen", side_effect=urlopen), \
+             self.assertLogs("ucb.watcher", level="INFO") as logs:
+            code = watcher.test_cloudkit(list(envs))
+        return code, writes, logs.output
+
+    @staticmethod
+    def _ok(record):
+        return _FakeResponse({"records": [{"recordName": record["recordName"]}]})
+
+    def test_probe_carries_url_and_is_cleaned_up(self):
+        code, writes, logs = self._probe(self._ok)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(writes), 2)
+        self.assertIn("url", writes[0])
+        self.assertEqual(writes[1], "delete")
+        self.assertTrue(any("url field accepted" in m for m in logs))
+
+    def test_rejected_url_is_reported_as_schema_not_as_auth_failure(self):
+        import io, urllib.error
+
+        def per_record(record):
+            if "url" in record["fields"]:
+                return _FakeResponse({"records": [{"recordName": record["recordName"],
+                                                   "serverErrorCode": "BAD_REQUEST"}]})
+            return self._ok(record)
+
+        def http_400(record):
+            if "url" in record["fields"]:
+                raise urllib.error.HTTPError("u", 400, "bad", {}, io.BytesIO(b"unknown field"))
+            return self._ok(record)
+        for responder in (per_record, http_400):
+            with self.subTest(responder=responder.__name__):
+                code, writes, logs = self._probe(responder)
+                self.assertEqual(code, 0, "auth works")
+                self.assertIn("url", writes[0])
+                self.assertNotIn("url", writes[1])
+                self.assertEqual(writes[2], "delete")
+                self.assertTrue(any(m.startswith("WARNING") and "CloudKit Console" in m for m in logs))
+                self.assertFalse([m for m in logs if m.startswith("ERROR")])
+
+    def test_broken_auth_still_fails(self):
+        import io, urllib.error
+
+        def unauthorized(record):
+            raise urllib.error.HTTPError("u", 401, "auth", {}, io.BytesIO(b"bad key"))
+
+        def unavailable(record):
+            raise urllib.error.HTTPError("u", 503, "down", {}, io.BytesIO(b"later"))
+        for responder, attempts in ((unauthorized, 2), (unavailable, 1)):
+            with self.subTest(responder=responder.__name__):
+                code, writes, logs = self._probe(responder)
+                self.assertEqual(code, 1)
+                self.assertEqual(len(writes), attempts)
+                self.assertTrue(any(m.startswith("ERROR") for m in logs))
+                self.assertFalse(any("CloudKit Console" in m for m in logs))
 
 
 class MainAtLeastOnceTests(unittest.TestCase):

@@ -22,7 +22,10 @@ any of its picked categories) fires exactly once for it. The title is "New
 class at <school>"; the body is the class's name, its instructor and its
 category, one line each, every line cut with "…" rather than wrapped. classIDs carries the class's
 id in the app's class feed (docs/classes.json: "ucb_ny/43407" for UCB, the
-adapter's own id elsewhere) so a tap can open that listing. A school with
+adapter's own id elsewhere) so a tap can open that listing, and url the
+class's page on the school's site for a tap that arrives before the feed has
+the class (written only when known; see send_alerts for environments whose
+schema lacks the field). A school with
 more than MAX_INDIVIDUAL_ALERTS new classes in one scan gets one summary
 record instead (a new-term drop or an adapter re-id must not become dozens of
 pushes).
@@ -249,11 +252,12 @@ def _ucb_class_type(canonical: str, tags, categories: list[str]) -> str:
 
 def scan_ucb() -> dict[str, dict[str, dict]]:
     """Arlo catalog → {school: {EventID: {title, when, categories, feed_id,
-    instructor, type}}}. Keys stay bare EventIDs (the watcher state's ids —
+    instructor, type, url}}}. Keys stay bare EventIDs (the watcher state's ids —
     changing them would re-alert every class); `feed_id` is the id the same
-    session has in the app's class feed, and `when` its start date."""
+    session has in the app's class feed, `when` its start date and `url` its
+    listing on the school's site ("" when the event doesn't identify one)."""
     from common import clean
-    from sources.ucb_classes import event_location_tags, raw_events
+    from sources.ucb_classes import event_location_tags, raw_events, registration_url
 
     out: dict[str, dict[str, dict]] = {s: {} for _, s in UCB_LOCATIONS}
     for ev in raw_events():
@@ -267,6 +271,10 @@ def scan_ucb() -> dict[str, dict[str, dict]]:
         # Same names, same order and separator as the class feed's instructor.
         instructor = ", ".join(clean(p.get("Name")) for p in (ev.get("Presenters") or [])
                                if isinstance(p, dict) and p.get("Name"))
+        try:
+            url = registration_url(ev)
+        except ValueError:
+            url = ""   # still alerted; the tap just has no listing to open
         for tag, school in UCB_LOCATIONS:
             if tag in locations:
                 when = (ev.get("StartDateTime") or "")[:10]
@@ -276,6 +284,7 @@ def scan_ucb() -> dict[str, dict[str, dict]]:
                     "feed_id": f"{school}/{ev.get('EventID')}",
                     "instructor": instructor,
                     "type": _ucb_class_type(canonical, tags, categories),
+                    "url": url,
                 }
     return out
 
@@ -307,7 +316,8 @@ def scan_others() -> dict[str, dict[str, dict]]:
             level = clean(c.get("level"))
             meta = {"title": c.get("title") or "", "when": (c.get("start") or "")[:10],
                     "feed_id": str(c["id"]), "instructor": clean(c.get("instructor")),
-                    "type": "" if level.casefold() == "currently running" else level}
+                    "type": "" if level.casefold() == "currently running" else level,
+                    "url": clean(c.get("url"))}
             if src["id"] == "brooklyn_cc":
                 meta["categories"] = class_categories(src["id"], meta["title"], level=level)
             current[str(c["id"])] = meta
@@ -403,20 +413,24 @@ def compose(school: str, item: dict) -> dict:
     """One class's alert payload (count 1). `categories` is every category
     the class carries, so one subscription matching any picked category fires
     once; `category` (its first entry) is the primary, kept for older
-    subscribers. classIDs is the class's feed id so the app can open it."""
+    subscribers. classIDs is the class's feed id so the app can open it; url
+    is its listing on the school's site, for a tap that arrives before the
+    class is in the app's feed ("" when unknown)."""
     name = DISPLAY.get(school, school)
     categories = item["categories"]
     return {
         "school": school, "category": categories[0], "categories": categories,
         "count": 1, "pushTitle": f"New class at {name}", "pushBody": _class_body(item),
         "classIDs": item.get("feed_id") or item["id"],
+        "url": item.get("url") or "",
     }
 
 
 def compose_summary(school: str, items: list[dict]) -> dict:
     """One record standing in for a flood of new classes at one school. Its
     categories are the union of the classes' (first-seen order) so every
-    subscriber who would have heard about any one of them hears this once."""
+    subscriber who would have heard about any one of them hears this once.
+    It has no single listing, so its url is empty."""
     name = DISPLAY.get(school, school)
     categories = list(dict.fromkeys(c for i in items for c in i["categories"]))
     return {
@@ -424,6 +438,7 @@ def compose_summary(school: str, items: list[dict]) -> dict:
         "count": len(items), "pushTitle": f"{len(items)} new classes at {name}",
         "pushBody": _list_body([i["title"] for i in items]),
         "classIDs": _join_ids([i.get("feed_id") or i["id"] for i in items]),
+        "url": "",
     }
 
 
@@ -520,12 +535,92 @@ def _sign(subpath: str, body: bytes, env: str) -> dict[str, str]:
     }
 
 
+def _write_batch(env: str, batch: str, targets: list[tuple[int, dict]],
+                 with_url: bool = True) -> tuple[list[tuple[int, dict]], list[tuple[int, dict]]]:
+    """Write one request's worth of (alert index, alert) targets to `env`.
+    Returns (failed, resend): the targets CloudKit did not acknowledge, and
+    the ones to write again without their `url` field. Those are targets the
+    environment definitely did not store while a url was in play — a
+    per-record server error on a record carrying one, or an HTTP 4xx for a
+    request carrying any (nothing in it was written). A network error,
+    timeout or HTTP 5xx is never resent: the write may have landed, and a
+    second record would be a second push."""
+    subpath = f"/database/1/{CONTAINER}/{env}/public/records/modify"
+    names = {f"alert-{batch}-{a['school']}-{a['category']}-{uuid.uuid4().hex[:8]}": i
+             for i, a in targets}
+    operations = [{
+        "operationType": "create",
+        "record": {
+            "recordType": "ClassAlert",
+            "recordName": name,
+            "fields": {
+                "school": {"value": a["school"], "type": "STRING"},
+                "category": {"value": a["category"], "type": "STRING"},
+                "categories": {"value": a["categories"], "type": "STRING_LIST"},
+                "count": {"value": a["count"], "type": "INT64"},
+                "pushTitle": {"value": a["pushTitle"], "type": "STRING"},
+                "pushBody": {"value": a["pushBody"], "type": "STRING"},
+                "classIDs": {"value": a["classIDs"], "type": "STRING"},
+                # Only when known: production rejects a field its schema lacks.
+                **({"url": {"value": a["url"], "type": "STRING"}}
+                   if with_url and a.get("url") else {}),
+            },
+        },
+    } for name, (i, a) in zip(names, targets)]
+    body = json.dumps({"operations": operations}).encode()
+    failed: list[tuple[int, dict]] = []
+    resend: list[tuple[int, dict]] = []
+    try:
+        # _sign is inside the try: a malformed key must not raise out of
+        # main() before the remaining environments (and state) are handled.
+        req = urllib.request.Request(
+            "https://api.apple-cloudkit.com" + subpath, data=body,
+            headers=_sign(subpath, body, env), method="POST")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.load(resp)
+        records = result.get("records") if isinstance(result, dict) else None
+        if not isinstance(records, list):
+            raise ValueError("CloudKit response has no records acknowledgement list")
+        # A 200 response is not an acknowledgement of every write. Match
+        # each requested name exactly once; omitted, malformed, duplicate,
+        # or failed entries remain pending instead of silently losing them.
+        for name, (i, a) in zip(names, targets):
+            matches = [r for r in records if isinstance(r, dict) and r.get("recordName") == name]
+            if len(matches) != 1 or matches[0].get("serverErrorCode"):
+                reason = (matches[0].get("serverErrorCode") if len(matches) == 1
+                          else "missing or duplicate record acknowledgement")
+                log.warning("%s: record %s not accepted: %s", env, name, reason)
+                failed.append((i, a))
+                if with_url and a.get("url") and len(matches) == 1:
+                    resend.append((i, a))
+                continue
+            log.info("%s: accepted %s school=%s categories=%s", env, name,
+                     a["school"], "+".join(a["categories"]))
+        log.info("%s: wrote %d alert record(s), %d unacknowledged or failed", env,
+                 len(targets) - len(failed), len(failed))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        log.error("%s: CloudKit HTTP %d: %s", env, e.code, body[:500])
+        failed = list(targets)
+        if with_url and 400 <= e.code < 500 and any(a.get("url") for _, a in targets):
+            resend = list(targets)
+    except Exception as e:  # noqa: BLE001
+        log.error("%s: CloudKit write failed: %r", env, e)
+        failed = list(targets)
+    return failed, resend
+
+
 def send_alerts(alerts: list[dict]) -> list[dict]:
     """Write one ClassAlert record per alert to every environment. Returns the
     alerts that some environment did NOT accept (HTTP/auth/network failure or
     a per-record server error), each tagged with `envs` = the environments
     still owed, so the caller can park them for a retry. An alert carrying
-    `envs` from an earlier retry only goes to those environments."""
+    `envs` from an earlier retry only goes to those environments.
+
+    A record's `url` field is new: an environment whose schema doesn't have
+    it yet (production, until it is deployed in CloudKit Console) rejects the
+    record. Records rejected that way are written again at once without the
+    url, so no alert waits on the schema."""
     if not alerts:
         log.info("nothing new")
         return []
@@ -553,69 +648,25 @@ def send_alerts(alerts: list[dict]) -> list[dict]:
             for i, _ in env_targets:
                 unsent.setdefault(i, []).append(env)
             continue
-        subpath = f"/database/1/{CONTAINER}/{env}/public/records/modify"
+        without_url = 0
         # A long outage can leave more alerts than CloudKit accepts in one
         # request. Drain bounded batches, preserving failures per environment
         # without blocking the later batches (including newly found classes).
         for start in range(0, len(env_targets), _MAX_CLOUDKIT_OPERATIONS):
-            targets = env_targets[start:start + _MAX_CLOUDKIT_OPERATIONS]
-            names = {f"alert-{batch}-{a['school']}-{a['category']}-{uuid.uuid4().hex[:8]}": i
-                     for i, a in targets}
-            operations = [{
-                "operationType": "create",
-                "record": {
-                    "recordType": "ClassAlert",
-                    "recordName": name,
-                    "fields": {
-                        "school": {"value": a["school"], "type": "STRING"},
-                        "category": {"value": a["category"], "type": "STRING"},
-                        "categories": {"value": a["categories"], "type": "STRING_LIST"},
-                        "count": {"value": a["count"], "type": "INT64"},
-                        "pushTitle": {"value": a["pushTitle"], "type": "STRING"},
-                        "pushBody": {"value": a["pushBody"], "type": "STRING"},
-                        "classIDs": {"value": a["classIDs"], "type": "STRING"},
-                    },
-                },
-            } for name, (i, a) in zip(names, targets)]
-            body = json.dumps({"operations": operations}).encode()
-            try:
-                # _sign is inside the try: a malformed key must not raise out of
-                # main() before the remaining environments (and state) are handled.
-                req = urllib.request.Request(
-                    "https://api.apple-cloudkit.com" + subpath, data=body,
-                    headers=_sign(subpath, body, env), method="POST")
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    result = json.load(resp)
-                records = result.get("records") if isinstance(result, dict) else None
-                if not isinstance(records, list):
-                    raise ValueError("CloudKit response has no records acknowledgement list")
-                # A 200 response is not an acknowledgement of every write. Match
-                # each requested name exactly once; omitted, malformed, duplicate,
-                # or failed entries remain pending instead of silently losing them.
-                accepted = 0
-                for name, i in names.items():
-                    matches = [r for r in records if isinstance(r, dict) and r.get("recordName") == name]
-                    if len(matches) != 1 or matches[0].get("serverErrorCode"):
-                        reason = (matches[0].get("serverErrorCode") if len(matches) == 1
-                                  else "missing or duplicate record acknowledgement")
-                        log.warning("%s: record %s not accepted: %s", env, name, reason)
-                        unsent.setdefault(i, []).append(env)
-                        continue
-                    accepted += 1
-                    a = alerts[i]
-                    log.info("%s: accepted %s school=%s categories=%s", env, name,
-                             a["school"], "+".join(a["categories"]))
-                log.info("%s: wrote %d alert record(s), %d unacknowledged or failed", env,
-                         accepted, len(targets) - accepted)
-            except urllib.error.HTTPError as e:
-                body = e.read().decode("utf-8", errors="replace")
-                log.error("%s: CloudKit HTTP %d: %s", env, e.code, body[:500])
-                for i, _ in targets:
-                    unsent.setdefault(i, []).append(env)
-            except Exception as e:  # noqa: BLE001
-                log.error("%s: CloudKit write failed: %r", env, e)
-                for i, _ in targets:
-                    unsent.setdefault(i, []).append(env)
+            failed, resend = _write_batch(env, batch, env_targets[start:start + _MAX_CLOUDKIT_OPERATIONS])
+            if resend:
+                log.info("%s: writing %d rejected record(s) again without the url field", env, len(resend))
+                resent = {i for i, _ in resend}
+                still_failed, _ = _write_batch(env, batch, resend, with_url=False)
+                without_url += sum(1 for _, a in resend if a.get("url")) \
+                    - sum(1 for _, a in still_failed if a.get("url"))
+                failed = [t for t in failed if t[0] not in resent] + still_failed
+            for i, _ in failed:
+                unsent.setdefault(i, []).append(env)
+        if without_url:
+            log.warning("%s: %d alert record(s) were only accepted without their \"url\" field; deploy the "
+                        "ClassAlert \"url\" (String) field to this environment's schema in CloudKit Console",
+                        env, without_url)
     return [dict(alerts[i], envs=envs) for i, envs in sorted(unsent.items())]
 
 
@@ -629,7 +680,9 @@ def pending_alerts(state: dict) -> list[dict]:
 
 
 def test_cloudkit(environments: list[str]) -> int:
-    """Send a single test record to verify CloudKit auth, then delete it."""
+    """Send a single test record to verify CloudKit auth, then delete it.
+    The record carries a `url`; an environment that rejects it but accepts
+    the same record without is reported as "schema not deployed" and passes."""
     if not environments:
         log.error("no CloudKit environment to test (CLOUDKIT_ENVS=%r; pass --test-prod for production)",
                   ",".join(ENVIRONMENTS))
@@ -656,43 +709,63 @@ def test_cloudkit(environments: list[str]) -> int:
     for env in environments:
         record_name = f"test-{env}-{uuid.uuid4().hex[:8]}"
         w_subpath = f"/database/1/{CONTAINER}/{env}/public/records/modify"
-        w_payload = json.dumps({"operations": [{
-            "operationType": "create",
-            "record": {
-                "recordType": "ClassAlert",
-                "recordName": record_name,
-                "fields": {
-                    "school": {"value": "__test__", "type": "STRING"},
-                    "category": {"value": "test", "type": "STRING"},
-                    "categories": {"value": ["test"], "type": "STRING_LIST"},
-                    "count": {"value": 0, "type": "INT64"},
-                    "pushTitle": {"value": "CloudKit auth test", "type": "STRING"},
-                    "pushBody": {"value": "This record can be deleted.", "type": "STRING"},
-                    "classIDs": {"value": "", "type": "STRING"},
-                },
-            },
-        }]}).encode()
-        w_req = urllib.request.Request(
-            "https://api.apple-cloudkit.com" + w_subpath, data=w_payload,
-            headers=_sign(w_subpath, w_payload, env), method="POST")
-        try:
-            with urllib.request.urlopen(w_req, timeout=30) as resp:
-                result = json.load(resp)
-            records = result.get("records", [])
-            errors = [r for r in records if r.get("serverErrorCode")]
-            if errors:
-                log.error("%s: write error: %s", env, errors[0])
+        fields = {
+            "school": {"value": "__test__", "type": "STRING"},
+            "category": {"value": "test", "type": "STRING"},
+            "categories": {"value": ["test"], "type": "STRING_LIST"},
+            "count": {"value": 0, "type": "INT64"},
+            "pushTitle": {"value": "CloudKit auth test", "type": "STRING"},
+            "pushBody": {"value": "This record can be deleted.", "type": "STRING"},
+            "classIDs": {"value": "", "type": "STRING"},
+            "url": {"value": "https://example.com/class", "type": "STRING"},
+        }
+        # First with the url field (development learns it on first write). If
+        # that is rejected, once more without it: a schema that lacks the
+        # field is reported as such, not as broken auth.
+        for with_url in (True, False):
+            if not with_url:
+                del fields["url"]
+            w_payload = json.dumps({"operations": [{
+                "operationType": "create",
+                "record": {"recordType": "ClassAlert", "recordName": record_name, "fields": fields},
+            }]}).encode()
+            w_req = urllib.request.Request(
+                "https://api.apple-cloudkit.com" + w_subpath, data=w_payload,
+                headers=_sign(w_subpath, w_payload, env), method="POST")
+            rejected = False   # definitely not written, so trying without url is safe
+            try:
+                with urllib.request.urlopen(w_req, timeout=30) as resp:
+                    result = json.load(resp)
+                records = result.get("records", [])
+                errors = [r for r in records if r.get("serverErrorCode")]
+                if errors:
+                    rejected = True
+                    if not with_url:
+                        log.error("%s: write error: %s", env, errors[0])
+                        ok = False
+                    else:
+                        log.warning("%s: write with the url field rejected: %s", env, errors[0])
+                else:
+                    if with_url:
+                        log.info("%s: write OK (url field accepted) — cleaning up %s", env, record_name)
+                    else:
+                        log.warning("%s: auth and write OK, but only WITHOUT the \"url\" field: deploy the "
+                                    "ClassAlert \"url\" (String) field to this environment's schema in "
+                                    "CloudKit Console — cleaning up %s", env, record_name)
+                    _delete_record(env, record_name)
+            except urllib.error.HTTPError as e:
+                body_text = e.read().decode("utf-8", errors="replace")
+                rejected = 400 <= e.code < 500
+                if with_url and rejected:
+                    log.warning("%s: write with the url field rejected: HTTP %d: %s", env, e.code, body_text[:500])
+                else:
+                    log.error("%s: write HTTP %d: %s", env, e.code, body_text[:500])
+                    ok = False
+            except Exception as e:  # noqa: BLE001
+                log.error("%s: write failed: %r", env, e)
                 ok = False
-            else:
-                log.info("%s: write OK — cleaning up %s", env, record_name)
-                _delete_record(env, record_name)
-        except urllib.error.HTTPError as e:
-            body_text = e.read().decode("utf-8", errors="replace")
-            log.error("%s: write HTTP %d: %s", env, e.code, body_text[:500])
-            ok = False
-        except Exception as e:  # noqa: BLE001
-            log.error("%s: write failed: %r", env, e)
-            ok = False
+            if not rejected:
+                break
     return 0 if ok else 1
 
 
