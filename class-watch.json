@@ -8,9 +8,9 @@
    "annoyance/ap1-wednesdays-with-tbd-t127",
    "annoyance/ap2-mondays-with-tbd-t127",
    "annoyance/ap2-sundays-with-tbd-t127",
-   "annoyance/ap2-thursdays-with-tbd-t127",
-   "annoyance/ap2-tuesdays-with-tbd-t127",
-   "annoyance/ap2-wednesdays-with-tbd-t127",
+   "annoyance/ap2-thursdays-with-cassidy-russell-t127",
+   "annoyance/ap2-tuesdays-with-megan-johns-t127",
+   "annoyance/ap2-wednesdays-with-casey-alltop-t127",
    "annoyance/ap3-mondays-withtbd-t127",
    "annoyance/ap3-sundays-withtbd-t127",
    "annoyance/ap3-thursdays-withtbd-t127",
@@ -18,20 +18,19 @@
    "annoyance/ap3-wednesdays-withtbd-t127",
    "annoyance/ap4-mondays-with-tbd-t127",
    "annoyance/ap4-sundays-with-tbd-t127",
-   "annoyance/ap4-thursdays-with-tbd-t127",
-   "annoyance/ap4-wednesdays-with-tbd-t127",
-   "annoyance/ap5-wednesdays-with-tbd-t127",
+   "annoyance/ap4-thursdays-with-ross-taylor-t127",
+   "annoyance/ap4-wednesdays-with-bruce-phillips-t127",
+   "annoyance/ap5-wednesdays-with-lauren-rivas-t127",
    "annoyance/crass1-sundays-with-tbd-t127",
    "annoyance/crass2-tuesdays-with-tbd-t127",
    "annoyance/creating-characters-crafting-a-5-minute-solo-set-tuesdays-with-max-kantor-t127",
-   "annoyance/fall-intensive-part-1-november-9-13",
    "annoyance/fall-intensive-part-1-october-4-8",
    "annoyance/fall-intensive-part-1-september-13-17",
    "annoyance/fall-intensive-part-2-october-11-15",
    "annoyance/fall-intensive-part-2-september-20-24",
-   "annoyance/mi1-thursdays-with-tbd-t127",
-   "annoyance/mi2-sundays-with-tbd-t127",
-   "annoyance/standup-saturdays-with-tbd-t127",
+   "annoyance/mi1-thursdays-with-brody-lemke-and-karen-sandvoss-t127",
+   "annoyance/mi2-sundays-with-jono-mammel-t127",
+   "annoyance/standup-saturdays-with-st-james-jackson-t127",
    "annoyance/summer-intensive-part-1-august-9-13",
    "annoyance/summer-intensive-part-1-july-5-9",
    "annoyance/summer-intensive-part-1-june-7-11",
@@ -44,53 +43,58 @@
    "annoyance/workshop-drop-in-improv-classes",
    "annoyance/workshop-you-already-did-the-funny-thing-with-jeff-quintana"
   ],
-  "new_at": "2026-11-06T04:02:53.469653+00:00",
-  "updated": "2026-11-10T08:08:43.907000+00:00"
+  "new_at": "2026-11-11T04:10:17.411225+00:00",
+  "updated": "2026-11-11T04:10:17.411225+00:00"
  },
  "brooklyn_cc": {
   "ids": [
-   "brooklyn_cc/broken-box-mime-nov-dec",
-   "brooklyn_cc/clown-1-hannah-oct-dec-2026",
-   "brooklyn_cc/clown-1-jeff-seal-oct-dec-2026",
-   "brooklyn_cc/clown-1-tallie-oct-dec-2026",
-   "brooklyn_cc/clown-2-chris-manley-oct-dec-2026",
-   "brooklyn_cc/clown-3-tallie-oct-dec-2026",
-   "brooklyn_cc/crafting-characters-nick-mestad-0oct-dec-2026",
-   "brooklyn_cc/drop-in-november-10th",
-   "brooklyn_cc/improv-1-kenny-oct-dec-2026",
-   "brooklyn_cc/improv-1-molly-oct-dec-26-mon",
-   "brooklyn_cc/improv-1-molly-oct-dec-26-sunday",
-   "brooklyn_cc/improv-1-taylor-oct-dec-2026",
-   "brooklyn_cc/improv-1-tony-ferraro",
-   "brooklyn_cc/improv-2-hannah-rehak-oct-dec-2026",
-   "brooklyn_cc/improv-2-hannah-rehak-oct-dec-2026-sunday",
-   "brooklyn_cc/improv-2-maya-sharma-oct-dec-2026",
-   "brooklyn_cc/improv-2-micah-oct-dec-2026",
-   "brooklyn_cc/improv-3-tej-khanna-oct-dec-2026",
-   "brooklyn_cc/improv-3-tej-khanna-oct-dec-2026-sunday",
-   "brooklyn_cc/improv-4-andy-junk-oct-dec-2026",
-   "brooklyn_cc/improv-drop-in-andy-bcc-november-12th",
-   "brooklyn_cc/improv-drop-in-andy-bcc-november-19th",
-   "brooklyn_cc/improv-level-2-miranda-rozas-oct-dec-2026",
-   "brooklyn_cc/improvised-sketch-disco-horses",
-   "brooklyn_cc/intro-to-clown-riley-soloner-november-3rd",
-   "brooklyn_cc/intro-to-clown-tallie-medel-november-17th",
-   "brooklyn_cc/musical-improv-1-oct-dec-2026",
-   "brooklyn_cc/musical-improv-3-oct-dec-2026",
-   "brooklyn_cc/musical-improv-ali-reed",
-   "brooklyn_cc/physical-comedy-john-towsen",
-   "brooklyn_cc/pilot-writing-rich-talarico-oct-dec-2026",
-   "brooklyn_cc/sketch-1-devin-oct-dec-2026",
-   "brooklyn_cc/sketch-1-jared-bronen-oct-dec-2026",
-   "brooklyn_cc/sketch-2-alise-morales-oct-dec-2026",
-   "brooklyn_cc/stand-up-1-joann-oct-dec-2026",
-   "brooklyn_cc/stand-up-1-sara-oct-dec-2026",
-   "brooklyn_cc/stand-up-1-sara-oct-dec-2026-sunday",
-   "brooklyn_cc/stand-up-2-joann-oct-dec-2026",
-   "brooklyn_cc/stand-up-intensive-baron-vaughn-november-weekend"
+   "brooklyn_cc/19087",
+   "brooklyn_cc/19139",
+   "brooklyn_cc/19140",
+   "brooklyn_cc/19142",
+   "brooklyn_cc/19143",
+   "brooklyn_cc/19146",
+   "brooklyn_cc/19197",
+   "brooklyn_cc/19232",
+   "brooklyn_cc/19233",
+   "brooklyn_cc/19234",
+   "brooklyn_cc/19235",
+   "brooklyn_cc/19236",
+   "brooklyn_cc/19237",
+   "brooklyn_cc/19238",
+   "brooklyn_cc/19239",
+   "brooklyn_cc/19241",
+   "brooklyn_cc/19244",
+   "brooklyn_cc/19245",
+   "brooklyn_cc/19247",
+   "brooklyn_cc/19250",
+   "brooklyn_cc/19252",
+   "brooklyn_cc/19273",
+   "brooklyn_cc/19274",
+   "brooklyn_cc/19275",
+   "brooklyn_cc/19276",
+   "brooklyn_cc/19277",
+   "brooklyn_cc/19283",
+   "brooklyn_cc/19284",
+   "brooklyn_cc/19286",
+   "brooklyn_cc/19287",
+   "brooklyn_cc/19291",
+   "brooklyn_cc/19294",
+   "brooklyn_cc/19296",
+   "brooklyn_cc/19298",
+   "brooklyn_cc/19300",
+   "brooklyn_cc/19301",
+   "brooklyn_cc/19302",
+   "brooklyn_cc/19303",
+   "brooklyn_cc/19304",
+   "brooklyn_cc/19306",
+   "brooklyn_cc/19307",
+   "brooklyn_cc/19372",
+   "brooklyn_cc/19410",
+   "brooklyn_cc/19417"
   ],
-  "new_at": "2026-10-27T03:46:22.663092+00:00",
-  "updated": "2026-11-09T12:07:19.098009+00:00"
+  "new_at": "2026-11-11T04:10:17.411225+00:00",
+  "updated": "2026-11-11T04:10:17.411225+00:00"
  },
  "io_chicago": {
   "ids": [
@@ -98,25 +102,34 @@
    "io_chicago/advanced-harold-weekend-intensive-may-22nd-23rd",
    "io_chicago/drop-in-improv-with-gretchen-eng",
    "io_chicago/fall-one-week-intensive-2027",
-   "io_chicago/io-improv-level-1-mondays-from-7-10pm-w-damian-anaya",
-   "io_chicago/io-improv-level-2-mondays-from-7-10pm-w-nick-rowley",
-   "io_chicago/io-improv-level-2-saturdays-from-12-3pm-w-nicole-carter",
-   "io_chicago/io-improv-level-2-thursdays-from-7-10pm-w-jess-rogers",
-   "io_chicago/io-improv-level-2-tuesdays-from-7-10pm-w-janelle-soulliere",
-   "io_chicago/io-improv-level-2-wednesdays-from-7-10pm-w-avery-ford-253cbf79-25c9-45b1-9710-9beb7c922cd7",
-   "io_chicago/io-improv-level-3-mondays-from-7-10pm-w-matty-vergun",
-   "io_chicago/io-improv-level-3-saturdays-from-12-3pm-w-kennedy-baldwin",
-   "io_chicago/io-improv-level-3-thursdays-from-7-10pm-w-andy-carey",
-   "io_chicago/io-improv-level-3-wednesdays-from-7-10pm-w-aram-rayzian",
-   "io_chicago/io-improv-level-4-mondays-from-7-10pm-w-adonis-holmes",
-   "io_chicago/io-improv-level-4-saturdays-from-12-3pm-w-clayton-margeson-a8a7580c-5143-4e39-89db-171571b8105a",
-   "io_chicago/io-improv-level-4-thursdays-from-7-10pm-w-mary-tilden",
-   "io_chicago/io-improv-level-4-wednesdays-from-7-10pm-w-craig-uhlir",
-   "io_chicago/io-improv-level-5-mondays-from-7-10pm-w-lisa-burton",
-   "io_chicago/io-improv-level-5-thursdays-from-7-10pm-w-james-dugan",
-   "io_chicago/io-improv-level-5-tuesdays-from-7-10pm-w-nicole-carter",
-   "io_chicago/music-improv-3-m-sunday-from-12-3pm-w-lisa-burton",
-   "io_chicago/music-improv-3-m-wednesday-from-7-10pm-w-allen-lucas-623de57c-ba61-4f7f-b020-8cd878ee03c2",
+   "io_chicago/improv-clinic-the-deconstruction",
+   "io_chicago/improv-to-sketch-1-tuesdays-from-7-10pm",
+   "io_chicago/io-improv-level-1-mondays-from-7-10pm-4ed37f85-ebc7-4494-8f5c-4f55a0e65972",
+   "io_chicago/io-improv-level-1-saturdays-from-12-3pm-8c29f489-9569-4759-a490-50eb5a4bf7c4",
+   "io_chicago/io-improv-level-1-sundays-from-12-3pm-49a1b523-49b5-44d8-ae04-8f605a6e0c6b",
+   "io_chicago/io-improv-level-1-thursdays-from-7-10pm-f3a77017-8d53-412e-a651-acdd64c82601",
+   "io_chicago/io-improv-level-1-tuesdays-from-7-10pm-ab74373b-0e1f-4dd7-99e3-5e03e890b9a0",
+   "io_chicago/io-improv-level-1-wednesdays-from-7-10pm-1e53588a-f92d-4c53-847a-233a4058d8a8",
+   "io_chicago/io-improv-level-2-mondays-from-7-10pm-9aadc721-7b94-46dc-918f-4d883a992b1c",
+   "io_chicago/io-improv-level-2-saturdays-from-12-3pm-6b0b71f7-4409-4cd0-bfce-8b4c2148508e",
+   "io_chicago/io-improv-level-2-thursdays-from-7-10pm-d978f5cf-cca9-4976-98e3-1e5e6464ec74",
+   "io_chicago/io-improv-level-2-tuesdays-from-7-10pm-136c9f3c-3813-4f03-911b-27c921d3776f",
+   "io_chicago/io-improv-level-2-wednesdays-from-7-10pm-a4eccdd2-78f4-44e7-9ee5-6ec8f10ff71f",
+   "io_chicago/io-improv-level-3-mondays-from-7-10pm-51de2aeb-cf48-4654-a24e-db25e31bd4f3",
+   "io_chicago/io-improv-level-3-saturdays-from-12-3pm-15151bba-f67c-4796-85de-914e6df21453",
+   "io_chicago/io-improv-level-3-thursdays-from-7-10pm-ad72210a-7912-4437-b6b2-5e68a2330780",
+   "io_chicago/io-improv-level-3-tuesdays-from-7-10pm-69c9874a-b258-4d37-94a4-e416795cfcd3",
+   "io_chicago/io-improv-level-3-wednesdays-from-7-10pm-81148d2f-4bc8-4f48-b4c1-041befd85a82",
+   "io_chicago/io-improv-level-4-mondays-from-7-10pm-efb559d9-98d6-4f70-8a3e-11bee268f809",
+   "io_chicago/io-improv-level-4-saturdays-from-12-3pm-5047607e-cd0e-4578-9c52-763afeed0be5",
+   "io_chicago/io-improv-level-4-thursdays-from-7-10pm-669ad92d-893e-4b14-976f-3ef33d00d578",
+   "io_chicago/io-improv-level-4-wednesdays-from-7-10pm-35eb00fb-0fa1-4cfb-a4fd-1ef326614d08",
+   "io_chicago/io-improv-level-5-mondays-from-7-10pm-69b6d787-2911-4bf6-8f1f-4a80bbfb49d3",
+   "io_chicago/io-improv-level-5-saturdays-from-12-3pm-b88cd90e-dadc-4f09-b711-2e124246a4f3",
+   "io_chicago/io-improv-level-5-thursdays-from-7-10pm-9d5ecddc-d1fe-43cf-99ca-ba28757da6f8",
+   "io_chicago/io-improv-level-5-wednesdays-from-7-10pm-76aeba21-d897-4e87-a984-1dd948dd4d8f",
+   "io_chicago/music-improv-1-m-sundays-from-12-3pm",
+   "io_chicago/music-improv-1-m-wednesdays-from-7-10pm-d461c0fd-3946-4ffa-9fbc-9353c4e7279c",
    "io_chicago/music-improv-drop-in",
    "io_chicago/music-improv-one-week-spring-intensive-march-2027",
    "io_chicago/music-improv-one-week-summer-intensive-august-2027",
@@ -125,20 +138,21 @@
    "io_chicago/solo-character-weekend-intensive-january-9th-10th",
    "io_chicago/solo-character-weekend-intensive-march-6th-7th",
    "io_chicago/spring-one-week-intensive-2027",
+   "io_chicago/stand-up-comedy-saturdays-3-6pm-781718ad-4ab1-476c-bc24-64d2c4b92692",
    "io_chicago/summer-intensive-2027",
    "io_chicago/summer-one-week-intensive-august-2027",
    "io_chicago/summer-one-week-intensive-june-2027",
    "io_chicago/winter-one-week-intensive-2026-ad48d354-728b-4a75-b29f-e84ea0e05901"
   ],
-  "new_at": "2026-11-07T00:04:09.262310+00:00",
-  "updated": "2026-11-10T08:08:43.907000+00:00"
+  "new_at": "2026-11-11T04:10:17.411225+00:00",
+  "updated": "2026-11-11T04:10:17.411225+00:00"
  },
  "logan_square": {
   "ids": [
    "logan_square/lsi-level-1-winter-intensive-2027"
   ],
   "new_at": "2026-10-29T15:50:30.412872+00:00",
-  "updated": "2026-11-10T08:08:43.907000+00:00"
+  "updated": "2026-11-11T04:10:17.411225+00:00"
  },
  "magnet": {
   "ids": [
@@ -198,10 +212,13 @@
    "magnet/12082",
    "magnet/12083",
    "magnet/12084",
-   "magnet/12085"
+   "magnet/12085",
+   "magnet/12086",
+   "magnet/12087",
+   "magnet/12088"
   ],
-  "new_at": "2026-11-10T08:08:43.907000+00:00",
-  "updated": "2026-11-10T08:08:43.907000+00:00"
+  "new_at": "2026-11-11T04:10:17.411225+00:00",
+  "updated": "2026-11-11T04:10:17.411225+00:00"
  },
  "second_city": {
   "ids": [
@@ -230,10 +247,8 @@
    "second_city/46575",
    "second_city/46576",
    "second_city/46577",
-   "second_city/46578",
    "second_city/46579",
    "second_city/46580",
-   "second_city/46581",
    "second_city/46582",
    "second_city/46584",
    "second_city/46586",
@@ -309,7 +324,7 @@
    "second_city/46724"
   ],
   "new_at": "2026-11-07T00:04:09.262310+00:00",
-  "updated": "2026-11-10T08:08:43.907000+00:00"
+  "updated": "2026-11-11T04:10:17.411225+00:00"
  },
  "ucb_la": {
   "ids": [
@@ -381,7 +396,7 @@
    "44444"
   ],
   "new_at": "2026-11-06T22:01:53.799999+00:00",
-  "updated": "2026-11-11T04:07:58.327114+00:00"
+  "updated": "2026-11-11T04:09:58.041678+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -449,7 +464,7 @@
    "44489"
   ],
   "new_at": "2026-11-09T22:51:52.710590+00:00",
-  "updated": "2026-11-11T04:07:58.327114+00:00"
+  "updated": "2026-11-11T04:09:58.041678+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -470,7 +485,7 @@
    "44479"
   ],
   "new_at": "2026-11-09T22:51:52.710590+00:00",
-  "updated": "2026-11-11T04:07:58.327114+00:00"
+  "updated": "2026-11-11T04:09:58.041678+00:00"
  },
  "wgis_la": {
   "ids": [
@@ -525,13 +540,13 @@
    "wgis_la/1922"
   ],
   "new_at": "2026-11-10T08:08:43.907000+00:00",
-  "updated": "2026-11-10T08:08:43.907000+00:00"
+  "updated": "2026-11-11T04:10:17.411225+00:00"
  },
  "wgis_ny": {
   "ids": [
    "wgis_ny/1880"
   ],
   "new_at": "2026-10-17T23:32:58.289387+00:00",
-  "updated": "2026-11-10T08:08:43.907000+00:00"
+  "updated": "2026-11-11T04:10:17.411225+00:00"
  }
 }
