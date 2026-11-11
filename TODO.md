@@ -5,21 +5,30 @@ READY_FOR_DISTRIBUTION; 1.7 (27) carries the class-alert fixes below plus the
 unreleased notification-delivery diagnostics; 1.8 (28) puts class alerts
 behind a $9.99 in-app purchase and is not yet uploaded).
 
-## Class details + alert deep links (2026-11-10, branch `class-details-alert-links`, uncommitted)
+## Class details + alert deep links (2026-11-10)
 
-- [ ] Commit, merge and push. The next scrape then publishes descriptions,
-      full schedules and `location` for every class (per-class pages for
-      Magnet and WGIS are fetched once and cached via `detail_done`).
-- [ ] Brooklyn CC classes moved from the dead Squarespace collection to
-      Crowdwork, so every BCC class id changed: the first watcher scan after
-      the merge sends BCC subscribers one "N new classes" summary push.
-- [ ] CloudKit: `ClassAlert` gains a string field `url`. Teach development with
-      `gh workflow run class-watch.yml -f mode=test`, then "Deploy Schema
-      Changes" in CloudKit Console. Until then the watcher resends production
-      records without the url (no alert is lost) and logs a schema warning.
-- [ ] Ship an app build past 28: a tapped alert opens the class, or the
-      listing URL in the in-app browser when the class is not in the feed yet;
-      the class page shows the location.
+- [x] Merged to main and live: descriptions, full schedules and `location`
+      for every class source (per-class pages for Magnet and WGIS fetched once,
+      cached via `detail_done`; WGIS's page schedule overrides the listing's).
+      A one-off forced class run published them on 2026-11-10 23:58 UTC.
+- [x] Brooklyn CC classes moved from the dead Squarespace collection (empty
+      since about 2026-11-08) to Crowdwork. Every BCC class id changed, so the
+      watcher's next non-UCB scan sends BCC subscribers one summary push.
+- [ ] **Upload 1.8 (29)** — archived (`MARKETING_VERSION 1.8`,
+      `CURRENT_PROJECT_VERSION 29`, Wallet PEMs inside) but the export failed:
+      "PLA Update available: the Account Holder must agree to the latest
+      Program License Agreement". Accept it at developer.apple.com/account,
+      then rerun `xcodebuild -exportArchive` with ios/ExportOptions.plist and
+      the Admin API key flags. 1.8 has no version page yet; the Class Alerts
+      IAP must be submitted with it.
+- [ ] CloudKit `ClassAlert.url`: development learns the field from the first
+      per-class UCB alert the chain writes after 2026-11-10 (summaries carry no
+      url). Then "Deploy Schema Changes" in CloudKit Console. Until then
+      production records are resent without the url (no alert lost).
+- [ ] `class-watch.yml -f mode=test` fails in development with HTTP 400
+      "Invalid container to get datastore", on the pre-change commit too, while
+      the chain's development writes succeeded at 08:08 UTC the same day.
+      Possibly the same pending agreement; recheck after accepting it.
 
 ## Release
 
