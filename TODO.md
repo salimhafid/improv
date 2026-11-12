@@ -14,17 +14,21 @@ behind a $9.99 in-app purchase and is not yet uploaded).
 - [x] Brooklyn CC classes moved from the dead Squarespace collection (empty
       since about 2026-11-08) to Crowdwork. Every BCC class id changed, so the
       watcher's next non-UCB scan sends BCC subscribers one summary push.
-- [x] **1.8 (29) submitted for review** 2026-11-12 00:41 UTC together with
-      the Class Alerts IAP (submission `5dbc2c20-2c59-4975-a41d-e722f3cad387`,
-      both WAITING_FOR_REVIEW). The IAP is added from its own page ("Add for
-      Review" starts the draft); the version is then added to that draft via
-      the API and submitted. The license agreement block cleared on
-      2026-11-11. Next app change must bump the build past 29.
-- [ ] **UCB free student tickets reported "not working properly"**
-      (2026-11-11, owner). Not reproduced: signed out, the login page still
-      matches the app's selectors (`.woocommerce-form-login`, `rememberme`);
-      the signed-in student pages and claim button could not be inspected
-      without a UCB session. Needs the symptom or a signed-in page.
+- [x] **1.8 (30) submitted for review** 2026-11-12 01:10 UTC together with
+      the Class Alerts IAP (submission `41a7a9c3-f29d-4650-abdb-2ba2ee853abb`,
+      both WAITING_FOR_REVIEW). It replaced the 1.8 (29) submission, withdrawn
+      before review started so the student-ticket fix ships in 1.8. Recipe:
+      the IAP's own page "Add for Review" starts the draft; the version is
+      added to that draft via the API and submitted. Next app change must
+      bump the build past 30.
+- [x] **UCB free student tickets** (fixed in build 30). UCB redesigned its
+      pages in November 2026: the reserve control is the ticket picker's
+      "Student Ticket" radio (`input[data-student-claim]`), the ID card is
+      `.ucb-id-card--student`, and the student-tickets page has Upcoming /
+      Past / Cancelled tabs sharing one card markup. `UCBSession` reads the
+      new markup, verified against the live signed-in pages. Not verified
+      live: an actual claim, the "already reserved" banner after one, and an
+      Upcoming card's release button (no ticket was reserved to test).
 - [x] CloudKit `ClassAlert.url` (String, no index): added to development in
       CloudKit Console and deployed to production 2026-11-11. Server-key writes
       never create schema, so development did not learn it by itself; alerts
