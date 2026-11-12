@@ -130,6 +130,10 @@ page before Submit for Review. Needs the Paid Applications Agreement active
 - All "None" except: **Profanity or Crude Humor → Infrequent/Mild** (comedy
   show titles/descriptions occasionally contain strong language). Result: 12+.
 
+## What's New — 1.8 (set on the version 2026-11-11, not yet submitted)
+
+Exact text: [whatsnew-1.8.txt](whatsnew-1.8.txt).
+
 ## What's New — 1.6 (as submitted 2026-09-08)
 
 Exact submitted text: [whatsnew-1.6.txt](whatsnew-1.6.txt).

@@ -14,21 +14,20 @@ behind a $9.99 in-app purchase and is not yet uploaded).
 - [x] Brooklyn CC classes moved from the dead Squarespace collection (empty
       since about 2026-11-08) to Crowdwork. Every BCC class id changed, so the
       watcher's next non-UCB scan sends BCC subscribers one summary push.
-- [ ] **Upload 1.8 (29)** — archived (`MARKETING_VERSION 1.8`,
-      `CURRENT_PROJECT_VERSION 29`, Wallet PEMs inside) but the export failed:
-      "PLA Update available: the Account Holder must agree to the latest
-      Program License Agreement". Accept it at developer.apple.com/account,
-      then rerun `xcodebuild -exportArchive` with ios/ExportOptions.plist and
-      the Admin API key flags. 1.8 has no version page yet; the Class Alerts
-      IAP must be submitted with it.
-- [ ] CloudKit `ClassAlert.url`: development learns the field from the first
-      per-class UCB alert the chain writes after 2026-11-10 (summaries carry no
-      url). Then "Deploy Schema Changes" in CloudKit Console. Until then
-      production records are resent without the url (no alert lost).
-- [ ] `class-watch.yml -f mode=test` fails in development with HTTP 400
-      "Invalid container to get datastore", on the pre-change commit too, while
-      the chain's development writes succeeded at 08:08 UTC the same day.
-      Possibly the same pending agreement; recheck after accepting it.
+- [ ] **Upload 1.8 (29)** — still blocked 2026-11-11: "PLA Update available:
+      the Account Holder must agree to the latest Program License Agreement"
+      (developer.apple.com/account). Then archive + `-exportArchive` with the
+      Admin API key flags, attach build 29 to version 1.8
+      (`821b38b3-802c-494c-91b1-d75d52f0b9b3`, created 2026-11-11 with What's
+      New, the purchase-aware description and review notes), add the Class
+      Alerts IAP on the version page (web-only) and submit.
+- [x] CloudKit `ClassAlert.url` (String, no index): added to development in
+      CloudKit Console and deployed to production 2026-11-11. Server-key writes
+      never create schema, so development did not learn it by itself; alerts
+      sent in between went out without the url (none lost).
+- [x] `class-watch.yml -f mode=test` passes again (2026-11-11); the
+      2026-11-10 "Invalid container to get datastore" failures did not recur.
+      It could not delete its `__test__` development record that run.
 
 ## Release
 

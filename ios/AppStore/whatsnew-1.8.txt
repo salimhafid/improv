@@ -1,0 +1,4 @@
+• Tap a new-class alert to go straight to that class. If it hasn't reached the app yet, the school's listing opens instead.
+• Class pages now show the full schedule, where the class meets, and a description for every school.
+• Brooklyn Comedy Collective classes are back and up to date.
+• Class Alerts are now a one-time purchase. Anyone who installed before this version keeps them free.
