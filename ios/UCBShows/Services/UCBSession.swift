@@ -312,7 +312,8 @@ final class UCBSession {
     (() => {
       const q = (s, r=document) => r.querySelector(s);
       if (q('.woocommerce-form-login')) return {state:'signedOut'};
-      const card = q('.ucb-student-id');
+      // The ID card was `.ucb-student-id` until UCB's November 2026 redesign.
+      const card = q('.ucb-id-card--student') || q('.ucb-student-id');
       const accountMarker = card || q('.woocommerce-MyAccount-navigation') || q('.woocommerce-MyAccount-content');
       if (!accountMarker) return {state:'unknown'};
       const idSvg = card ? (q('svg.qr-svg', card)?.outerHTML || q('svg', card)?.outerHTML || '') : '';
@@ -352,7 +353,11 @@ final class UCBSession {
           svg
         });
       };
-      document.querySelectorAll('.ucb-student-claim-item[data-order]').forEach(item => {
+      // Since the November 2026 redesign the page lists Upcoming, Past and
+      // Cancelled tabs with the same card markup; only Upcoming are tickets.
+      // Without the tabs (the older page) every card is a current one.
+      const cardScope = q('.ucb-student-panel') ? (q('.ucb-student-panel[data-panel="upcoming"]') || document.createElement('div')) : document;
+      cardScope.querySelectorAll('.ucb-student-claim-item[data-order]').forEach(item => {
         pushTicket(
           item.getAttribute('data-order'),
           item.querySelector('[data-nonce]')?.getAttribute('data-nonce') || null,
@@ -362,7 +367,7 @@ final class UCBSession {
       });
       // Fallback if UCB renames the card class: anchor on the release control.
       if (!tickets.length) {
-        document.querySelectorAll('.ucb-student-release[data-order], [data-order][data-nonce]').forEach(rel => {
+        cardScope.querySelectorAll('.ucb-student-release[data-order], [data-order][data-nonce]').forEach(rel => {
           const scope = rel.closest('[data-order]')?.parentElement?.closest('div, li, article') || rel.parentElement || document;
           if (/cancell?ed|released/i.test(scope.innerText || '')) return;
           pushTicket(
@@ -379,7 +384,10 @@ final class UCBSession {
 
     private static let readClaimJS = """
     (() => {
-      const b = document.querySelector('.ucb-student-claim[data-event]');
+      // The claim control: since UCB's November 2026 ticket picker, the
+      // "Student Ticket" radio row; before it, a `.ucb-student-claim` button.
+      // Both carry data-event / data-nonce for the same ucb_student_claim call.
+      const b = document.querySelector('input[data-student-claim][data-event]:not(:disabled), .ucb-student-claim[data-event]');
       const confirmed = /student ticket is confirmed|it.s in your account/i.test(document.body.innerText||'');
       return {available: !!b, alreadyClaimed: confirmed, event: b?.dataset.event || null, nonce: b?.dataset.nonce || null};
     })()
