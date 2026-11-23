@@ -104,6 +104,22 @@ class PublishTests(PublishHarness):
         self.assertEqual(code, 0)
         self.assertEqual(self.stored(storage.SHOWS_BLOB)["shows"], [{"title": "Old"}])
 
+    def test_partial_failures_appear_in_actions_for_each_feed(self):
+        self.shows["sources"].append(_row("empty", 0))
+        self.shows["sources"][0].update(stale=True, scraped_at="2026-08-31")
+        self.classes["sources"][0].update(ok=False)
+        self.talent["sources"][0].update(stale=True, error="directory unavailable")
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
+            code, err = self.run_main()
+            self.assertEqual(code, 0)
+            self.assertEqual(err.count("::warning::"), 3)
+            self.assertIn("shows/a could not refresh. Last successful scrape: 2026-08-31", err)
+            self.assertIn("talent/ny could not refresh", err)
+            code, err = self.run_main(["--classes-only"])
+            self.assertEqual(code, 0)
+            self.assertEqual(err.count("::warning::"), 1)
+            self.assertIn("classes/x could not refresh", err)
+
     def test_empty_classes_or_talent_keeps_previous_file_without_failing(self):
         storage.save_classes(self.classes)
         self.classes = _payload("classes", [], [_row("wgis_ny", 0), _row("x", 0, ok=False)])

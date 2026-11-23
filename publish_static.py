@@ -50,11 +50,23 @@ def _healthy(source: dict) -> bool:
     return bool(source.get("ok")) and (source.get("count") or 0) > 0
 
 
+def _report_source_failures(name: str, payload: dict) -> None:
+    """Surface partial refresh failures even when publishing saved data succeeds."""
+    prefix = "::warning::" if os.environ.get("GITHUB_ACTIONS") == "true" else ""
+    for source in payload.get("sources", []):
+        if source.get("stale") or not source.get("ok") or source.get("error"):
+            last_good = source.get("scraped_at") or "never"
+            print(f"{prefix}{name}/{source['id']} could not refresh. "
+                  f"Last successful scrape: {last_good}. "
+                  f"Retained {source.get('count', 0)} listings.", file=sys.stderr)
+
+
 def _save_guarded(name: str, payload: dict, save_fn) -> bool:
     """Refuse to overwrite a feed with emptiness: no source contributing items
     can only mean total scrape failure (or corrupt previous state), so keep
     the last-published file instead. Returns False only when the write itself
     failed."""
+    _report_source_failures(name, payload)
     if not any(_healthy(s) for s in payload.get("sources", [])):
         print(f"{name}: no source contributed items — keeping the previous file",
               file=sys.stderr)
@@ -112,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"shows: {payload.get('count')} · classes: {classes_payload.get('count')}"
           f" · talent: {talent_payload.get('count')}")
+    _report_source_failures("shows", payload)
     healthy = []
     for s in payload.get("sources", []):
         if _healthy(s):
