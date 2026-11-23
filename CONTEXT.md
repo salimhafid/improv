@@ -183,7 +183,10 @@ talent.py):
 `/wp-json/wp/v2/dt_team`. The NY, LA, Teachers and DCM categories use term
 IDs 31, 21, 22 and 270 respectively. Each group is paged in stable post-ID
 order. The number of unique profiles must match the API total before the new
-roster can replace the previous one. Profiles shared by several groups keep
+roster can replace the previous one. If the collection is unavailable, the
+public directory supplies the same groups through its location filters,
+alphabetical sort and Load more control. Each selected filter, offset and
+unique profile total is checked. Profiles shared by several groups keep
 one entry and one set of current details.
 
 ## Class-alert watcher (watcher.py + .github/workflows/class-watch*.yml)
@@ -1088,8 +1091,10 @@ Gotchas learned the hard way:
   `sources[second_city].scraped_at` in `docs/shows.json` is no longer null.
 - The November 22 talent publish carried the August 31 roster. UCB had
   replaced the directory markup and the DCM grid previously used here.
-  After deploying the REST adapter, check the four group timestamps in
-  `docs/talent.json` to verify runner access.
+  On November 23 UTC the hosted publisher refreshed all four groups and
+  produced 1,787 unique profiles. The public directory was also verified
+  independently from a hosted runner. Partial failures now produce a
+  workflow warning with the last successful scrape time.
 
 ## Access & conventions
 
