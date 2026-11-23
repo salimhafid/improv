@@ -1,9 +1,16 @@
 # TODO.md — open items, watchlist, and likely next steps
 
-Companion to [CONTEXT.md](CONTEXT.md). Status as of 2026-10-11 (app 1.6 is
-READY_FOR_DISTRIBUTION; 1.7 (27) carries the class-alert fixes below plus the
-unreleased notification-delivery diagnostics; 1.8 (28) puts class alerts
-behind a $9.99 in-app purchase and is not yet uploaded).
+Companion to [CONTEXT.md](CONTEXT.md). As of November 22, 2026, Improv
+1.8 (30) is live and its Class Alerts in-app purchase is approved.
+
+## Feed refresh and class alerts (1.8.1)
+
+- [x] Deployed the updated class catalog, class watcher and talent directory.
+      The live app decoded 460 classes, 1,597 shows and 1,787 people. CloudKit
+      accepted nine new UCB class alerts. The next scan found no duplicates.
+- [x] Archived and signed 1.8.1 (31). Release notes and the automatic release
+      setting are in App Store Connect.
+- [ ] Submit build 31 for review after Apple accepts the binary upload.
 
 ## Class details + alert deep links (2026-11-10)
 

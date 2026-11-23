@@ -39,9 +39,10 @@ key-value storage that mirrors the user's own settings, and APNs.
   **1.7 (27)** — notification-delivery diagnostics plus the 2026-10-09
   class-alert fixes (one push per class, taps open the class, foreground
   class-feed refresh) — was uploaded 2026-10-09 and submitted 2026-10-10
-  (see TODO.md). The project is now **MARKETING_VERSION 1.8,
-  CURRENT_PROJECT_VERSION 28** (not yet uploaded): class alerts behind a
-  $9.99 in-app purchase (see "Class Alerts in-app purchase (1.8)").
+  (see TODO.md). As of November 22, **1.8 (30)** is live and the $9.99
+  Class Alerts purchase is approved. The signed **1.8.1 (31)** archive
+  contains the feed refresh and class alert subscription fixes. See TODO.md
+  for its App Store submission status.
 - Accounts: none of ours. The app offers an **optional UCB student sign-in**
   (ucbcomedy.com, inside a web view) for reserving free student tickets — see
   "UCB session engine" below and PRIVACY.md.
