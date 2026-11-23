@@ -42,3 +42,11 @@ xcrun swiftc -parse-as-library -o "$BIN" \
   tests/ios/NotificationDeliveryTests.swift \
   tests/ios/LogicTests.swift
 "$BIN"
+
+echo "── Class alert registration and sync tests ────────────"
+xcrun swiftc -parse-as-library -o "$BUILD_DIR/class_alert_store_tests" \
+  ios/UCBShows/Services/ClassAlertPreferences.swift \
+  ios/UCBShows/Services/NotificationDeliveryStatus.swift \
+  ios/UCBShows/Services/ClassAlertsStore.swift \
+  tests/ios/ClassAlertsStoreTests.swift
+"$BUILD_DIR/class_alert_store_tests"

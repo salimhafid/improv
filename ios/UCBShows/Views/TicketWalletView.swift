@@ -27,7 +27,11 @@ struct TicketWalletView: View {
             content
                 .navigationTitle("Tickets")
                 .navigationDestination(for: Ticket.self) { ticket in
-                    TicketDetailView(ticket: ticket) { t in await tickets.release(t) }
+                    if let current = tickets.ticket(id: ticket.id) {
+                        TicketDetailView(ticket: current) { t in await tickets.release(t) }
+                    } else {
+                        ContentUnavailableView("Ticket removed", systemImage: "ticket")
+                    }
                 }
                 .navigationDestination(for: Show.self) { show in
                     ShowDetailView(show: show, namespace: zoom)
@@ -36,7 +40,8 @@ struct TicketWalletView: View {
                 // Re-runs when sign-in state flips, so a first-ever sign-in pulls
                 // the Student ID + tickets without needing a pull-to-refresh.
                 // Throttled: revisiting the tab within a few minutes is instant.
-                .task(id: account.isSignedIn) {
+                .task(id: app.activeTab == 1 ? account.isSignedIn : nil) {
+                    guard app.activeTab == 1 else { return }
                     if account.isSignedIn { await tickets.syncIfStale() }
                     // That sync is an uninterruptible web-view navigation, so
                     // we can resume here half a minute later on a screen the
@@ -55,12 +60,6 @@ struct TicketWalletView: View {
                 .onAppear { openShowDeepLink(app.openShowID) }
                 .onChange(of: app.openShowID) { _, id in openShowDeepLink(id) }
                 .onChange(of: going.shows) { _, _ in openShowDeepLink(app.openShowID) }
-                // A TabView keeps unselected children alive, so `.task` above
-                // doesn't re-run when the user finally lands here — this is
-                // what makes arriving on the tab the notifiable moment.
-                .onChange(of: app.activeTab) { _, _ in
-                    Task { await askForRemindersIfVisible() }
-                }
         }
     }
 

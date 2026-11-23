@@ -13,6 +13,7 @@ struct RootView: View {
     @Environment(ClassesStore.self) private var classesStore
     @Environment(TalentStore.self) private var talent
     @Environment(AppState.self) private var app
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var hSize
 
     var body: some View {
@@ -44,9 +45,25 @@ struct RootView: View {
             // must not pop back open on the way back to compact.
             if size == .regular { app.sidebarOpen = false }
         }
-        .task { await store.loadInitial() }
-        .task { await classesStore.loadInitial() }
-        .task { await talent.loadInitial() }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                async let shows: Void = store.refreshIfStale()
+                async let classes: Void = classesStore.refreshIfStale()
+                async let people: Void = talent.refreshIfStale()
+                _ = await (shows, classes, people)
+                do { try await Task.sleep(for: .seconds(300)) }
+                catch { return }
+            }
+        }
+        .task(id: app.activeTab) {
+            guard scenePhase == .active else { return }
+            switch app.activeTab {
+            case 0: await store.refreshIfStale()
+            case 2: await classesStore.refreshIfStale()
+            default: break
+            }
+        }
         .modifier(UITestTabSelection(selection: $app.activeTab))
         .modifier(UITestSidebar())
     }

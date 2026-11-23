@@ -20,7 +20,7 @@ struct ClassesPayload: Decodable {
         generatedAt = try c.decodeIfPresent(String.self, forKey: .generatedAt)
         count = try c.decodeIfPresent(Int.self, forKey: .count)
         sources = (try c.decodeIfPresent(Lossy<SourceInfo>.self, forKey: .sources))?.elements
-        classes = (try c.decodeIfPresent(Lossy<ClassItem>.self, forKey: .classes))?.elements ?? []
+        classes = try c.decode(Lossy<ClassItem>.self, forKey: .classes).elements
     }
 }
 

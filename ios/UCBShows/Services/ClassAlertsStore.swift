@@ -1,7 +1,9 @@
 import CloudKit
 import Foundation
 import Observation
+#if canImport(UIKit)
 import UIKit
+#endif
 import UserNotifications
 
 /// Class-alert preferences + the CloudKit subscriptions that make them real.
@@ -100,6 +102,15 @@ final class ClassAlertsStore {
     @ObservationIgnored
     private lazy var database = CKContainer(identifier: "iCloud.com.salimhafid.UCBShows").publicCloudDatabase
 
+    // Subsequent refreshes join a running reconcile. Bound its network
+    // operations so a connection that stalls cannot hold every later retry.
+    private static let syncConfiguration: CKOperation.Configuration = {
+        let config = CKOperation.Configuration()
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 40
+        return config
+    }()
+
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.prefsKey) {
             persistedData = data
@@ -168,9 +179,10 @@ final class ClassAlertsStore {
         persistedData = data
         guard let data, let saved = try? JSONDecoder().decode(ClassAlertPreferences.self, from: data),
               saved != prefs else { return }
+        let turnedOn = !prefs.master && saved.master
         prefs = saved
         migrateIfNeeded()
-        queueSync()
+        queueSync(rearmDevice: turnedOn)
     }
 
     /// Count of schools currently alerting — drives the bell badge. Deliberately
@@ -188,16 +200,10 @@ final class ClassAlertsStore {
     /// CloudKit at launch, as before.
     func accessChanged() {
         guard prefs.master || UserDefaults.standard.bool(forKey: Self.syncPendingKey) else { return }
-        queueSync()
         // An unlock outside the sheet (Ask to Buy approved, a purchase on
         // another device, the TestFlight flag turned on) also has to register
-        // this device, because `armOnLaunch` skips that while locked. Without
-        // it the subscriptions exist and no push reaches this device until the
-        // next foreground. It never prompts; its reconcile coalesces with the
-        // one just queued.
-        if prefs.master, access?.isUnlocked == true {
-            Task { await armOnLaunch() }
-        }
+        // this device, because `armOnLaunch` skips that while locked.
+        queueSync(rearmDevice: prefs.master && access?.isUnlocked == true)
     }
 
     // MARK: Toggles (each persists + resyncs)
@@ -275,9 +281,12 @@ final class ClassAlertsStore {
 
     /// A pref change owes a reconcile. Noted before the attempt, because the
     /// attempt can fail offline and the retry has to know it's owed.
-    private func queueSync() {
+    private func queueSync(rearmDevice: Bool = false) {
         UserDefaults.standard.set(true, forKey: Self.syncPendingKey)
-        Task { await syncSubscriptions() }
+        Task {
+            if rearmDevice { await armOnLaunch() }
+            else { await syncSubscriptions() }
+        }
     }
 
     // MARK: Arming (permission + APNs registration)
@@ -306,7 +315,7 @@ final class ClassAlertsStore {
     private func requestPushAuthorization() async {
         let granted = await NotificationAuth.ensure()
         await refreshDeliveryStatus()
-        guard granted else { return }
+        guard granted, prefs.master, !isLocked else { return }
         // APNs registration is specific to class alerts: these arrive as
         // CloudKit pushes, unlike the on-device ticket/show reminders.
         UIApplication.shared.registerForRemoteNotifications()
@@ -322,29 +331,15 @@ final class ClassAlertsStore {
     /// launch, because the device token rotates.
     func armOnLaunch() async {
         await refreshDeliveryStatus()
-        guard prefs.master, !isLocked else {
-            // Off can still owe a reconcile: a switch-off that failed offline
-            // left every subscription live, and with master Off nothing else
-            // retries. `desired` is empty, so this is only the delete. Locked
-            // is the same — nothing to register for, but a refund's delete
-            // that failed offline is owed.
-            if UserDefaults.standard.bool(forKey: Self.syncPendingKey) {
-                await syncSubscriptions()
-            }
-            return
-        }
-        switch deliveryStatus?.authorization {
-        case .denied:
-            authorizationDenied = true
-        case .notDetermined, nil:
-            // Not our moment to ask — `armIfNeeded` handles it when the user
-            // opens the sheet.
-            break
-        case .allowed, .provisional:
-            authorizationDenied = false
+        let permitted = deliveryStatus?.authorization == .allowed || deliveryStatus?.authorization == .provisional
+        let register = prefs.master && !isLocked && permitted
+        if register {
             UIApplication.shared.registerForRemoteNotifications()
-            // Idempotent (it diffs against CloudKit's own list), and the only
-            // thing that ever retries a reconcile that failed offline.
+        }
+        // Settings govern this device's APNs registration. A failed change
+        // to the account's subscriptions still needs retrying even while
+        // this device's permission is denied or undecided.
+        if register || UserDefaults.standard.bool(forKey: Self.syncPendingKey) {
             await syncSubscriptions()
         }
     }
@@ -377,12 +372,12 @@ final class ClassAlertsStore {
     /// on the account. Unknown, or the gate not wired yet: nil, and nothing is
     /// created or deleted until the answer arrives (`accessChanged` queues
     /// that reconcile).
-    private var desired: [String: NSPredicate]? {
+    private var desired: [ClassAlertSubscription]? {
         switch access?.state {
         case .unlocked:
-            return Dictionary(uniqueKeysWithValues: prefs.subscriptionPlan.map { ($0.id, $0.predicate) })
+            return prefs.subscriptionPlan
         case .locked:
-            return UserDefaults.standard.bool(forKey: Self.revokeOnLockKey) ? [:] : nil
+            return UserDefaults.standard.bool(forKey: Self.revokeOnLockKey) ? [] : nil
         case .unknown, nil:
             return nil
         }
@@ -407,31 +402,31 @@ final class ClassAlertsStore {
         let task = Task { await performSync() }
         syncTask = task
         await task.value
-        syncTask = nil
     }
 
     private func performSync() async {
-        do {
-            while true {
-                // Nothing to reconcile (undecided, or locked with no revoke
-                // owed), at the start or after a round whose awaits it moved
-                // under. Return before the flag is cleared.
-                guard let want = desired else { return }
-                // Recorded before any write, so a run that fails partway
-                // still leaves a refund owing the delete.
-                if case .unlocked(let reason)? = access?.state, reason != .grandfathered {
+        // Release the shared task before leaving the worker. Clearing it in
+        // an awaiting caller leaves a window for a new toggle to join a task
+        // that has already finished and never reconcile its change.
+        defer { syncTask = nil }
+        while let want = desired {
+            do {
+                let existing = try await database.configuredWith(configuration: Self.syncConfiguration) {
+                    try await $0.allSubscriptions()
+                }
+                guard desired == want else { continue }
+                if !want.isEmpty, case .unlocked(let reason)? = access?.state, reason != .grandfathered {
                     UserDefaults.standard.set(true, forKey: Self.revokeOnLockKey)
                 }
-                let existing = try await database.allSubscriptions()
-                let ours = existing.filter { $0.subscriptionID.hasPrefix("alert/") }
+                let ours = Set(existing.map(\.subscriptionID).filter { $0.hasPrefix("alert/") })
 
-                let stale = ours.map(\.subscriptionID).filter { want[$0] == nil }
-                let missing = want.filter { id, _ in !ours.contains { $0.subscriptionID == id } }
+                let stale = Array(ours.subtracting(want.map(\.id)))
+                let missing = want.filter { !ours.contains($0.id) }
 
                 var new: [CKSubscription] = []
-                for (id, predicate) in missing {
-                    let sub = CKQuerySubscription(recordType: "ClassAlert", predicate: predicate,
-                                                  subscriptionID: id, options: .firesOnRecordCreation)
+                for subscription in missing {
+                    let sub = CKQuerySubscription(recordType: "ClassAlert", predicate: subscription.predicate,
+                                                  subscriptionID: subscription.id, options: .firesOnRecordCreation)
                     let info = CKSubscription.NotificationInfo()
                     // Title/body come straight from the watcher-composed record.
                     info.titleLocalizationKey = "CA_TITLE"
@@ -450,37 +445,43 @@ final class ClassAlertsStore {
                 // with no alerts at all. Keeping them means duplicate pushes
                 // at worst until a later reconcile succeeds; the dirty flag
                 // stays set, so the next launch or foreground retries.
-                //
-                // Each call throws only for the operation as a whole. An
-                // item CloudKit rejected on its own (a predicate on a field
-                // the schema hasn't indexed, say) comes back per item, and
-                // swallowing it read as "healthy" over a subscription that
-                // never existed.
                 if !new.isEmpty {
-                    let (saved, _) = try await database.modifySubscriptions(saving: new, deleting: [])
-                    for case .failure(let error) in saved.values { throw error }
+                    try await modifySubscriptions(saving: new, deleting: [])
+                    // A newer plan may need one of the subscriptions we
+                    // were about to delete. Re-read before retiring it.
+                    guard desired == want else { continue }
                 }
                 if !stale.isEmpty {
-                    let (_, deleted) = try await database.modifySubscriptions(saving: [], deleting: stale)
-                    for case .failure(let error) in deleted.values { throw error }
+                    try await modifySubscriptions(saving: [], deleting: stale)
                 }
-                // A toggle (or a purchase-gate change) that landed during the
-                // awaits above only coalesced onto this run; reconcile it now
-                // rather than at the next foreground. IDs are deterministic,
-                // so keys are the diff. A gate gone undecided (nil) goes round
-                // to the guard above.
-                if let now = desired, Set(now.keys) == Set(want.keys) { break }
+                guard desired == want else { continue }
+                syncIssue = ""
+                UserDefaults.standard.set(false, forKey: Self.syncPendingKey)
+                if want.isEmpty || access?.state == .unlocked(.grandfathered) {
+                    UserDefaults.standard.removeObject(forKey: Self.revokeOnLockKey)
+                }
+                return
+            } catch {
+                // A failure for an obsolete plan must not strand callers
+                // already waiting for the current plan to be reconciled.
+                guard desired == want else { continue }
+                UserDefaults.standard.set(true, forKey: Self.syncPendingKey)
+                if (error as? CKError)?.code == .notAuthenticated {
+                    syncIssue = "Sign in to iCloud (Settings) to receive class alerts."
+                } else {
+                    syncIssue = "Couldn’t update alert subscriptions — will retry. (\(error.localizedDescription))"
+                }
+                return
             }
-            syncIssue = ""
-            UserDefaults.standard.set(false, forKey: Self.syncPendingKey)
-            // The lock's delete went through. Later locked launches hold, or
-            // a TestFlight build would delete on every launch what an App
-            // Store device on the account keeps recreating.
-            if isLocked { UserDefaults.standard.removeObject(forKey: Self.revokeOnLockKey) }
-        } catch let error as CKError where error.code == .notAuthenticated {
-            syncIssue = "Sign in to iCloud (Settings) to receive class alerts."
-        } catch {
-            syncIssue = "Couldn’t update alert subscriptions — will retry. (\(error.localizedDescription))"
         }
+    }
+
+    private func modifySubscriptions(saving: [CKSubscription], deleting: [String]) async throws {
+        let (saved, deleted) = try await database.configuredWith(configuration: Self.syncConfiguration) {
+            try await $0.modifySubscriptions(saving: saving, deleting: deleting)
+        }
+        // CloudKit can accept the operation and reject individual items.
+        for case .failure(let error) in saved.values { throw error }
+        for case .failure(let error) in deleted.values { throw error }
     }
 }

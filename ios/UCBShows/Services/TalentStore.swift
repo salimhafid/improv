@@ -7,14 +7,7 @@ import Observation
 @MainActor
 @Observable
 final class TalentStore {
-    enum Phase: Equatable {
-        case loading        // first load, nothing to show yet
-        case loaded         // showing fresh data
-        case offline        // showing cached data, refresh failed
-        case failed(String) // nothing to show and refresh failed
-    }
-
-    private(set) var phase: Phase = .loading
+    var phase: FeedLoader<TalentPayload>.Phase { loader.phase }
     private(set) var allPeople: [TalentPerson] = []
     /// A non-empty directory is on hand (cached or fresh) — what the cast
     /// chips and the directory view key on.
@@ -28,38 +21,20 @@ final class TalentStore {
     /// Profile slug → person (exact matches for structured cast).
     private var bySlug: [String: TalentPerson] = [:]
 
-    private let service: FeedService<TalentPayload>
+    private let loader: FeedLoader<TalentPayload>
 
     init(service: FeedService<TalentPayload> = .talent) {
-        self.service = service
+        self.loader = FeedLoader(service)
     }
 
-    /// Show cached data instantly (if any), then refresh from the network —
-    /// the same shape as the shows and classes stores.
-    func loadInitial() async {
-        if allPeople.isEmpty {
-            let service = self.service
-            if let cached = await Task.detached(priority: .utility, operation: { service.cachedPayload() }).value {
-                apply(cached)
-                phase = .loaded
-            }
-        }
-        await refresh(force: false)
+    /// Check on launch, foreground, and while the app is open.
+    func refreshIfStale(maxAge: TimeInterval = 300) async {
+        await loader.refreshIfStale(maxAge: maxAge, apply: apply)
     }
 
-    /// Refresh from the network; the directory's retry and pull-to-refresh.
-    /// `force` — the default, since every caller outside the store is the
-    /// user — revalidates with the origin even inside the CDN's max-age, so
-    /// an explicit refresh can't "succeed" out of `URLCache` while offline.
+    /// A user action or class alert revalidates even a recently checked feed.
     func refresh(force: Bool = true) async {
-        do {
-            let payload = try await service.fetchRemote(
-                policy: force ? .reloadRevalidatingCacheData : .useProtocolCachePolicy)
-            apply(payload)
-            phase = .loaded
-        } catch {
-            phase = allPeople.isEmpty ? .failed(error.localizedDescription) : .offline
-        }
+        await loader.refresh(force: force, apply: apply)
     }
 
     /// The single write path for directory data — both loaders above go

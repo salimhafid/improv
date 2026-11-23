@@ -125,6 +125,7 @@ struct ClassAlertsView: View {
                     Text("Checked daily — one notification per new class, or a single summary when a school posts many at once. Alerts work even for theaters you don’t have toggled on elsewhere.")
                 }
             }
+            .refreshable { await refreshAlerts() }
             .navigationTitle("Class Alerts")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -139,7 +140,7 @@ struct ClassAlertsView: View {
         // are off or permission is already settled. On the stack, not the
         // root list: the list disappears under every push, and re-arming
         // on each pop back is an APNs + CloudKit round trip for nothing.
-        .task { await alerts.armIfNeeded() }
+        .task { await refreshAlerts() }
         // A purchase or restore made here is the moment to turn alerts on —
         // and it is notifiable, so `setMaster` asks for permission. Saved
         // prefs that already say On (iCloud, or a re-purchase) skipped the
@@ -154,6 +155,14 @@ struct ClassAlertsView: View {
             }
         }
         .deniedNotificationsAlert(alerts)
+    }
+
+    /// A connection restored while the app stayed open must be enough to
+    /// recover a pending purchase lookup and retry the saved alert settings.
+    private func refreshAlerts() async {
+        await access.refresh()
+        guard !Task.isCancelled else { return }
+        await alerts.armIfNeeded()
     }
 
     /// The pitch, the buy button and Restore. Buying and restoring stay

@@ -45,12 +45,18 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     }
     @MainActor private var pendingClassAlert: ClassAlertTap?
 
+    /// Refresh the class list on receipt without interrupting the current screen.
+    @MainActor var onForegroundClassAlert: (@MainActor () -> Void)?
+
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
+        if notification.request.content.userInfo["ck"] != nil {
+            await MainActor.run { onForegroundClassAlert?() }
+        }
         // Still surface it if the app is foregrounded — and keep it in
         // Notification Center, so a banner missed mid-scroll isn't gone.
-        [.banner, .list, .sound]
+        return [.banner, .list, .sound]
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,

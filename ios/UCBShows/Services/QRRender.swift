@@ -165,8 +165,11 @@ struct QRCodeView: View {
         }
         .task(id: svg) {
             failed = false
-            image = await QRRender.cachedImage(svg: svg)
-            failed = image == nil && !svg.isEmpty
+            image = nil
+            let rendered = await QRRender.cachedImage(svg: svg)
+            guard !Task.isCancelled else { return }
+            image = rendered
+            failed = rendered == nil && !svg.isEmpty
         }
     }
 }

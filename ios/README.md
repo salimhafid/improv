@@ -129,11 +129,14 @@ runs too (see CONTEXT.md, "Class Alerts in-app purchase (1.8)").
   calendar choice, the I'm-Going list and the ticket wallet are mirrored
   through iCloud key-value storage, so they follow you across your devices
   and reinstalls.
-- **Pull to refresh** (Shows, Classes, Talent) — re-fetches the published feed.
-  It never triggers a scrape; scraping happens on the backend's schedule, and
-  refresh surfaces whatever the last run stored. The class feed also
-  refreshes itself on foreground once its last fetch is 5 minutes old (the
-  backend republishes a school's classes within minutes of alerting on one).
+- **Feed refresh** — Shows, Classes, and Talent check the published feeds on
+  launch, when returning to the app, and every five minutes while it is open.
+  Returning to a tab or the talent directory also retries a stale or failed
+  load. Pull to refresh or tap a class alert to revalidate immediately. A
+  class alert received while the app is open also refreshes the class list.
+  The backend's scraping schedule determines when new listings are published.
+  A school showing saved classes after a failed scrape displays its own last
+  successful update in the folder header.
 - **Offline** — the last successful payloads are cached to disk, so the app
   opens instantly and shows saved data (with a banner) when the network is
   unavailable.
@@ -158,8 +161,7 @@ UCBShows/
                              notification delegate, APNs registration delegate,
                              builds + injects the eight stores and the Class Alerts
                              purchase gate, wires tickets/account/alerts, deep-links,
-                             5-min ticket sync + class-feed and purchase refresh on
-                             foreground
+                             5-min ticket sync and purchase refresh on foreground
   UCBShows.entitlements      aps-environment, iCloud container + CloudKit, KVS
   Localizable.strings        CA_TITLE / CA_BODY passthroughs for CloudKit pushes
   Models/

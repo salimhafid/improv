@@ -67,8 +67,13 @@ struct SourceInfo: Decodable, Identifiable, Hashable {
     let count: Int
     let ok: Bool
     let error: String?
+    let stale: Bool
+    let scrapedAt: Date?
 
-    enum CodingKeys: String, CodingKey { case id, org, city, count, ok, error }
+    enum CodingKeys: String, CodingKey {
+        case id, org, city, count, ok, error, stale
+        case scrapedAt = "scraped_at"
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -78,6 +83,8 @@ struct SourceInfo: Decodable, Identifiable, Hashable {
         count = (try c.decodeIfPresent(Int.self, forKey: .count)) ?? 0
         ok = (try c.decodeIfPresent(Bool.self, forKey: .ok)) ?? false
         error = try c.decodeIfPresent(String.self, forKey: .error)
+        stale = (try? c.decode(Bool.self, forKey: .stale)) ?? false
+        scrapedAt = (try? c.decode(String.self, forKey: .scrapedAt)).flatMap(DateUtils.parseTimestamp)
     }
 }
 
