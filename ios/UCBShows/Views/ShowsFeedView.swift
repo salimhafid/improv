@@ -31,10 +31,16 @@ struct ShowsFeedView: View {
                     switch store.phase {
                     case .loading: SkeletonFeed()
                     case .failed(let message): errorState(message)
-                    default: emptyDataState
+                    case .loaded, .offline:
+                        ScrollablePlaceholder { emptyDataState }
+                            .safeAreaInset(edge: .top) {
+                                if store.phase == .offline {
+                                    OfflineBanner(updatedLabel: store.updatedLabel, noun: "shows")
+                                }
+                            }
                     }
                 } else if sections.isEmpty {
-                    emptyState
+                    ScrollablePlaceholder { emptyState }
                         .safeAreaInset(edge: .top) {
                             // The feed shows this banner inline; an empty
                             // filtered/searched list still deserves to know
@@ -69,8 +75,8 @@ struct ShowsFeedView: View {
                 // Scope changed — drop venue/types not in the new selection.
                 store.reconcileFilters(theaters: theaters)
             }
-            .onChange(of: store.lastUpdated) { _, _ in
-                // Re-reconcile on every successful load (keyed on the timestamp,
+            .onChange(of: store.feedVersion) { _, _ in
+                // Re-reconcile on every successful load (keyed on the feed revision,
                 // not the count, so a same-count refresh still reconciles).
                 maybeAutoPush()
                 store.reconcileFilters(theaters: theaters)

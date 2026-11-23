@@ -14,6 +14,19 @@ enum TalentRoute: Hashable {
 /// full profile on ucbcomedy.com in an in-app Safari sheet.
 struct TalentBioView: View {
     let person: TalentPerson
+    @Environment(TalentStore.self) private var talent
+
+    var body: some View {
+        if let current = talent.person(slug: person.slug) {
+            TalentBioContent(person: current)
+        } else {
+            ContentUnavailableView("Profile No Longer Listed", systemImage: "person")
+        }
+    }
+}
+
+private struct TalentBioContent: View {
+    let person: TalentPerson
 
     @Environment(ShowsStore.self) private var shows
     @State private var webLink: WebLink?
@@ -57,7 +70,7 @@ struct TalentBioView: View {
         .sheet(item: $webLink) { link in
             SafariView(url: link.url).ignoresSafeArea()
         }
-        .task(id: "\(person.slug)|\(shows.lastUpdated?.timeIntervalSince1970 ?? 0)") {
+        .task(id: "\(person.slug)|\(person.name)|\(shows.feedVersion)") {
             matchingShows = computeMatchingShows()
         }
     }
@@ -171,10 +184,14 @@ struct TalentDirectoryView: View {
                 // with no cached directory to fall back on.
                 switch talent.phase {
                 case .failed(let message): errorState(message)
-                default: ContentUnavailableView("Loading Talent…", systemImage: "person.3")
+                case .loading: ContentUnavailableView("Loading Talent…", systemImage: "person.3")
+                case .loaded, .offline:
+                    ScrollablePlaceholder {
+                        ContentUnavailableView("No Talent Listed", systemImage: "person.3")
+                    }
                 }
             } else if people.isEmpty {
-                ContentUnavailableView.search(text: query)
+                ScrollablePlaceholder { ContentUnavailableView.search(text: query) }
             } else {
                 List(people) { person in
                     NavigationLink(value: TalentRoute.person(person)) {
@@ -185,6 +202,7 @@ struct TalentDirectoryView: View {
             }
         }
         .refreshable { await talent.refresh() }
+        .task { await talent.refreshIfStale() }
         .navigationTitle("UCB Talent")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search performers & teachers")

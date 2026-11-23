@@ -76,11 +76,17 @@ struct ClassesView: View {
         let layout = store.schoolFolders(theaters: theaters, searchText: query)
         NavigationStack(path: $path) {
             Group {
-                if store.allClasses.isEmpty {
+                if store.allClasses.isEmpty && !layout.selected.contains(where: { $0.sourceNotice != nil }) {
                     switch store.phase {
                     case .loading: SkeletonList()
                     case .failed(let message): errorState(message)
-                    default: emptyDataState
+                    case .loaded, .offline:
+                        ScrollablePlaceholder { emptyDataState }
+                            .safeAreaInset(edge: .top) {
+                                if store.phase == .offline {
+                                    OfflineBanner(updatedLabel: store.updatedLabel, noun: "classes")
+                                }
+                            }
                     }
                 } else {
                     // The empty state is an overlay, not a sibling branch: a
@@ -91,8 +97,17 @@ struct ClassesView: View {
                         .overlay {
                             if layout.selected.isEmpty {
                                 emptyState.background(Color(.systemGroupedBackground))
+                                    .allowsHitTesting(false)
                             }
                         }
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let pendingAlert {
+                    PendingClassBanner(titleHint: pendingAlert.target.titleHint) {
+                        dismissPendingAlert()
+                    }
+                    .transition(.opacity)
                 }
             }
             .navigationTitle(title)
@@ -101,7 +116,11 @@ struct ClassesView: View {
                 alertsToolbarItem
             }
             .navigationDestination(for: ClassItem.self) { item in
-                ClassDetailView(item: item)
+                if let current = store.currentItem(for: item) {
+                    ClassDetailView(item: current)
+                } else {
+                    ContentUnavailableView("Class No Longer Listed", systemImage: "graduationcap")
+                }
             }
             // An instructor's bio (from a class page) and that person's
             // shows (from the bio), as in the Shows tab.
@@ -143,7 +162,10 @@ struct ClassesView: View {
         // for the alerted one. Keyed on the whole target, so a new tap, the
         // record resolving, a dismissal or the tab going away each cancel the
         // run in progress.
-        .task(id: app.classAlertTarget) { await followAlert(app.classAlertTarget) }
+        .task(id: app.activeTab == 2 ? app.classAlertTarget : nil) {
+            guard app.activeTab == 2 else { return }
+            await followAlert(app.classAlertTarget)
+        }
     }
 
     // MARK: List
@@ -154,13 +176,6 @@ struct ClassesView: View {
                 if store.phase == .offline {
                     OfflineBanner(updatedLabel: store.updatedLabel, noun: "classes")
                         .padding(.bottom, 8)
-                }
-
-                if let pendingAlert {
-                    PendingClassBanner(titleHint: pendingAlert.target.titleHint) {
-                        dismissPendingAlert()
-                    }
-                    .transition(.opacity)
                 }
 
                 ForEach(layout.selected) { folder in
@@ -198,7 +213,8 @@ struct ClassesView: View {
                 // A picked theater with nothing in the class feed. Present but
                 // inert — there's nothing to open, and a tappable card that
                 // does nothing is worse than a labelled empty one.
-                cardHeader(folder, isOpen: false, trailing: "No classes listed", chevron: false)
+                cardHeader(folder, isOpen: false,
+                           trailing: folder.sourceNotice == nil ? "No classes listed" : nil, chevron: false)
             } else {
                 Button {
                     // Held open by the search: a tap has nothing to show and
@@ -230,16 +246,26 @@ struct ClassesView: View {
     }
 
     private func cardHeader(_ folder: SchoolFolder, isOpen: Bool,
-                            trailing: String, chevron: Bool) -> some View {
+                            trailing: String?, chevron: Bool) -> some View {
         HStack(spacing: 12) {
             TheaterIcon(id: folder.id, size: 36)
-            Text(folder.name)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(folder.name)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                if let notice = folder.sourceNotice {
+                    Text(notice)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             Spacer(minLength: 4)
-            Text(trailing)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            if let trailing {
+                Text(trailing)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             if chevron {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
@@ -317,6 +343,7 @@ struct ClassesView: View {
     /// restarted whenever the target changes, and cancelled when the tab
     /// goes away.
     private func followAlert(_ target: ClassAlertTarget?) async {
+        guard isCurrent(target) else { return }
         if let pendingAlert, pendingAlert.target.id != target?.id {
             withAnimation(.snappy(duration: 0.25)) { self.pendingAlert = nil }
         }
@@ -327,12 +354,19 @@ struct ClassesView: View {
         // Record still on its way (bounded at ~10 s): land on the school
         // now; the resolved target re-runs this task.
         if target.isProvisional {
+            if !path.isEmpty { path = NavigationPath() }
+            sheet = nil
             revealFolder(target.school)
             return
         }
         // A flood summary, or an alert whose record couldn't be read: the
         // school's folder is the closest thing to "that class".
         guard target.classIDs.count == 1 else {
+            if !path.isEmpty { path = NavigationPath() }
+            sheet = nil
+            revealFolder(target.school)
+            await store.refresh()
+            guard isCurrent(target) else { return }
             revealFolder(target.school)
             consume(target)
             return
@@ -346,10 +380,15 @@ struct ClassesView: View {
             consume(target)
             return
         }
-        if let item = store.item(for: target) { open(item, for: target); return }
+        if let item = store.item(for: target) {
+            open(item, for: target)
+            // Present immediately, then update the displayed availability.
+            Task { await store.refresh() }
+            return
+        }
         // Our copy predates the class; the published feed may not.
         await store.refresh(force: true)
-        if Task.isCancelled { return }
+        guard isCurrent(target) else { return }
         if let item = store.item(for: target) { open(item, for: target); return }
 
         // Not published in the app yet, but the alert says where it is on
@@ -371,14 +410,22 @@ struct ClassesView: View {
         }
         while Date() < deadline {
             try? await Task.sleep(for: Self.pendingPollInterval)
-            if Task.isCancelled { return }
+            guard isCurrent(target) else { return }
+            guard Date() < deadline else { break }
             await store.refresh(force: true)
-            if Task.isCancelled { return }
+            guard isCurrent(target) else { return }
+            guard Date() < deadline else { break }
             if let item = store.item(for: target) { open(item, for: target); return }
         }
         // Still not published: stop promising it.
         withAnimation(.snappy(duration: 0.25)) { pendingAlert = nil }
         consume(target)
+    }
+
+    /// SwiftUI can deliver cancellation after the tab or the target changes.
+    /// Check both again after each wait before updating the navigation stack.
+    private func isCurrent(_ target: ClassAlertTarget?) -> Bool {
+        !Task.isCancelled && app.activeTab == 2 && app.classAlertTarget == target
     }
 
     /// Open the alerted class: its folder and subject group expanded behind

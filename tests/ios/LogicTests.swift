@@ -618,6 +618,7 @@ struct LogicTests {
         testSearchByteParity()
         testSchoolFolderOrder()
         testPickedTheaterWithNoClasses()
+        testClassSourceFreshness()
         testClassAlertTargets()
         testClassesStaleness()
         testInstructorLinks()
@@ -627,6 +628,7 @@ struct LogicTests {
         testPastShowsPruned()
         testReconcileFilters()
         await testTalentDirectory()
+        await testInitialFeedLoading()
         print(failures == 0 ? "\nALL SWIFT LOGIC TESTS PASSED" : "\n\(failures) FAILURE(S)")
         exit(failures == 0 ? 0 : 1)
     }
@@ -728,6 +730,34 @@ func testPickedTheaterWithNoClasses() {
     // An unpicked empty theater is still dropped.
     check(!picked.selected.contains { $0.id == "playground" },
           "an unpicked theater with no classes stays out of the list")
+}
+
+@MainActor
+func testClassSourceFreshness() {
+    let data = Data(#"""
+    {"classes":[{"source":"ucb_ny","title":"Improv"},{"source":"magnet","title":"Improv"}],
+     "generated_at":"2026-11-22T22:34:15Z",
+     "sources":[{"id":"ucb_ny","ok":true,"count":1,"stale":true,"scraped_at":"2026-11-18T14:17:37.606261+00:00"},
+                {"id":"magnet","ok":true,"count":1},
+                {"id":"brooklyn_cc","ok":false,"count":0,"error":"upstream unavailable"}]}
+    """#.utf8)
+    let store = ClassesStore()
+    store.apply(try! JSONDecoder().decode(ClassesPayload.self, from: data))
+    let folders = store.schoolFolders(theaters: ["ucb_ny"]).selected
+    let stale = folders.first { $0.id == "ucb_ny" }
+    let date = DateUtils.parseTimestamp("2026-11-18T14:17:37Z")!
+    check(stale?.sourceNotice?.contains(date.formatted(date: .abbreviated, time: .shortened)) == true,
+          "a school's saved listings show its scrape date even when the aggregate is fresh")
+    checkEqual(stale?.count, 1, "carried listings remain browsable")
+    check(folders.first { $0.id == "magnet" }?.sourceNotice == nil,
+          "a healthy legacy source without stale metadata has no freshness warning")
+    checkEqual(folders.first { $0.id == "brooklyn_cc" }?.sourceNotice,
+               "Class listings temporarily unavailable", "failed schools with no saved rows remain visible")
+    check(!store.schoolFolders(theaters: ["ucb_ny"], searchText: "Improv").selected.contains { $0.id == "brooklyn_cc" },
+          "an unavailable school with no matches stays out of search results")
+    store.apply(classesPayload([["title": "Fresh", "source": "ucb_ny"]]))
+    check(store.schoolFolders(theaters: ["ucb_ny"]).selected.first?.sourceNotice == nil,
+          "a subsequent successful scrape clears the school's status")
 }
 
 // MARK: Class-alert deep links (tap → target → class) and foreground refresh
@@ -838,19 +868,39 @@ func testClassAlertTargets() {
                nil, "a class not in the feed yet is nil")
     checkEqual(store.item(for: ClassAlertTarget(school: "ucb_ny"))?.title, nil,
                "a target with no ids is nil")
+    let cachedNY = classItem(["id": "ucb_ny/44239", "title": "Sketch 201", "source": "ucb_ny"])
+    store.apply(classesPayload([
+        ["id": "ucb_online/44239", "title": "Sketch 201", "source": "ucb_online"],
+        ["id": "magnet/44239", "title": "Level One", "source": "magnet"],
+        ["id": "ucb_online/section-sketch-02", "title": "Sketch 101", "source": "ucb_online"],
+    ]))
+    checkEqual(store.item(for: ClassAlertTarget(school: "ucb_ny", classIDs: ["ucb_ny/44239"]))?.source,
+               "ucb_online", "a migrated Arlo section resolves at its corrected campus")
+    checkEqual(store.currentItem(for: cachedNY)?.source, "ucb_online",
+               "a detail opened from cached New York listings follows the corrected Online section")
+    check(store.item(for: ClassAlertTarget(school: "brooklyn_cc", classIDs: ["brooklyn_cc/44239"])) == nil,
+          "numeric IDs from another school never match UCB events")
+    check(store.item(for: ClassAlertTarget(school: "ucb_ny", classIDs: ["ucb_ny/section-sketch-02"])) == nil,
+          "cross-campus inference is restricted to legacy numeric IDs")
+    store.apply(classesPayload([
+        ["id": "ucb_online/44239", "title": "Sketch Online", "source": "ucb_online"],
+        ["id": "ucb_la/44239", "title": "Sketch LA", "source": "ucb_la"],
+    ]))
+    check(store.item(for: ClassAlertTarget(school: "ucb_ny", classIDs: ["ucb_ny/44239"])) == nil,
+          "an ambiguous Arlo EventID cannot open another campus's class")
 }
 
 @MainActor
 func testClassesStaleness() {
     let now = fixedNow
-    check(ClassesStore.isStale(lastFetched: nil, now: now, maxAge: 300), "never fetched is stale")
-    check(!ClassesStore.isStale(lastFetched: now.addingTimeInterval(-120), now: now, maxAge: 300),
+    check(FeedLoader<ClassesPayload>.isStale(lastFetched: nil, now: now, maxAge: 300), "never fetched is stale")
+    check(!FeedLoader<ClassesPayload>.isStale(lastFetched: now.addingTimeInterval(-120), now: now, maxAge: 300),
           "a 2-minute-old fetch is fresh")
-    check(!ClassesStore.isStale(lastFetched: now.addingTimeInterval(-300), now: now, maxAge: 300),
+    check(!FeedLoader<ClassesPayload>.isStale(lastFetched: now.addingTimeInterval(-300), now: now, maxAge: 300),
           "exactly maxAge is still fresh")
-    check(ClassesStore.isStale(lastFetched: now.addingTimeInterval(-301), now: now, maxAge: 300),
+    check(FeedLoader<ClassesPayload>.isStale(lastFetched: now.addingTimeInterval(-301), now: now, maxAge: 300),
           "older than maxAge is stale")
-    check(ClassesStore.isStale(lastFetched: now.addingTimeInterval(3600), now: now, maxAge: 300),
+    check(FeedLoader<ClassesPayload>.isStale(lastFetched: now.addingTimeInterval(3600), now: now, maxAge: 300),
           "a clock set backwards doesn't suppress refreshes")
 }
 
@@ -1123,4 +1173,181 @@ func testTalentDirectory() async {
     await store.refresh()
     checkEqual(store.phase, .offline, "a later failure keeps the data and reports offline")
     check(store.loaded, "…so cast chips keep working")
+}
+
+// MARK: Initial feed loading and cancellation
+
+/// URLProtocol keeps these tests offline and holds a request until the test
+/// explicitly finishes it, so concurrent callers are exercised deterministically.
+private final class StoreFeedProbe {
+    private let lock = NSLock()
+    private var pending: [URLProtocol] = []
+    private var policies: [URLRequest.CachePolicy] = []
+
+    var requests: [URLRequest.CachePolicy] {
+        lock.lock()
+        defer { lock.unlock() }
+        return policies
+    }
+
+    func start(_ request: URLProtocol) {
+        lock.lock()
+        pending.append(request)
+        policies.append(request.request.cachePolicy)
+        lock.unlock()
+    }
+
+    func cancel(_ request: URLProtocol) {
+        lock.lock()
+        pending.removeAll { $0 === request }
+        lock.unlock()
+    }
+
+    func finish(data: Data? = nil, error: Error? = nil) {
+        lock.lock()
+        let requests = pending
+        pending.removeAll()
+        lock.unlock()
+        for request in requests {
+            if let error {
+                request.client?.urlProtocol(request, didFailWithError: error)
+            } else {
+                let response = HTTPURLResponse(url: request.request.url!, statusCode: 200,
+                                               httpVersion: nil, headerFields: nil)!
+                request.client?.urlProtocol(request, didReceive: response, cacheStoragePolicy: .notAllowed)
+                request.client?.urlProtocol(request, didLoad: data!)
+                request.client?.urlProtocolDidFinishLoading(request)
+            }
+        }
+    }
+}
+
+private final class StoreFeedProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var probes: [URL: StoreFeedProbe] = [:]
+
+    static func register(_ probe: StoreFeedProbe?, for url: URL) {
+        lock.lock()
+        probes[url] = probe
+        lock.unlock()
+    }
+
+    private var probe: StoreFeedProbe? {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        return request.url.flatMap { Self.probes[$0] }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { probe?.start(self) }
+    override func stopLoading() { probe?.cancel(self) }
+}
+
+@MainActor
+private func waitForFeedRequests(_ count: Int, probe: StoreFeedProbe, label: String) async {
+    // A generous bound reports a failure instead of hanging the test suite.
+    for _ in 0..<2_000 {
+        if probe.requests.count >= count { return }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    check(false, "\(label) started request \(count)")
+}
+
+@MainActor
+private func checkInitialLoad(label: String, probe: StoreFeedProbe, payload: Data,
+                              load: @escaping @MainActor () async -> Void,
+                              refresh: @escaping @MainActor () async -> Void,
+                              cache: URL,
+                              isLoaded: @escaping @MainActor () -> Bool,
+                              isOffline: @escaping @MainActor () -> Bool) async {
+    let first = Task { await load() }
+    let second = Task { await load() }
+    await waitForFeedRequests(1, probe: probe, label: label)
+    checkEqual(probe.requests, [.useProtocolCachePolicy], "\(label) concurrent initial loads share one request")
+    // A pull or alert that arrives during the cache-permitting launch check
+    // must revalidate, and the launch response must finish writing first.
+    let forcedDuringLaunch = Task { await refresh() }
+    first.cancel()
+    probe.finish(data: payload)
+    await first.value
+    await second.value
+    check(isLoaded(), "\(label) one canceled caller does not cancel the shared initial load")
+    await waitForFeedRequests(2, probe: probe, label: label)
+    checkEqual(probe.requests.last, .reloadRevalidatingCacheData, "\(label) an overlapping pull revalidates")
+    probe.finish(data: payload)
+    await forcedDuringLaunch.value
+    await load()
+    checkEqual(probe.requests.count, 2, "\(label) revisiting a screen does not repeat initial loading")
+
+    let manual = Task { await refresh() }
+    await waitForFeedRequests(3, probe: probe, label: label)
+    checkEqual(probe.requests.last, .reloadRevalidatingCacheData, "\(label) explicit refresh revalidates")
+    probe.finish(error: URLError(.notConnectedToInternet))
+    await manual.value
+    check(isOffline(), "\(label) network failure preserves data and reports offline")
+
+    let canceled = Task { await refresh() }
+    await waitForFeedRequests(4, probe: probe, label: label)
+    canceled.cancel()
+    await canceled.value
+    check(isOffline(), "\(label) canceled refresh preserves the previous phase and data")
+
+    let retry = Task { await load() }
+    await waitForFeedRequests(5, probe: probe, label: label)
+    probe.finish(data: payload)
+    await retry.value
+    check(isLoaded(), "\(label) foreground retries a failed or canceled refresh")
+
+    let malformed = Task { await refresh() }
+    await waitForFeedRequests(6, probe: probe, label: label)
+    probe.finish(data: Data("{}".utf8))
+    await malformed.value
+    check(isOffline(), "\(label) a response missing the list preserves the last good rows")
+    checkEqual(try? Data(contentsOf: cache), payload, "\(label) malformed feeds leave the disk cache intact")
+}
+
+@MainActor
+func testInitialFeedLoading() async {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [StoreFeedProtocol.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+    let suffix = UUID().uuidString
+    for kind in ["shows", "classes", "talent"] {
+        let url = URL(string: "https://improv-tests.invalid/\(suffix)/\(kind)")!
+        let cacheName = "logic_tests.\(suffix).\(kind).cache.json"
+        let probe = StoreFeedProbe()
+        StoreFeedProtocol.register(probe, for: url)
+        defer {
+            StoreFeedProtocol.register(nil, for: url)
+            try? FileManager.default.removeItem(at: AppSupport.file(cacheName))
+        }
+        switch kind {
+        case "shows":
+            let store = ShowsStore(service: FeedService(feed: url, cacheName: cacheName, session: session))
+            let payload = Data(#"{"shows":[{"title":"Test Show","source":"ucb_ny"}]}"#.utf8)
+            await checkInitialLoad(label: kind, probe: probe, payload: payload,
+                                   load: { await store.refreshIfStale() }, refresh: { await store.refresh() },
+                                   cache: AppSupport.file(cacheName),
+                                   isLoaded: { store.phase == .loaded && store.allShows.count == 1 },
+                                   isOffline: { store.phase == .offline && store.allShows.count == 1 })
+        case "classes":
+            let store = ClassesStore(service: FeedService(feed: url, cacheName: cacheName, session: session))
+            let payload = Data(#"{"classes":[{"title":"Test Class","source":"ucb_ny"}]}"#.utf8)
+            await checkInitialLoad(label: kind, probe: probe, payload: payload,
+                                   load: { await store.refreshIfStale() }, refresh: { await store.refresh() },
+                                   cache: AppSupport.file(cacheName),
+                                   isLoaded: { store.phase == .loaded && store.allClasses.count == 1 },
+                                   isOffline: { store.phase == .offline && store.allClasses.count == 1 })
+        default:
+            let store = TalentStore(service: FeedService(feed: url, cacheName: cacheName, session: session))
+            let payload = talentPayload([["name": "Test Person", "slug": "test-person"]])
+            await checkInitialLoad(label: kind, probe: probe, payload: payload,
+                                   load: { await store.refreshIfStale() }, refresh: { await store.refresh() },
+                                   cache: AppSupport.file(cacheName),
+                                   isLoaded: { store.phase == .loaded && store.allPeople.count == 1 && store.loaded },
+                                   isOffline: { store.phase == .offline && store.allPeople.count == 1 && store.loaded })
+        }
+    }
 }

@@ -94,6 +94,9 @@ struct UCBShowsApp: App {
                         app.openShowID = id
                         app.activeTab = 1
                     }
+                    notifications.onForegroundClassAlert = {
+                        Task { await classesStore.refresh() }
+                    }
                     notifications.onClassAlert = { tap in
                         app.activeTab = 2
                         // The push names only the record and the subscription.
@@ -168,11 +171,8 @@ struct UCBShowsApp: App {
                     let outcome = await account.restoreOnLaunch()
                     tickets.adopt(outcome)
                 }
-                // The shows feed lands after the wallet does, so a ticket read
-                // at launch had nothing to match against. Count, not contents:
-                // a full array compare of ~2300 shows on every feed apply is
-                // exactly the cost this is trying to avoid.
-                .onChange(of: store.allShows.count) { _, _ in
+                // Same-count feed updates can resolve previously unmatched tickets.
+                .onChange(of: store.feedVersion) { _, _ in
                     tickets.backfillShowJoins()
                 }
                 // Periodic ticket/QR refresh: every foreground (throttled to
@@ -188,9 +188,6 @@ struct UCBShowsApp: App {
                     // A refund, an Ask to Buy approval or a flipped TestFlight
                     // flag lands here; a changed answer queues its reconcile.
                     Task { await classAlertsAccess.refresh() }
-                    // The launch fetch is otherwise the class list's only
-                    // automatic refresh. Throttled inside the store.
-                    Task { await classesStore.refreshIfStale() }
                 }
         }
     }

@@ -125,8 +125,10 @@ final class ClassAlertsAccess {
         do {
             try await AppStore.sync()
             await refresh(rerunIfRunning: true)
-            if !isUnlocked {
+            if isLocked {
                 purchaseMessage = "No Class Alerts purchase found for this Apple ID."
+            } else if state == .unknown {
+                purchaseMessage = "The App Store couldn’t verify Class Alerts access. Try restoring again."
             }
         } catch StoreKitError.userCancelled {
             // Dismissing the sign-in sheet isn't something to report.
@@ -200,16 +202,22 @@ final class ClassAlertsAccess {
 
     // MARK: StoreKit reads
 
-    /// Unverified or revoked (refunded) transactions don't count.
-    private static func hasPurchase() async -> Bool {
+    /// Only a verified entitlement unlocks alerts. If StoreKit supplies a
+    /// matching entitlement it can't verify, hold existing subscriptions
+    /// until a subsequent refresh can establish whether to revoke them.
+    private static func hasPurchase() async -> Bool? {
+        var answer: Bool? = false
         for await result in Transaction.currentEntitlements {
-            if case .verified(let transaction) = result,
-               transaction.productID == ClassAlertsAccessPolicy.productID,
-               transaction.revocationDate == nil {
-                return true
+            switch result {
+            case .verified(let transaction):
+                if transaction.productID == ClassAlertsAccessPolicy.productID, transaction.revocationDate == nil {
+                    return true
+                }
+            case .unverified(let transaction, _):
+                if transaction.productID == ClassAlertsAccessPolicy.productID { answer = nil }
             }
         }
-        return false
+        return answer
     }
 
     /// Never calls `AppTransaction.refresh()`, which can show a sign-in

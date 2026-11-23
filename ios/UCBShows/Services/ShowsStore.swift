@@ -33,14 +33,7 @@ struct DaySection: Identifiable {
 @MainActor
 @Observable
 final class ShowsStore {
-    enum Phase: Equatable {
-        case loading        // first load, nothing to show yet
-        case loaded         // showing fresh data
-        case offline        // showing cached data, refresh failed
-        case failed(String) // nothing to show and refresh failed
-    }
-
-    private(set) var phase: Phase = .loading
+    var phase: FeedLoader<ShowsPayload>.Phase { loader.phase }
     private(set) var allShows: [Show] = []
     private(set) var lastUpdated: Date?
     private(set) var sourcesInfo: [SourceInfo] = []
@@ -50,7 +43,7 @@ final class ShowsStore {
         didSet { Self.persistFilters(filters) }
     }
 
-    private let service: FeedService<ShowsPayload>
+    private let loader: FeedLoader<ShowsPayload>
     private static let filtersKey = "filters"
 
     /// Memo for `sections`, which is called from inside `ShowsFeedView.body`.
@@ -65,7 +58,7 @@ final class ShowsStore {
     /// reading it in `sections` is what registers the view's dependency on the
     /// feed on the cache-hit path, where `allShows` is never touched. Only ever
     /// written from `apply`, never during body evaluation.
-    private var feedVersion = 0
+    private(set) var feedVersion = 0
 
     /// Diagnostic: how many times the sections were actually rebuilt, i.e. the
     /// memo's miss count. Read by the offline logic harness.
@@ -108,7 +101,7 @@ final class ShowsStore {
     static let expiryGrace: TimeInterval = 6 * 3600
 
     init(service: FeedService<ShowsPayload> = .shows) {
-        self.service = service
+        self.loader = FeedLoader(service)
         self.filters = Self.loadFilters() ?? Filters()
     }
 
@@ -147,35 +140,14 @@ final class ShowsStore {
         }
     }
 
-    // MARK: Loading
-
-    /// Show cached data instantly (if any), then refresh from the network. The
-    /// cache read + decode runs off the main actor to avoid a launch hitch.
-    func loadInitial() async {
-        if allShows.isEmpty {
-            let service = self.service
-            if let cached = await Task.detached(priority: .utility, operation: { service.cachedPayload() }).value {
-                apply(cached)
-                phase = .loaded
-            }
-        }
-        await refresh(force: false)
+    /// Check on launch, foreground, and while the app is open.
+    func refreshIfStale(maxAge: TimeInterval = 300) async {
+        await loader.refreshIfStale(maxAge: maxAge, apply: apply)
     }
 
-    /// Refresh from the network. `force` — the default, since every caller
-    /// outside the store is the user pulling or tapping "Try Again" — makes
-    /// the request revalidate with the origin even inside the CDN's max-age,
-    /// so an explicit refresh can't "succeed" out of `URLCache` while offline.
-    /// The launch path passes false and lets the protocol cache answer.
+    /// A user action or class alert revalidates even a recently checked feed.
     func refresh(force: Bool = true) async {
-        do {
-            let payload = try await service.fetchRemote(
-                policy: force ? .reloadRevalidatingCacheData : .useProtocolCachePolicy)
-            apply(payload)
-            phase = .loaded
-        } catch {
-            phase = allShows.isEmpty ? .failed(error.localizedDescription) : .offline
-        }
+        await loader.refresh(force: force, apply: apply)
     }
 
     /// The single write path for show data — both loaders above go through it,

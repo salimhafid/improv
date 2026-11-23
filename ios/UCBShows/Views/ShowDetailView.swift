@@ -6,6 +6,18 @@ import SwiftUI
 struct ShowDetailView: View {
     let show: Show
     let namespace: Namespace.ID
+    @Environment(ShowsStore.self) private var store
+
+    var body: some View {
+        // Saved wallet shows can outlive their listing in the public feed.
+        let current = store.allShows.first { $0.id == show.id } ?? show
+        ShowDetailContent(show: current, namespace: namespace)
+    }
+}
+
+private struct ShowDetailContent: View {
+    let show: Show
+    let namespace: Namespace.ID
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL

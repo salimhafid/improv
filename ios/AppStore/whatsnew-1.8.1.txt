@@ -1,0 +1,1 @@
+Shows, classes, and the talent directory now refresh while you browse and when you return to Improv. If a school’s class list is delayed, you’ll see when its listings were last updated. Class alerts now recover more reliably after connection or account changes, and tapping an alert opens the latest available class details.

@@ -21,7 +21,7 @@ struct ShowsPayload: Decodable {
         generatedAt = try c.decodeIfPresent(String.self, forKey: .generatedAt)
         count = try c.decodeIfPresent(Int.self, forKey: .count)
         sources = (try c.decodeIfPresent(Lossy<SourceInfo>.self, forKey: .sources))?.elements
-        shows = (try c.decodeIfPresent(Lossy<Show>.self, forKey: .shows))?.elements ?? []
+        shows = try c.decode(Lossy<Show>.self, forKey: .shows).elements
     }
 }
 

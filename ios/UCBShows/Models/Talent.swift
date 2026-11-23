@@ -17,7 +17,7 @@ struct TalentPayload: Decodable {
         generatedAt = try c.decodeIfPresent(String.self, forKey: .generatedAt)
         count = try c.decodeIfPresent(Int.self, forKey: .count)
         // Element-lossy: one malformed person never aborts the directory.
-        people = (try c.decodeIfPresent(Lossy<TalentPerson>.self, forKey: .people))?.elements ?? []
+        people = try c.decode(Lossy<TalentPerson>.self, forKey: .people).elements
     }
 }
 

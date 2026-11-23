@@ -13,6 +13,7 @@ struct SchoolFolder: Identifiable, Equatable {
     let id: String
     let name: String
     let count: Int
+    let sourceNotice: String?
     let subjects: [SubjectGroup]
 }
 
@@ -147,19 +148,12 @@ struct ClassAlertTarget: Equatable {
 @MainActor
 @Observable
 final class ClassesStore {
-    enum Phase: Equatable {
-        case loading
-        case loaded
-        case offline
-        case failed(String)
-    }
-
-    private(set) var phase: Phase = .loading
+    var phase: FeedLoader<ClassesPayload>.Phase { loader.phase }
     private(set) var allClasses: [ClassItem] = []
     private(set) var lastUpdated: Date?
     private(set) var sourcesInfo: [SourceInfo] = []
 
-    private let service: FeedService<ClassesPayload>
+    private let loader: FeedLoader<ClassesPayload>
 
     /// Memo for `schoolFolders`, which is called from inside `ClassesView.body`.
     /// `@ObservationIgnored` is LOAD-BEARING: an observed write during body
@@ -179,15 +173,6 @@ final class ClassesStore {
     /// memo's miss count. Read by the offline logic harness.
     @ObservationIgnored private(set) var layoutBuildCount = 0
 
-    /// When a network fetch last succeeded — the staleness clock behind
-    /// `refreshIfStale`. Nil until one has. Ignored by observation: no view
-    /// reads it, and every write would otherwise invalidate the Classes tab.
-    @ObservationIgnored private var lastFetched: Date?
-    /// Network fetches in flight. A foreground at cold launch lands while the
-    /// launch fetch is still running; that one is about to answer, so
-    /// `refreshIfStale` stands down instead of sending a duplicate.
-    @ObservationIgnored private var fetchesInFlight = 0
-
     private struct LayoutKey: Equatable {
         let theaters: Set<String>
         /// Already normalized (see `normalizedQuery`).
@@ -196,67 +181,17 @@ final class ClassesStore {
     }
 
     init(service: FeedService<ClassesPayload> = .classes) {
-        self.service = service
+        self.loader = FeedLoader(service)
     }
 
-    // MARK: Loading
-
-    func loadInitial() async {
-        if allClasses.isEmpty {
-            let service = self.service
-            if let cached = await Task.detached(priority: .utility, operation: { service.cachedPayload() }).value {
-                apply(cached)
-                phase = .loaded
-            }
-        }
-        await refresh(force: false)
-    }
-
-    /// Refresh from the network. `force` — the default, since every caller
-    /// outside the store is the user pulling, tapping "Try Again", or waiting
-    /// on an alerted class — makes the request revalidate with the origin even
-    /// inside the CDN's max-age, so an explicit refresh can't "succeed" out of
-    /// `URLCache` while offline. The launch and foreground paths pass false
-    /// and let the protocol cache answer.
-    func refresh(force: Bool = true) async {
-        fetchesInFlight += 1
-        defer { fetchesInFlight -= 1 }
-        do {
-            let payload = try await service.fetchRemote(
-                policy: force ? .reloadRevalidatingCacheData : .useProtocolCachePolicy)
-            apply(payload)
-            phase = .loaded
-            lastFetched = Date()
-        } catch {
-            // A caller torn down mid-request (the class-alert lookup in
-            // `ClassesView` is cancelled whenever its target changes or the
-            // tab goes away) says nothing about connectivity; reporting it
-            // as `.offline` would raise the offline banner over a good feed.
-            if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
-            phase = allClasses.isEmpty ? .failed(error.localizedDescription) : .offline
-        }
-    }
-
-    /// Foreground refresh: the launch fetch is the only automatic one, so an
-    /// app left running for days kept showing the class list it launched
-    /// with — and a just-alerted class could never appear in it. Throttled
-    /// (default: the CDN's 5-minute max-age, inside which a fetch can't see
-    /// anything newer anyway) and let the protocol cache answer, so frequent
-    /// app switching costs at most a 304.
+    /// Check on launch, foreground, and while the app is open.
     func refreshIfStale(maxAge: TimeInterval = 300) async {
-        guard fetchesInFlight == 0,
-              Self.isStale(lastFetched: lastFetched, now: Date(), maxAge: maxAge) else { return }
-        await refresh(force: false)
+        await loader.refreshIfStale(maxAge: maxAge, apply: apply)
     }
 
-    /// The staleness decision, pure so the harness can check it: never
-    /// fetched, or the last success is more than `maxAge` old. A clock set
-    /// backwards (`now` before the stamp) also counts as stale rather than
-    /// suppressing refreshes until the clock catches up.
-    static func isStale(lastFetched: Date?, now: Date, maxAge: TimeInterval) -> Bool {
-        guard let lastFetched else { return true }
-        let age = now.timeIntervalSince(lastFetched)
-        return age > maxAge || age < 0
+    /// A user action or class alert revalidates even a recently checked feed.
+    func refresh(force: Bool = true) async {
+        await loader.refresh(force: force, apply: apply)
     }
 
     // MARK: Class alerts
@@ -269,9 +204,34 @@ final class ClassesStore {
     func item(for target: ClassAlertTarget) -> ClassItem? {
         guard target.classIDs.count == 1, let id = target.classIDs.first else { return nil }
         if let hit = allClasses.first(where: { $0.rawID == id }) { return hit }
-        guard !id.contains("/"), let school = target.school, !school.isEmpty else { return nil }
-        let prefixed = "\(school)/\(id)"
-        return allClasses.first { $0.rawID == prefixed }
+        var qualifiedID = id
+        if !id.contains("/"), let school = target.school, !school.isEmpty {
+            qualifiedID = "\(school)/\(id)"
+            if let hit = allClasses.first(where: { $0.rawID == qualifiedID }) { return hit }
+        }
+        if let school = target.school, !SourceCatalog.isUCB(school) { return nil }
+        return relocatedUCBClass(qualifiedID)
+    }
+
+    /// A class page opened from a cached snapshot must also follow a campus
+    /// correction if its first network refresh arrives after navigation.
+    func currentItem(for snapshot: ClassItem) -> ClassItem? {
+        if let exact = allClasses.first(where: { $0.id == snapshot.id }) { return exact }
+        guard SourceCatalog.isUCB(snapshot.source) else { return nil }
+        return relocatedUCBClass(snapshot.rawID)
+    }
+
+    /// Arlo assigned a numeric EventID across UCB campuses. The replacement
+    /// catalog corrects some campus labels while preserving that EventID.
+    private func relocatedUCBClass(_ qualifiedID: String) -> ClassItem? {
+        let parts = qualifiedID.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, SourceCatalog.isUCB(String(parts[0])) else { return nil }
+        let eventID = parts[1]
+        guard !eventID.isEmpty, eventID.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        let matches = allClasses.filter {
+            SourceCatalog.isUCB($0.source) && $0.rawID == "\($0.source)/\(eventID)"
+        }
+        return matches.count == 1 ? matches[0] : nil
     }
 
     /// The single write path for class data — both loaders above go through it,
@@ -387,12 +347,25 @@ final class ClassesStore {
             // the chosen theater silently vanish from this list. Suppressed
             // during a search, where an empty result is self-explanatory.
             let picked = theaters.contains(entry.id)
-            guard !classes.isEmpty || (picked && query.isEmpty) else { return nil }
+            let notice = sourceNotice(for: entry.id)
+            guard !classes.isEmpty || (query.isEmpty && (picked || notice != nil)) else { return nil }
             return SchoolFolder(id: entry.id, name: entry.name, count: classes.count,
-                                subjects: Self.subjectGroups(from: classes, source: entry.id))
+                                sourceNotice: notice, subjects: Self.subjectGroups(from: classes, source: entry.id))
         }
         return SchoolFolderLayout(selected: folders,
                                   orderKey: folders.map(\.id).joined(separator: "|"))
+    }
+
+    /// A fresh aggregate can contain an older snapshot for one school. The
+    /// source's scrape timestamp identifies the listings the user can see.
+    private func sourceNotice(for school: String) -> String? {
+        guard let source = sourcesInfo.first(where: { $0.id == school }),
+              source.stale || !source.ok || source.error?.isEmpty == false else { return nil }
+        guard source.count > 0 else { return "Class listings temporarily unavailable" }
+        if let date = source.scrapedAt {
+            return "Showing saved listings from \(date.formatted(date: .abbreviated, time: .shortened))"
+        }
+        return "Showing saved listings"
     }
 
     /// Improv Core and Sketch Core lead, then the fixed subject order. Each

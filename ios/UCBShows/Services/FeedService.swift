@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Fetches a JSON feed and keeps a local "last-good" copy so a tab shows content
 /// instantly on launch and survives being offline. One generic replaces the
@@ -41,6 +42,7 @@ struct FeedService<Payload: Decodable> {
             throw FeedError.badResponse(http.statusCode)
         }
         let payload = try JSONDecoder().decode(Payload.self, from: data)
+        try Task.checkCancellation()
         try? data.write(to: cacheURL, options: .atomic)   // best-effort last-good cache
         return payload
     }
@@ -49,6 +51,86 @@ struct FeedService<Payload: Decodable> {
     func cachedPayload() -> Payload? {
         guard let data = try? Data(contentsOf: cacheURL) else { return nil }
         return try? JSONDecoder().decode(Payload.self, from: data)
+    }
+}
+
+/// One refresh at a time per feed, including its disk-cache read and write.
+@MainActor
+@Observable
+final class FeedLoader<Payload: Decodable & Sendable> {
+    enum Phase: Equatable {
+        case loading, loaded, offline, failed(String)
+    }
+
+    private(set) var phase: Phase = .loading
+    private let service: FeedService<Payload>
+    @ObservationIgnored private var checkedDisk = false
+    @ObservationIgnored private var hasPayload = false
+    @ObservationIgnored private var lastFetched: Date?
+    @ObservationIgnored private var inFlight: URLRequest.CachePolicy?
+    @ObservationIgnored private var waiters: [CheckedContinuation<Bool, Never>] = []
+
+    init(_ service: FeedService<Payload>) {
+        self.service = service
+    }
+
+    static func isStale(lastFetched: Date?, now: Date, maxAge: TimeInterval) -> Bool {
+        guard let lastFetched else { return true }
+        let age = now.timeIntervalSince(lastFetched)
+        return age > maxAge || age < 0
+    }
+
+    func refreshIfStale(maxAge: TimeInterval, apply: @escaping (Payload) -> Void) async {
+        guard !Task.isCancelled else { return }
+        // Navigation can cancel one view while another still needs this feed.
+        await Task {
+            guard Self.isStale(lastFetched: lastFetched, now: Date(), maxAge: maxAge) else { return }
+            await refresh(force: false, apply: apply)
+        }.value
+    }
+
+    func refresh(force: Bool, apply: (Payload) -> Void) async {
+        // Share equivalent requests. A pull or alert arriving during an automatic
+        // check still needs a revalidation, after the first request has finished.
+        while let policy = inFlight {
+            let finished = await withCheckedContinuation { waiters.append($0) }
+            if finished && (!force || policy == .reloadRevalidatingCacheData) { return }
+        }
+        guard !Task.isCancelled else { return }
+        let policy: URLRequest.CachePolicy = force ? .reloadRevalidatingCacheData : .useProtocolCachePolicy
+        inFlight = policy
+        var finished = false
+        defer {
+            inFlight = nil
+            let waiting = waiters
+            waiters.removeAll()
+            for waiter in waiting { waiter.resume(returning: finished) }
+        }
+        if !checkedDisk {
+            let service = self.service
+            let cached = await Task.detached(priority: .utility) { service.cachedPayload() }.value
+            guard !Task.isCancelled else { return }
+            checkedDisk = true
+            if let cached {
+                apply(cached)
+                hasPayload = true
+                phase = .loaded
+            }
+        }
+        do {
+            let payload = try await service.fetchRemote(policy: policy)
+            try Task.checkCancellation()
+            apply(payload)
+            hasPayload = true
+            lastFetched = Date()
+            phase = .loaded
+        } catch {
+            guard !Task.isCancelled, !(error is CancellationError),
+                  (error as? URLError)?.code != .cancelled else { return }
+            lastFetched = nil
+            phase = hasPayload ? .offline : .failed(error.localizedDescription)
+        }
+        finished = true
     }
 }
 

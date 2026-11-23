@@ -23,6 +23,20 @@ struct SafariView: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }
 
+/// Gives an empty result screen the same pull-to-refresh gesture as its list.
+struct ScrollablePlaceholder<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                content().frame(minHeight: geometry.size.height)
+            }
+            .scrollBounceBehavior(.always)
+        }
+    }
+}
+
 /// Pinned date section header for the feed.
 struct SectionHeaderView: View {
     let title: String
