@@ -1,300 +1,218 @@
-"""UCB classes (New York, Los Angeles and Online) via the Arlo public REST API.
-
-ucbcomedy.com's course pages are Cloudflare-protected + client-rendered, but the
-data is served as JSON by Arlo (ucbcomedy.arlo.co). We page through eventsearch
-once (memoized) and split sessions by location tags or their venue metadata.
-
-Two requests, one walk each per run: the class-alert watcher (raw_events) keeps
-the light field list it polls every ~2 minutes; the daily feed build asks the
-same search for the course copy, the meeting pattern and each session's venue
-as well (about 1.1 MB instead of 0.14 MB for the catalog, still two pages).
-"""
+"""UCB's public registration catalog, shared by the class feed and alert watcher."""
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
-from collections import Counter
-from datetime import datetime
-from urllib.parse import parse_qs, urlencode, urlsplit
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from urllib.parse import urljoin, urlsplit
+from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 
-from common import block_text, clean, fetch_json, make_class, strip_html
+from common import CITY_TZ, block_text, clean, fetch_html, local_today, make_class
 
 log = logging.getLogger("ucb.classes.source")
 
-ARLO_BASE = "https://ucbcomedy.arlo.co/api/2012-02-01/pub/resources/"
-# UCB's supported course resolver redirects to the canonical course permalink
-# and preserves `event`, selecting this exact session (not every Improv 101).
-# Arlo's raw ViewUri points at the old home-page route; use its template ID
-# with the current /courses/ resolver, as UCB's own catalog does.
-COURSE_URL = "https://ucbcomedy.com/courses/"
-_FIELDS = ("EventID,ViewUri,Name,StartDateTime,Summary,IsFull,Location,"
-           "Categories,Tags,Presenters,AdvertisedOffers")
-_EXPAND = "Categories,Presenters,AdvertisedOffers,Location"
-# Feed build only: Sessions is the one place Arlo publishes the street address
-# and the number of meetings (the event-level Location is usually just a name).
-_FEED_FIELDS = _FIELDS + ",EndDateTime,Description,SessionsDescription,Sessions"
-_FEED_EXPAND = _EXPAND + ",Sessions"
-_LOCATION_TAGS = ("LOC_NY", "LOC_LA", "LOC_Online")
-
-# Memo the (paged) event list so the NY, LA and Online passes in one aggregate
-# don't each re-page the whole catalog. A failed walk is memoised too (as the
-# error) so a mid-walk outage is not re-walked three times per run. Keyed by
-# request: False = the watcher's light walk, True = the feed's detailed one.
-_memo: dict[bool, tuple[float, list | Exception]] | None = None
+CATALOG_URL = "https://ucbcomedy.com/training-center/course/"
+_SCHOOLS = {"New York": "ucb_ny", "Los Angeles": "ucb_la", "Online": "ucb_online"}
+# Some published sections have no data-cat tags while still belonging to a
+# clearly labeled catalog group (e.g. Acting or Improv Workshops & Drop-Ins).
+_GROUP_CATEGORIES = {
+    "Acting": ("acting",), "Character": ("sketch-and-character",),
+    "Clowning": ("clowning",), "Featured Programs": ("featured-programs",),
+    "Improv Electives": ("improv-electives",), "Advanced Study Improv": ("improv",),
+    "Improv Workshops & Drop-Ins": ("improv", "workshop"), "Musical Improv": ("musical-improv",),
+    "Sketch Electives": ("sketch-electives",), "Stand-Up": ("stand-up",),
+    "Writing Programs": ("writing-programs",), "Improv": ("improv",),
+    "Improv & Musical Improv": ("improv",), "Sketch & Character": ("sketch-and-character",),
+    "Sketch and Character": ("sketch-and-character",),
+}
+# UCB replaced Arlo in November 2026. Keep the feed and watcher's existing IDs
+# for migrated sections. New sections use the course slug AND section number:
+# different courses reuse the same number, including leading zeroes.
+_LEGACY_IDS = json.loads(Path(__file__).with_name("ucb_section_ids.json").read_text())
+_SECTION_PATH = re.compile(r"/course/([\w-]+)/(\d+)/", flags=re.ASCII)
+_memo: tuple[float, list | Exception] | None = None
 _MEMO_TTL = 120.0
+_feed_cache: ContextVar[dict | None] = ContextVar("ucb_feed_catalog", default=None)
 
 
-def event_location_tags(event: dict) -> list[str]:
-    """Route a published session even before its optional LOC tag is assigned.
-
-    Explicit location tags take precedence, including unsupported locations
-    such as LOC_TX. Only an event without any LOC tag may use venue metadata.
-    These exact names/cities mirror Arlo's public UCB locations; class titles,
-    descriptions and ambiguous state-only addresses do not establish a city.
-    """
-    tags = event.get("Tags") or []
-    if not isinstance(tags, (list, tuple)):
-        tags = []
-    location_tags = [tag for tag in tags if isinstance(tag, str) and tag.startswith("LOC_")]
-    if location_tags:
-        return [tag for tag in _LOCATION_TAGS if tag in location_tags]
-    location = event.get("Location")
-    if not isinstance(location, dict):
-        return []
-    name = clean(location.get("Name")).casefold()
-    if location.get("IsOnline") is True or name == "online":
-        return ["LOC_Online"]
-    country = clean(location.get("Country")).casefold()
-    if country and country not in {"united states", "united states of america", "us", "usa"}:
-        return []
-    city = clean(location.get("City")).casefold()
-    if re.match(r"^ny\s*:", name) or city in {"new york", "new york city"}:
-        return ["LOC_NY"]
-    if re.match(r"^la\s*:", name) or city == "los angeles":
-        return ["LOC_LA"]
-    return []
-
-
-def _events(detailed: bool = False) -> list[dict]:
-    global _memo
-    memo = (_memo or {}).get(detailed)
-    if memo and (time.monotonic() - memo[0]) < _MEMO_TTL:
-        if isinstance(memo[1], Exception):
-            raise RuntimeError(f"ucb_classes: Arlo walk failed earlier this run: {memo[1]}")
-        return memo[1]
+@contextmanager
+def feed_snapshot():
+    """All campuses in one publish share the first catalog read, even when
+    detail enrichment between campuses takes longer than the polling TTL."""
+    token = _feed_cache.set({})
     try:
-        items = _walk(_FEED_FIELDS, _FEED_EXPAND) if detailed else _walk()
-    except Exception as e:
-        _memo = {**(_memo or {}), detailed: (time.monotonic(), e)}
-        raise
-    _memo = {**(_memo or {}), detailed: (time.monotonic(), items)}
-    return items
+        yield
+    finally:
+        _feed_cache.reset(token)
 
 
-def _walk(fields: str = _FIELDS, expand: str = _EXPAND) -> list[dict]:
-    items: list[dict] = []
-    skip = 0
-    while skip <= 5000:
-        url = (f"{ARLO_BASE}eventsearch/?format=json&top=100&skip={skip}"
-               f"&fields={fields}&expand={expand}")
-        data = fetch_json(url)
-        batch = data.get("Items", []) or []
-        items.extend(batch)
-        if not data.get("NextPageUri") or not batch:
+def _text(node, selector):
+    el = node.select_one(selector)
+    return clean(el.get_text(" ", strip=True)) if el else ""
+
+
+def _start(dates: str, schedule: str, city: str, today: date) -> str | None:
+    # The register page gives a month/day, sometimes including a year. It
+    # lists upcoming classes and can still show yesterday near midnight.
+    match = re.match(r"([A-Za-z]+) (\d{1,2})(?:,? (\d{4}))?\b", dates)
+    if not match:
+        return None
+    month, day, year = match.groups()
+    for candidate in ([int(year)] if year else [today.year - 1, today.year, today.year + 1]):
+        try:
+            first = datetime.strptime(f"{month[:3]} {day} {candidate}", "%b %d %Y")
+        except ValueError:
+            continue
+        if year or first.date() >= today - timedelta(days=7):
             break
-        # Advance by what Arlo actually returned — if it ever pages at <100,
-        # a fixed +100 stride would silently skip records.
-        skip += len(batch)
-    # Log once per API walk, rather than once for each city using the memo.
-    # Explicit other-city tags are expected; unassigned sessions need review.
-    for event in items:
-        tags = event.get("Tags") or []
-        has_location_tag = isinstance(tags, (list, tuple)) and any(
-            isinstance(tag, str) and tag.startswith("LOC_") for tag in tags)
-        if event.get("EventID") and clean(event.get("Name")) and not has_location_tag:
-            inferred = event_location_tags(event)
-            if inferred:
-                log.info("UCB session routed from venue id=%s title=%r location=%r routes=%s",
-                         event["EventID"], clean(event["Name"]), event.get("Location"), inferred)
-            else:
-                log.warning("unassigned UCB session id=%s title=%r location=%r",
-                            event["EventID"], clean(event["Name"]), event.get("Location"))
-    return items
-
-
-def _price(offers) -> str:
-    if not offers:
-        return ""
-    amt = (offers[0] or {}).get("OfferAmount") or {}
-    return amt.get("FormattedAmountTaxInclusive") or amt.get("FormattedAmountTaxExclusive") or ""
-
-
-def registration_url(event: dict) -> str:
-    """Resolve the source's course template and exact session without guessing a slug.
-
-    Missing identifiers must fail the source and retain its last-good feed,
-    rather than publishing a Register button that opens an unrelated catalog.
-    Only numeric source IDs are used; the source's URL host is never followed.
-    """
-    view_uri = event.get("ViewUri")
-    if not isinstance(view_uri, str):
-        raise ValueError("UCB class is missing its course-template URL")
-    template_ids = parse_qs(urlsplit(view_uri).query).get("arlo_id", [])
-    event_id = str(event.get("EventID") or "")
-    if (len(template_ids) != 1 or not re.fullmatch(r"[1-9][0-9]*", template_ids[0])
-            or not re.fullmatch(r"[1-9][0-9]*", event_id)):
-        raise ValueError("UCB class is missing valid course-template/session identifiers")
-    return COURSE_URL + "?" + urlencode({"eventtemplate": template_ids[0], "event": event_id})
-
-
-def _description(ev: dict) -> str:
-    """The course copy as plain paragraphs, without the teacher biography some
-    workshops append (a paragraph opening "<presenter name> is ..." or
-    "Instructor bio"). "" when Arlo has no Description for the event."""
-    desc = ev.get("Description")
-    html = desc.get("Text") if isinstance(desc, dict) else None
-    if not isinstance(html, str) or not html.strip():
-        return ""
-    # Source line wraps and &nbsp; spacers are layout, not paragraph breaks.
-    text = block_text(BeautifulSoup(re.sub(r"\s+", " ", html), "lxml")).replace("\xa0", " ")
-    names = [clean(p.get("Name")).casefold() for p in (ev.get("Presenters") or [])
-             if isinstance(p, dict) and p.get("Name")]
-    paragraphs = []
-    for para in text.split("\n\n"):
-        para = "\n".join(line for line in (clean(l) for l in para.split("\n")) if line)
-        # Copy pasted with hard-wrapped lines (<br> mid-sentence, ~70 columns):
-        # a long line that runs on into a lowercase word is one sentence.
-        para = re.sub(r"(?<=[^\n]{40})(?<![.!?:;])\n(?=[a-z])", " ", para)
-        low = para.casefold()
-        if not para or low.startswith("instructor bio") or any(low.startswith(n + " is ") for n in names):
-            continue
-        paragraphs.append(para)
-    return "\n\n".join(paragraphs)
-
-
-def _sessions(ev: dict) -> list[dict]:
-    sessions = ev.get("Sessions")
-    return [s for s in sessions if isinstance(s, dict)] if isinstance(sessions, list) else []
-
-
-def _schedule(ev: dict, start: str | None) -> str:
-    """"Sundays 11am-2pm ET · Nov 29 - Jan 31 · 8 sessions + class show": Arlo's
-    meeting pattern, the first-to-last session dates and the number of class
-    meetings. Without a pattern (one-off workshops) the first session's date
-    and time stand in for it, as before."""
-    first = None
-    if start:
-        try:
-            first = datetime.strptime(start, "%Y-%m-%dT%H:%M:%S")
-        except ValueError:
-            return start
-    end_raw = ev.get("EndDateTime")
-    last = None
-    if first and isinstance(end_raw, str):
-        try:
-            last = datetime.strptime(end_raw[:19], "%Y-%m-%dT%H:%M:%S")
-        except ValueError:
-            pass
-    parts = []
-    pattern = re.sub(r"^Duration\s+", "", clean(ev.get("SessionsDescription")), flags=re.I)
-    if pattern:
-        parts.append(pattern)
-    elif first:
-        line = first.strftime("%A, %B %-d @ %-I:%M %p")
-        if last and last.date() == first.date() and last > first:
-            line += last.strftime(" - %-I:%M %p")
-        parts.append(line)
-    if first and last and last.date() > first.date():
-        parts.append(f"{first.strftime('%b %-d')} - {last.strftime('%b %-d')}")
-    elif first and pattern:
-        parts.append(first.strftime("%b %-d"))
-    # The class show and its tech rehearsal are sessions in Arlo, but UCB's
-    # own copy counts class meetings only ("8 sessions ... a class performance").
-    names = [clean(s.get("Name")).casefold() for s in _sessions(ev)]
-    extras = [n for n in names if "show" in n or "rehearsal" in n]
-    meetings = len(names) - len(extras) or len(names)
-    if meetings > 1:
-        show = len(extras) < len(names) and any("show" in n for n in extras)
-        parts.append(f"{meetings} sessions" + (" + class show" if show else ""))
-    return " · ".join(parts)
-
-
-def _location(ev: dict, loc_tag: str) -> str:
-    """"<venue>, <street>, <city>" of the venue most sessions meet at (the
-    class show is often on another stage), else of the event's own Location
-    when it carries an address; "Online" for an online class."""
-    if loc_tag == "LOC_Online":
-        return "Online"
-    venues = [s["Location"] for s in _sessions(ev) if isinstance(s.get("Location"), dict)]
-    if venues:
-        key = Counter((clean(v.get("VenueName")), clean(v.get("StreetLine1"))) for v in venues).most_common(1)[0][0]
-        venue = next(v for v in venues if (clean(v.get("VenueName")), clean(v.get("StreetLine1"))) == key)
     else:
-        venue = ev.get("Location") if isinstance(ev.get("Location"), dict) else {}
-    if venue.get("IsOnline") is True or "online" in (clean(venue.get("Name")).casefold(),
-                                                     clean(venue.get("City")).casefold()):
-        return "Online"
-    street = clean(venue.get("StreetLine1"))
-    if not street:
-        return ""       # a bare campus label ("NY: Union Square") is not an address
-    parts = [clean(venue.get("VenueName")), street, clean(venue.get("StreetLine2")), clean(venue.get("City"))]
-    return ", ".join(p for p in parts if p)
+        return None
+    clock = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?", schedule, re.I)
+    if not clock:
+        return first.date().isoformat()
+    hour, minute, meridiem = clock.groups()
+    if not 1 <= int(hour) <= 12 or int(minute or 0) >= 60:
+        return first.date().isoformat()
+    first = first.replace(hour=int(hour) % 12 + (12 if meridiem.lower() == "p" else 0),
+                          minute=int(minute or 0))
+    # The app interprets naive Online times as Eastern. UCB often publishes
+    # online times in Pacific time; the displayed schedule retains its label.
+    if city == "Online":
+        zone = re.search(r"\b(PT|PDT|PST|ET|EDT|EST)\b", schedule, re.I)
+        if zone and zone[1].upper().startswith("P"):
+            first = first.replace(tzinfo=ZoneInfo("America/Los_Angeles")).astimezone(CITY_TZ[city])
+            first = first.replace(tzinfo=None)
+    return first.isoformat()
 
 
-def _build(loc_tag: str, source: str, org: str, city: str) -> list[dict]:
-    out: list[dict] = []
-    for ev in _events(detailed=True):
-        if loc_tag not in event_location_tags(ev):
-            continue
-        title = clean(ev.get("Name"))
-        if not title:
-            continue
-        start_raw = ev.get("StartDateTime") or ""
-        start = start_raw[:19] if len(start_raw) >= 19 and start_raw[10] == "T" else None
-        schedule = _schedule(ev, start)
-        cats = ev.get("Categories") or []
-        level = re.sub(r"^\d+\.\s*", "", clean((cats[0] or {}).get("Name"))) if cats else ""
-        instructor = ", ".join(clean(p.get("Name")) for p in (ev.get("Presenters") or []) if p.get("Name"))
-        # Arlo's Summary is usually just "Category: Improv & Musical Improv" —
-        # a duplicate of `level`, not a description; publish only real copy.
-        # The event's Description is the real course copy; Summary only stands
-        # in when it is missing. Some Summaries wrap the label in quotes.
-        summary = strip_html(ev.get("Summary"))
-        description = _description(ev) or (
-            "" if summary.lstrip("\"'\u201c\u2018 ").lower().startswith("category:") else summary)
-        out.append(make_class(
-            id=f"{source}/{ev.get('EventID')}",
-            title=title,
-            url=registration_url(ev),
-            instructor=instructor,
-            schedule=schedule,
-            start=start,
-            price=_price(ev.get("AdvertisedOffers")),
-            level=level,
-            description=description,
-            location=_location(ev, loc_tag),
-            is_full=bool(ev.get("IsFull")),
-            source=source, org=org, city=city,
-        ))
-    return out
+def _parse_catalog(html: str) -> list[tuple[dict, list[str], bool]]:
+    soup = BeautifulSoup(html, "lxml")
+    rows = soup.select("tr.ucb-cl-run")
+    total = re.fullmatch(r"Showing ([\d,]+) class(?:es)?", _text(soup, ".ucb-cl-count"), re.I)
+    if not rows or not total or len(rows) != int(total[1].replace(",", "")):
+        raise ValueError(f"Incomplete UCB registration catalog ({len(rows)} section rows)")
+    sessions = []
+    seen = set()
+    for row in rows:
+        where = row.select_one('[data-label="Where"] .ucb-cl-run-value')
+        if not where:
+            raise ValueError("UCB section is missing its location")
+        city = _text(where, ".ucb-cl-run-sub") or clean(where.get_text(" ", strip=True))
+        school = _SCHOOLS.get(city)
+        if not school:
+            continue  # UCB also publishes classes in Austin, Pittsburgh, etc.
+        link = row.select_one('[data-label="Status"] a[href]')
+        url = urlsplit(urljoin(CATALOG_URL, link["href"])) if link else None
+        path = _SECTION_PATH.fullmatch(url.path) if url and url.netloc == "ucbcomedy.com" else None
+        section = row.find_parent("section", class_="ucb-cl-sub")
+        group = row.find_parent("article", class_="ucb-cl-course")
+        title = _text(section, ".ucb-cl-sub-title") if section else ""
+        if not path or url.scheme != "https" or not title or row.get("data-open") not in ("0", "1"):
+            raise ValueError(f"Incomplete UCB section for {title!r} in {city}")
+        slug, number = path.groups()
+        key = f"{slug}/{number}"
+        if key in seen:
+            raise ValueError(f"Duplicate UCB section {key}")
+        seen.add(key)
+        session_id = _LEGACY_IDS.get(key, f"section-{slug}-{number}")
+        dates = _text(row, '[data-label="Starts"]')
+        pattern = _text(row, '[data-label="Schedule"]')
+        # The in-person meeting calendar is venue-local. UCB's LA stand-up
+        # section, for example, says 7 PM PST in its meetings but has a stray
+        # “ET” in the listing. Keep the venue clock and omit a conflicting
+        # label. Online listings explicitly use both Eastern and Pacific.
+        if city == "Los Angeles":
+            pattern = re.sub(r"\s+E(?:[DS])?T\b", "", pattern, flags=re.I)
+        elif city == "New York":
+            pattern = re.sub(r"\s+P(?:[DS])?T\b", "", pattern, flags=re.I)
+        instructor = _text(row, '[data-label="Instructor"] .ucb-cl-run-value')
+        item = make_class(
+            id=f"{school}/{session_id}", source=school, org="UCB", city=city,
+            title=title, url="https://ucbcomedy.com" + path[0],
+            instructor="Teacher TBD" if instructor == "UCBclasses" else instructor,
+            schedule=" · ".join(filter(None, (pattern, dates))),
+            start=_start(dates, pattern, city, local_today(city)),
+            level=_text(group, ".ucb-cl-course-title") if group else "",
+            price=_text(row, '[data-label="Price"]'),
+            location=clean(where.get_text(", ", strip=True)), is_full=row["data-open"] == "0",
+        )
+        listed_categories = row.get("data-cat", "").split()
+        categories = listed_categories or list(_GROUP_CATEGORIES.get(item["level"], ()))
+        tags = categories + row.get("data-freq", "").split()
+        sessions.append((item, tags, not listed_categories))
+    if not sessions:
+        raise ValueError("UCB registration catalog has no supported locations")
+    return sessions
+
+
+def catalog() -> list[tuple[dict, list[str], bool]]:
+    global _memo
+    scope = _feed_cache.get()
+    cached = None
+    if scope is not None:
+        cached = scope.get("catalog")
+    elif _memo and time.monotonic() - _memo[0] < _MEMO_TTL:
+        cached = _memo[1]
+    if isinstance(cached, Exception):
+        raise RuntimeError(f"UCB catalog failed earlier this run: {cached}") from cached
+    if cached is not None:
+        return cached
+    try:
+        # UCB's bare page is served from a shared WordPress page cache. A
+        # stable query gets the same public listing with current seat counts.
+        sessions = _parse_catalog(fetch_html(CATALOG_URL + "?improv_catalog=1"))
+    except Exception as exc:
+        sessions = exc
+    _memo = (time.monotonic(), sessions)
+    if scope is not None:
+        scope["catalog"] = sessions
+    if isinstance(sessions, Exception):
+        raise sessions
+    return sessions
+
+
+def section_category_tags(url: str) -> list[str]:
+    """Read explicit subject labels from a new section whose listing omits them."""
+    try:
+        soup = BeautifulSoup(fetch_html(url), "lxml")
+    except Exception as exc:  # optional detail must not delay the alert past this scan
+        log.warning("UCB section categories unavailable at %s: %r", url, exc)
+        return []
+    tagline = _text(soup, ".ucb-class-band__tagline")
+    label = re.fullmatch(r"Category:\s*(.+)", tagline, re.I)
+    if not label:
+        return []
+    return [tag for subject in label[1].split("/") for tag in _GROUP_CATEGORIES.get(subject.strip(), ())]
+
+
+def class_detail(url: str) -> dict | None:
+    soup = BeautifulSoup(fetch_html(url), "lxml")
+    # A redirect to the generic course page does not identify this section.
+    if not soup.select_one(".ucb-class-band__title"):
+        return None
+    about = soup.select_one(".ucb-class-about__body")
+    return {"description": block_text(about) if about else ""}
+
+
+def _for_school(source: str) -> list[dict]:
+    # Feed enrichment mutates its rows; keep the common listing read-only.
+    return [item.copy() for item, _, _ in catalog() if item["source"] == source]
 
 
 def fetch_ny() -> list[dict]:
-    return _build("LOC_NY", "ucb_ny", "UCB", "New York")
+    return _for_school("ucb_ny")
 
 
 def fetch_la() -> list[dict]:
-    return _build("LOC_LA", "ucb_la", "UCB", "Los Angeles")
+    return _for_school("ucb_la")
 
 
 def fetch_online() -> list[dict]:
-    return _build("LOC_Online", "ucb_online", "UCB", "Online")
-
-
-def raw_events() -> list[dict]:
-    """The full tagged Arlo event list (paged, memoized) — used by the
-    class-alert watcher, which needs LOC_* and CTG_* tags directly."""
-    return _events()
+    return _for_school("ucb_online")

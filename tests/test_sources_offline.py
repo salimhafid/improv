@@ -10,7 +10,7 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import patch
 
-from sources import crowdwork, magnet, playground, second_city, ucb, ucb_classes, ucb_talent, wgis
+from sources import crowdwork, magnet, playground, second_city, ucb, ucb_talent, wgis
 
 
 def _iso(day: date, hh: int = 20, offset: str = "-05:00") -> str:
@@ -157,110 +157,43 @@ class UcbDetailTests(unittest.TestCase):
         self.assertTrue(description.endswith("blurb\u2026"))
 
 
-# ---- UCB classes (Arlo) ------------------------------------------------------
-
-def _arlo_event(eid: int, summary: str, tag: str = "LOC_NY") -> dict:
-    return {"EventID": eid, "Name": f"Improv 101: Section {eid}", "StartDateTime": "2026-10-01T19:00:00-04:00",
-            "ViewUri": "https://ucbcomedy.com/?object_post_type=event&arlo_id=42",
-            "Summary": summary, "Tags": [tag], "Categories": [{"Name": "1. Improv"}],
-            "Presenters": [{"Name": "Jane Doe"}], "AdvertisedOffers": []}
-
-
-class UcbClassesTests(unittest.TestCase):
-    def setUp(self):
-        ucb_classes._memo = None
-        self.addCleanup(setattr, ucb_classes, "_memo", None)
-
-    def test_category_summary_is_not_a_description(self):
-        page = {"Items": [_arlo_event(1, "Category: Improv &amp; Musical Improv"),
-                          _arlo_event(2, "<p>Learn the Harold.</p>")]}
-        with patch.object(ucb_classes, "fetch_json", return_value=page) as fj:
-            by_id = {c["id"]: c for c in ucb_classes.fetch_ny()}
-        self.assertEqual(by_id["ucb_ny/1"]["description"], "")
-        self.assertEqual(by_id["ucb_ny/2"]["description"], "Learn the Harold.")
-        self.assertEqual(by_id["ucb_ny/1"]["level"], "Improv")
-        url = fj.call_args[0][0]
-        self.assertIn("Location", url)   # routes published sessions before LOC tags are assigned
-        self.assertIn("ViewUri", url)
-
-    def test_registration_targets_exact_sessions_in_the_same_course(self):
-        page = {"Items": [_arlo_event(40741, ""), _arlo_event(40742, "", "LOC_LA"),
-                          _arlo_event(40743, "", "LOC_Online")]}
-        with patch.object(ucb_classes, "fetch_json", return_value=page):
-            classes = ucb_classes.fetch_ny() + ucb_classes.fetch_la() + ucb_classes.fetch_online()
-        self.assertEqual([c["url"] for c in classes], [
-            f"https://ucbcomedy.com/courses/?eventtemplate=42&event={eid}"
-            for eid in (40741, 40742, 40743)])
-
-    def test_registration_rejects_missing_or_ambiguous_identifiers(self):
-        for changes in ({"ViewUri": None}, {"ViewUri": "https://ucbcomedy.com/"},
-                        {"ViewUri": "https://ucbcomedy.com/?arlo_id=42&arlo_id=43"},
-                        {"ViewUri": "https://ucbcomedy.com/?arlo_id=42oops"},
-                        {"EventID": "40741&event=other"}, {"EventID": 0}):
-            with self.subTest(changes=changes):
-                event = _arlo_event(40741, "") | changes
-                with self.assertRaises(ValueError):
-                    ucb_classes.registration_url(event)
-
-    def test_failed_walk_is_memoised_within_a_run(self):
-        # A mid-walk failure must not be re-walked by the LA and Online passes.
-        with patch.object(ucb_classes, "fetch_json", side_effect=RuntimeError("arlo down")) as fj:
-            for fetch in (ucb_classes.fetch_ny, ucb_classes.fetch_la, ucb_classes.fetch_online):
-                with self.assertRaises(RuntimeError):
-                    fetch()
-        self.assertEqual(fj.call_count, 1)
-
-
-# ---- UCB talent (DCM grid + dt_team pages) ----------------------------------
-
-def _dcm_posts(offset: int, n: int, total: int, names=None) -> dict:
-    names = names or [f"Person {offset + i}" for i in range(n)]
-    posts = "".join(
-        f'<a href="https://ucbcomedy.com/people/p-{offset + i}/" aria-label="{name}">'
-        f'<img class="x" src="https://u.test/{offset + i}.jpg"></a>'
-        for i, name in enumerate(names))
-    return {"posts": posts, "total": total}
-
+# ---- UCB talent (WordPress REST collection) ---------------------------------
 
 class UcbTalentTests(unittest.TestCase):
-    def test_dcm_names_are_html_unescaped(self):
-        payload = _dcm_posts(0, 2, 2, ["Brady O&#8217;Callahan", "Ethan &amp; Gigi"])
-        with patch.object(ucb_talent, "post_json", return_value=payload):
-            people, total = ucb_talent._dcm_batch(0)
-        self.assertEqual([p["name"] for p in people], ["Brady O\u2019Callahan", "Ethan & Gigi"])
-        self.assertEqual(total, 2)
+    @staticmethod
+    def page(start, count, total=101):
+        rows = [{"slug": f"p-{i}", "link": f"https://ucbcomedy.com/people/p-{i}/",
+                 "title": {"rendered": f"Performer &amp; guest {i}"},
+                 "dt_team_category": [31, 270], "content": {"rendered": "<p>A bio.</p>"},
+                 "yoast_head_json": {"og_image": [{"url": "https://x.test/headshot.jpg"}]}}
+                for i in range(start, start + count)]
+        return {"status": 200, "headers": {"X-WP-TotalPages": (total + 99) // 100,
+                                          "X-WP-Total": total}, "body": rows}
 
-    def test_one_failed_batch_is_not_fatal(self):
-        # 60 people at 12 per batch: offset 24 fails, 48/60 = 80 % still passes.
-        def fake_post(url, data):
-            offset = int(url.rsplit("=", 1)[1])
-            if offset == 24:
-                raise RuntimeError("status=202 challenged=True")
-            return _dcm_posts(offset, 12, 60)
-        with patch.object(ucb_talent, "post_json", side_effect=fake_post):
-            with self.assertLogs("ucb.talent", level="WARNING"):
-                roster = ucb_talent.fetch_dcm_roster()
-        self.assertEqual(len(roster), 48)
+    def test_full_group_includes_following_page_and_biographies(self):
+        pages = [self.page(0, 100), self.page(100, 1)]
+        with patch.object(ucb_talent, "fetch_json", side_effect=pages) as fetch:
+            people = ucb_talent.fetch_group("ny")
+        self.assertIn("dt_team_category=31", fetch.call_args_list[0].args[0])
+        self.assertIn("page=2&", fetch.call_args_list[1].args[0])
+        self.assertEqual(len(people), 101)
+        self.assertEqual(people[-1], {
+            "slug": "p-100", "name": "Performer & guest 100", "dcm": True,
+            "bio": "A bio.", "bio_done": True, "image": "https://x.test/headshot.jpg",
+            "url": "https://ucbcomedy.com/people/p-100/"})
 
-    def test_too_many_failed_batches_raise(self):
-        def fake_post(url, data):
-            offset = int(url.rsplit("=", 1)[1])
-            if offset:
-                raise RuntimeError("status=202 challenged=True")
-            return _dcm_posts(0, 12, 60)
-        with patch.object(ucb_talent, "post_json", side_effect=fake_post):
-            with self.assertLogs("ucb.talent", level="WARNING"):
+    def test_incomplete_or_repeated_pages_cannot_replace_a_group(self):
+        for last in (self.page(100, 0), self.page(0, 1), {"status": 400, "body": []}):
+            with self.subTest(last=last), patch.object(ucb_talent, "fetch_json",
+                                                       side_effect=[self.page(0, 100), last]):
                 with self.assertRaises(RuntimeError):
-                    ucb_talent.fetch_dcm_roster()
+                    ucb_talent.fetch_group("ny")
 
-    def test_page_names_are_unescaped(self):
-        html = ('<div class="wf-cell" data-name="Ethan &amp; Gigi"><div class="team-container dt_team_category-dcm">'
-                '<a href="https://ucbcomedy.com/people/ethan-gigi/"><img data-src="https://u.test/e.jpg"></a>'
-                '</div></div>')
-        with patch.object(ucb_talent, "fetch_html", return_value=html):
-            (p,) = ucb_talent.fetch_page("https://ucbcomedy.com/talent/new-york/")
-        self.assertEqual(p["name"], "Ethan & Gigi")
-        self.assertTrue(p["dcm"])
+    def test_wrong_category_is_not_a_success(self):
+        page = self.page(0, 1, total=1)
+        with patch.object(ucb_talent, "fetch_json", return_value=page):
+            with self.assertRaisesRegex(RuntimeError, "invalid profile"):
+                ucb_talent.fetch_group("teachers")
 
 
 # ---- Crowdwork (per-date expansion) ----------------------------------------

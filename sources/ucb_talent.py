@@ -1,131 +1,69 @@
-"""UCB talent directory adapter.
-
-The NY, LA, and teachers pages share the same WordPress "dt_team" grid
-markup: each person is a `div.wf-cell` carrying `data-name`, a
-`/people/<slug>/` profile link, a lazy-loaded headshot in `data-src`, and
-category classes (`dt_team_category-dcm`, house-team names, …) on the inner
-`.team-container`.
-
-The DCM talent page is a WP Grid Builder AJAX grid (its /page/N/ URLs all
-serve the same first 30 people), so the full ~1,200-person roster is paged
-through the grid's own load-more endpoint: POST `/?wpgb-ajax=refresh&
-_load_more=<offset>` with a `wpgb` form field carrying the grid config —
-captured from the live page's XHR traffic. The `dt_team_category-dcm` class
-on the static pages still contributes dcm tags as a bonus.
+"""UCB's public WordPress talent directory. Each published dt_team category
+backs one roster. The REST collection supplies profile links, bios and
+headshots and reports both the page count and total number of people.
 """
 from __future__ import annotations
 
-import html
-import json
-import logging
-import re
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
 
-from common import clean, fetch_html, post_json, safe_url
+from common import clean, fetch_html, fetch_json, safe_url, strip_html
 
-log = logging.getLogger("ucb.talent")
-
-PAGES = [
-    ("ny",       "https://ucbcomedy.com/talent/new-york/"),
-    ("la",       "https://ucbcomedy.com/talent/los-angeles/"),
-    ("teachers", "https://ucbcomedy.com/talent/teachers/"),
-]
-
-_SLUG = re.compile(r"/people/([^/]+)/?")
+# Stable WordPress term IDs (ny-talent, la-talent, teachers, dcm).
+GROUP_TERMS = {"ny": 31, "la": 21, "teachers": 22, "dcm": 270}
+_COLLECTION = "https://ucbcomedy.com/wp-json/wp/v2/dt_team"
 
 
-_DCM_GRID_CONFIG = json.dumps({
-    "main_query": [], "permalink": "https://ucbcomedy.com/talent/dcm-talent/",
-    "facets": [2, 4, 5, 11, 13], "lang": "", "id": "team_grid_f82f7fb1",
-    "is_template": True,
-})
-_DCM_ENDPOINT = "https://ucbcomedy.com/?wpgb-ajax=refresh&_load_more={offset}"
-_DCM_BATCH = 12
+def _page(group: str, page: int) -> dict:
+    query = urlencode({
+        "dt_team_category": GROUP_TERMS[group], "per_page": 100,
+        "orderby": "id", "order": "asc", "page": page, "_envelope": 1,
+        "_fields": "slug,link,title.rendered,content.rendered,dt_team_category,yoast_head_json.og_image",
+    })
+    result = fetch_json(f"{_COLLECTION}?{query}")
+    if not isinstance(result, dict) or result.get("status") != 200 or not isinstance(result.get("body"), list):
+        raise RuntimeError(f"ucb_talent: invalid {group} roster page {page}")
+    return result
 
 
-def _dcm_batch(offset: int) -> tuple[list[dict], int]:
-    """One load-more batch of the DCM grid → (people, reported total).
-    Raises RuntimeError when the endpoint cannot be fetched/decoded."""
-    d = post_json(_DCM_ENDPOINT.format(offset=offset), data={"wpgb": _DCM_GRID_CONFIG})
-    if not isinstance(d, dict):
-        raise RuntimeError(f"ucb_talent: DCM batch {offset} is not a JSON object")
-    posts = (d.get("posts") or "").replace("\\/", "/")
-    people = []
-    for m in re.finditer(r'<a href="(https://ucbcomedy\.com/people/([^/"]+)/)"\s+aria-label="([^"]+)">\s*<img[^>]+src="([^"]+)"', posts):
-        # aria-label is raw attribute text: "Brady O&#8217;Callahan" needs unescaping.
-        people.append({"name": clean(html.unescape(m.group(3))), "slug": m.group(2),
-                       "url": m.group(1), "image": safe_url(m.group(4))})
-    return people, int(d.get("total") or 0)
+def fetch_group(group: str) -> list[dict]:
+    first = _page(group, 1)
+    headers = first["headers"]
+    pages, total = int(headers["X-WP-TotalPages"]), int(headers["X-WP-Total"])
+    if not (0 < total and pages == (total + 99) // 100):
+        raise RuntimeError(f"ucb_talent: invalid {group} pagination ({total} people, {pages} pages)")
+    rows = list(first["body"])
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for result in pool.map(lambda page: _page(group, page), range(2, pages + 1)):
+            rows.extend(result["body"])
 
-
-def _dcm_batch_or_empty(offset: int) -> list[dict]:
-    """A failed batch is non-fatal: the 80 % completeness check below decides
-    whether the roster is usable, so one bad answer doesn't sink ~75 others."""
-    try:
-        return _dcm_batch(offset)[0]
-    except Exception as e:  # noqa: BLE001 - fetch, decode or shape error alike
-        log.warning("ucb_talent: DCM batch at offset %d failed: %s", offset, e)
-        return []
-
-
-def fetch_dcm_roster() -> list[dict]:
-    """The full DCM roster via the grid's load-more endpoint. The first batch
-    reports the total, the rest are fetched in parallel."""
-    first, total = _dcm_batch(0)
-    if not first or not total:
-        raise RuntimeError("ucb_talent: DCM roster endpoint returned nothing")
-    offsets = list(range(len(first), total, _DCM_BATCH))
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        batches = list(ex.map(_dcm_batch_or_empty, offsets))
-    seen: dict[str, dict] = {p["slug"]: p for p in first}
-    for b in batches:
-        for p in b:
-            seen.setdefault(p["slug"], p)
-    if len(seen) < total * 0.8:
-        raise RuntimeError(f"ucb_talent: DCM roster incomplete ({len(seen)}/{total})")
-    return list(seen.values())
+    people = {}
+    for row in rows:
+        slug, url = row["slug"], safe_url(row["link"])
+        name = strip_html(row["title"]["rendered"])
+        categories = row["dt_team_category"]
+        if not (slug and url and name and GROUP_TERMS[group] in categories):
+            raise RuntimeError(f"ucb_talent: invalid profile on {group} roster")
+        images = (row.get("yoast_head_json") or {}).get("og_image") or []
+        image = safe_url(images[0].get("url")) if images else None
+        person = {"slug": slug, "name": name, "url": url, "image": image or None,
+                  "dcm": GROUP_TERMS["dcm"] in categories}
+        biography = strip_html((row.get("content") or {}).get("rendered"))[:1500]
+        if biography:
+            person.update(bio=biography, bio_done=True)
+        people[slug] = person
+    if len(people) != total:
+        raise RuntimeError(f"ucb_talent: incomplete {group} roster ({len(people)}/{total})")
+    return list(people.values())
 
 
 def bio(url: str) -> str | None:
-    """Fetch a /people/<slug>/ profile page → bio text; "" when the page has
-    no bio, None when the FETCH failed (so the enrichment cache retries next
-    run instead of remembering an empty bio forever)."""
+    """Profile fallback for people whose collection entry contains no bio."""
     try:
         soup = BeautifulSoup(fetch_html(url), "lxml")
     except RuntimeError:
         return None
     el = soup.select_one(".ucb-talent-individual__bio")
     return clean(el.get_text(" "))[:1500] if el else ""
-
-
-def fetch_page(url: str) -> list[dict]:
-    """One dt_team talent page → [{name, slug, url, image, dcm}]."""
-    soup = BeautifulSoup(fetch_html(url), "lxml")
-    people: list[dict] = []
-    for cell in soup.select("div.wf-cell[data-name]"):
-        name = clean(html.unescape(cell.get("data-name", "")))
-        link = cell.select_one("a[href*='/people/']")
-        if not name or not link:
-            continue
-        href = safe_url(link.get("href"))
-        m = _SLUG.search(href or "")
-        if not m:
-            continue
-        img_el = cell.select_one("img[data-src]") or cell.select_one("img[src]")
-        raw = (img_el.get("data-src") or img_el.get("src") or "") if img_el else ""
-        image = safe_url(raw) if raw.startswith("http") else None
-
-        container = cell.select_one(".team-container")
-        classes = " ".join((container.get("class") if container else cell.get("class")) or [])
-        people.append({
-            "name": name,
-            "slug": m.group(1),
-            "url": href,
-            "image": image,
-            "dcm": "dt_team_category-dcm" in classes,
-        })
-    if not people:
-        raise RuntimeError(f"ucb_talent: no people parsed from {url}")
-    return people

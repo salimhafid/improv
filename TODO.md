@@ -131,13 +131,8 @@ behind a $9.99 in-app purchase and is not yet uploaded).
       count moves off 541. The stage now comes from `showAttributes.venue`
       — the blank-venue rate (68 % of the frozen carry) should drop; if it
       doesn't, the field moved again.
-- [ ] **ucbcomedy.com 202s** to the Actions runner: all three talent pages fail
-      every run (roster carried from 2026-08-31), DCM alternates 202 / non-JSON,
-      `ucb_ny` shows succeed only on some ticks. This branch logs the first
-      offending body per host once per run at WARNING (`ucb.common`) — read it
-      in the scrape log to learn what Cloudflare is serving — and backs the
-      talent sweep off 6 h after a total failure. Root cause and remedy
-      (different fingerprint? request volume? egress IP?) still open.
+- [ ] Confirm that all four talent groups advance their `scraped_at` on the
+      first production sweep with the WordPress REST adapter.
 - [ ] **A failing source is due every run** (its `scraped_at` stays null), and
       the cron is now hourly: a broken Second City costs ~91 requests/hour
       until fixed. Consider a failure back-off in `run_sources` like the
@@ -244,9 +239,8 @@ that break the build.
 - [ ] **Mixed-city day sections** in the I'm-Going list take Today/Tomorrow
       from the first show's zone (`DaySection.group`); keying sections on
       city+day would change the grouping — product decision.
-- [ ] `SourceInfo.stale`/`scraped_at` are decoded but ignored by the app, so a
-      carried source (`ucb_ny`, Second City) renders as fully available. The
-      data is there if the sidebar should hint "last updated N days ago".
+- [ ] The Classes tab shows each stale school's last successful refresh.
+      The Shows sidebar could also display per-source freshness.
 - [ ] `ShowsStore.sections` memo key does not include the moving 6-hour grace
       cutoff, so between 00:00 and 06:00 a show crossing the line waits for
       the next key change to drop out. `ClassItem.hasKeyword` tolerates `+s`
@@ -300,7 +294,7 @@ that break the build.
       request when cutting bandwidth. The code is in git history, but note
       that `main` was rewritten on 2026-09-04, so search by message/date
       (`git log --all -- 'ios/UCBWidget/*'`), not by old hashes.
-- [ ] Talent directory: the PAGES list in sources/ucb_talent.py is the
+- [ ] Talent directory: the GROUP_TERMS mapping in sources/ucb_talent.py is the
       extension point if UCB adds rosters (e.g. touring companies).
 - [x] Watcher payload: `classIDs` now carries feed ids and the app opens
       the tapped class from it (1.7). `count` is still unread.

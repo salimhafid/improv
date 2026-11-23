@@ -26,14 +26,12 @@ from datetime import datetime, timezone
 
 import storage
 from aggregation import parse_dt
-from sources.ucb_talent import PAGES, bio, fetch_dcm_roster, fetch_page
+from sources.ucb_talent import GROUP_TERMS, bio, fetch_group
 
 log = logging.getLogger("ucb.talent")
 
-# The roster changes rarely and a full refresh is ~80 requests (grid pages +
-# DCM load-more sweep), so re-scrape each group at most daily (with the same
-# early-tick grace as the show/class loop); in-between runs reuse the
-# previous payload and only keep converging bios.
+# Each category is scraped daily, with the same early-tick grace as the
+# shows and classes. Other runs reuse the roster and fill any missing bios.
 _ROSTER_INTERVAL = 24 * 3600
 _ROSTER_GRACE = 30 * 60
 # When a sweep fails outright (every group it tried errored — the host is
@@ -55,7 +53,6 @@ _BIO_WORKERS = 8
 _BIO_DEADLINE = 5 * 60
 _PAST_DEADLINE = object()    # safe() result for a fetch skipped by the deadline
 
-_GROUPS = [g for g, _ in PAGES] + ["dcm"]
 _GROUP_CITY = {"ny": "New York", "la": "Los Angeles"}   # teachers/dcm span cities
 
 
@@ -82,6 +79,8 @@ def _enrich_bios(people: list[dict], prev_people: list[dict], deadline=None) -> 
             if p.get("slug") and (p.get("bio_done") or p.get("bio"))}
     to_fetch = []
     for person in people:
+        if person.get("bio_done"):
+            continue
         cached = prev.get(person.get("slug"))
         if cached is not None:
             person["bio"] = cached.get("bio", "")
@@ -149,9 +148,11 @@ def aggregate_talent(now: datetime | None = None) -> dict:
     prev_people = [p for p in previous.get("people", []) if isinstance(p, dict)]
     prev_stamps = _prev_stamps(previous)
     prev_counts = {g: sum(1 for p in prev_people if g in (p.get("groups") or []))
-                   for g in _GROUPS}
+                   for g in GROUP_TERMS}
 
-    due = {g for g in _GROUPS if _group_due(prev_stamps.get(g), now)}
+    due = {g for g in GROUP_TERMS if _group_due(prev_stamps.get(g), now)}
+    previous_errors = {s["id"]: s.get("error") for s in previous.get("sources", [])
+                       if isinstance(s, dict) and s.get("id")}
     if due and _backing_off(previous, now):
         log.info("talent: last sweep failed outright at %s; backing off (%s due)",
                  previous.get("roster_attempted_at"), sorted(due))
@@ -160,14 +161,18 @@ def aggregate_talent(now: datetime | None = None) -> dict:
     people: dict[str, dict] = {}   # slug → person
     summary: list[dict] = []
 
-    def merge(p: dict, group: str, extra_dcm: bool = False) -> None:
-        entry = people.setdefault(p["slug"], {**p, "groups": []})
+    def merge(p: dict, group: str, *, fresh: bool = False) -> None:
+        entry = people.setdefault(p["slug"], {"groups": []})
+        for key, value in p.items():
+            if key in ("groups", "dcm"):
+                continue
+            # A cached group can be merged before or after a fresh profile.
+            if key not in entry or (value and (fresh or not entry[key])):
+                entry[key] = value
         if group not in entry["groups"]:
             entry["groups"].append(group)
-        if extra_dcm and "dcm" not in entry["groups"]:
+        if p.get("dcm") and "dcm" not in entry["groups"]:
             entry["groups"].append("dcm")
-        if not entry.get("image") and p.get("image"):
-            entry["image"] = p["image"]
 
     def row(group: str, count: int, *, stale: bool, scraped_at: str | None,
             error: str | None) -> None:
@@ -176,7 +181,7 @@ def aggregate_talent(now: datetime | None = None) -> dict:
                         "stale": stale and bool(count), "scraped_at": scraped_at,
                         "error": error})
 
-    def carry_group(group: str, error: Exception | None) -> None:
+    def carry_group(group: str, error: str | None) -> None:
         carried = skipped = 0
         for prev in prev_people:
             if group not in (prev.get("groups") or []):
@@ -201,25 +206,22 @@ def aggregate_talent(now: datetime | None = None) -> dict:
             raise RuntimeError(f"ucb_talent: {group} parsed {count} people vs {prev_count} "
                                f"last time (truncated page?)")
 
-    def scrape_group(group: str, fetch) -> None:
+    def scrape_group(group: str) -> None:
         if group not in due:
-            carry_group(group, None)
+            carry_group(group, previous_errors.get(group))
             return
         try:
-            fetched = fetch()
+            fetched = fetch_group(group)
             check_shrink(group, len(fetched))
             for p in fetched:
-                merge(p, group, extra_dcm=p.pop("dcm", False))
+                merge(p, group, fresh=True)
             row(group, len(fetched), stale=False, scraped_at=now.isoformat(), error=None)
             log.info("talent group %s: %d people", group, len(fetched))
         except Exception as e:  # noqa: BLE001 - carry the group from last-good
-            carry_group(group, e)
+            carry_group(group, str(e))
 
-    for group, url in PAGES:
-        scrape_group(group, lambda url=url: fetch_page(url))
-    # Full DCM roster from the grid's load-more endpoint (the category-class
-    # tags above only cover DCM people who are also on the NY/LA/teacher pages).
-    scrape_group("dcm", fetch_dcm_roster)
+    for group in GROUP_TERMS:
+        scrape_group(group)
 
     ordered = sorted(people.values(), key=lambda p: (p.get("name") or "").lower())
     fetched = _enrich_bios(ordered, prev_people, deadline=bio_deadline)

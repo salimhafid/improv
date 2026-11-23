@@ -23,13 +23,13 @@ SOURCES = [
 ]
 
 CLASS_SOURCES = [
-    {"id": "ucb_ny", "org": "UCB", "city": "New York", "fetch": ucb_classes.fetch_ny},
+    {"id": "ucb_ny", "org": "UCB", "city": "New York", "fetch": ucb_classes.fetch_ny, "detail": ucb_classes.class_detail},
     {"id": "brooklyn_cc", "org": "Brooklyn Comedy Collective", "city": "New York", "fetch": brooklyn_cc.fetch_classes},
     {"id": "magnet", "org": "Magnet Theater", "city": "New York", "fetch": magnet.fetch_classes, "detail": magnet.class_detail},
     {"id": "wgis_ny", "org": "WGIS", "city": "New York", "fetch": wgis.fetch_classes_ny, "detail": wgis.class_detail,
      "detail_overrides": ("schedule",)},
-    {"id": "ucb_la", "org": "UCB", "city": "Los Angeles", "fetch": ucb_classes.fetch_la},
-    {"id": "ucb_online", "org": "UCB", "city": "Online", "fetch": ucb_classes.fetch_online},
+    {"id": "ucb_la", "org": "UCB", "city": "Los Angeles", "fetch": ucb_classes.fetch_la, "detail": ucb_classes.class_detail},
+    {"id": "ucb_online", "org": "UCB", "city": "Online", "fetch": ucb_classes.fetch_online, "detail": ucb_classes.class_detail},
     {"id": "wgis_la", "org": "WGIS", "city": "Los Angeles", "fetch": wgis.fetch_classes_la, "detail": wgis.class_detail,
      "detail_overrides": ("schedule",)},
     {"id": "annoyance", "org": "The Annoyance", "city": "Chicago", "fetch": annoyance.fetch_classes},

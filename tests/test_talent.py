@@ -15,8 +15,6 @@ import storage
 import talent
 
 NOW = datetime(2026, 7, 22, 12, 0, 0, tzinfo=timezone.utc)
-PAGES = [("ny", "https://x.test/ny"), ("la", "https://x.test/la"),
-         ("teachers", "https://x.test/teachers")]
 
 
 class MustNotFetch(Exception):
@@ -58,12 +56,11 @@ class TalentHarness(unittest.TestCase):
         self.addCleanup(env.stop)
         os.environ.pop("TALENT_BIO_BUDGET", None)
         # Default fetchers: every page/roster answers, bios are empty strings.
-        self.pages = {url: [_page_person(f"{g}1"), _page_person(f"{g}2")] for g, url in PAGES}
-        self.fetch_page = Mock(side_effect=lambda url: [dict(p) for p in self.pages[url]])
-        self.fetch_dcm = Mock(return_value=[_page_person("dcm1"), _page_person("dcm2")])
+        self.pages = {g: [_page_person(f"{g}1"), _page_person(f"{g}2")]
+                      for g in talent.GROUP_TERMS}
+        self.fetch_group = Mock(side_effect=lambda g: [dict(p) for p in self.pages[g]])
         self.bio = Mock(return_value="")
-        for name, value in (("PAGES", PAGES), ("fetch_page", self.fetch_page),
-                            ("fetch_dcm_roster", self.fetch_dcm), ("bio", self.bio)):
+        for name, value in (("fetch_group", self.fetch_group), ("bio", self.bio)):
             p = patch.object(talent, name, value)
             p.start()
             self.addCleanup(p.stop)
@@ -81,8 +78,7 @@ class TalentHarness(unittest.TestCase):
 class TalentSweepTests(TalentHarness):
     def test_first_run_sweeps_every_group_with_uniform_rows(self):
         payload = self.run_at()
-        self.assertEqual(self.fetch_page.call_count, 3)
-        self.fetch_dcm.assert_called_once()
+        self.assertEqual(self.fetch_group.call_count, 4)
         rows = self.rows(payload)
         self.assertEqual(set(rows), {"ny", "la", "teachers", "dcm"})
         for row in rows.values():
@@ -97,6 +93,17 @@ class TalentSweepTests(TalentHarness):
         self.assertEqual(payload["roster_attempted_at"], NOW.isoformat())
         self.assertEqual(payload["count"], 8)
 
+    def test_fresh_profile_replaces_old_bio_even_after_a_group_was_carried(self):
+        old = (NOW - timedelta(days=2)).isoformat()
+        storage.save_talent(_previous([_person("shared", "ny", "la", bio="Old bio")],
+                                      {"ny": NOW.isoformat(), "la": old,
+                                       "teachers": NOW.isoformat(), "dcm": NOW.isoformat()}))
+        self.pages["la"] = [dict(_page_person("shared"), name="New name", bio="New bio", bio_done=True)]
+        (person,) = self.run_at()["people"]
+        self.assertEqual((person["name"], person["bio"], person["groups"]),
+                         ("New name", "New bio", ["ny", "la"]))
+        self.bio.assert_not_called()
+
     def test_only_due_groups_are_fetched(self):
         stale = (NOW - timedelta(hours=25)).isoformat()
         fresh = (NOW - timedelta(hours=2)).isoformat()
@@ -104,9 +111,8 @@ class TalentSweepTests(TalentHarness):
             [_person("ny1", "ny"), _person("la1", "la"), _person("t1", "teachers"),
              _person("dcm1", "dcm")],
             {"ny": stale, "la": fresh, "teachers": fresh, "dcm": fresh}))
-        self.fetch_dcm.side_effect = MustNotFetch("dcm not due")
         payload = self.run_at()
-        self.fetch_page.assert_called_once_with("https://x.test/ny")
+        self.fetch_group.assert_called_once_with("ny")
         rows = self.rows(payload)
         self.assertEqual(rows["ny"]["scraped_at"], NOW.isoformat())
         for g in ("la", "teachers", "dcm"):
@@ -124,18 +130,15 @@ class TalentSweepTests(TalentHarness):
                                       {"ny": just_short, "la": just_short,
                                        "teachers": just_short, "dcm": just_short}))
         self.run_at()
-        self.assertEqual(self.fetch_page.call_count, 3)
-        self.fetch_dcm.assert_called_once()
+        self.assertEqual(self.fetch_group.call_count, 4)
 
     def test_nothing_due_makes_no_requests_and_keeps_people(self):
         fresh = (NOW - timedelta(hours=1)).isoformat()
         storage.save_talent(_previous([_person("ny1", "ny", "dcm", bio="hi")],
                                       {"ny": fresh, "la": fresh, "teachers": fresh, "dcm": fresh}))
-        self.fetch_page.side_effect = MustNotFetch()
-        self.fetch_dcm.side_effect = MustNotFetch()
+        self.fetch_group.side_effect = MustNotFetch()
         payload = self.run_at()
-        self.fetch_page.assert_not_called()
-        self.fetch_dcm.assert_not_called()
+        self.fetch_group.assert_not_called()
         self.bio.assert_not_called()
         (person,) = payload["people"]
         self.assertEqual(person["bio"], "hi")
@@ -151,10 +154,8 @@ class TalentSweepTests(TalentHarness):
         storage.save_talent(_previous([_person("la1", "la"), _person("dcm1", "dcm")],
                                       {"ny": None, "la": fresh, "teachers": fresh, "dcm": fresh},
                                       roster_attempted_at=fresh))
-        self.fetch_dcm.side_effect = MustNotFetch("dcm not due")
         payload = self.run_at()
-        self.fetch_page.assert_called_once_with("https://x.test/ny")
-        self.fetch_dcm.assert_not_called()
+        self.fetch_group.assert_called_once_with("ny")
         self.assertEqual(self.rows(payload)["ny"]["scraped_at"], NOW.isoformat())
 
     def test_legacy_payload_without_row_stamps_uses_roster_clock(self):
@@ -164,7 +165,7 @@ class TalentSweepTests(TalentHarness):
                              "people": [_person("ny1", "ny")]})
         self.assertTrue(talent._group_due(talent._prev_stamps(storage.load_talent())["ny"], NOW))
         self.run_at()
-        self.assertEqual(self.fetch_page.call_count, 3)
+        self.assertEqual(self.fetch_group.call_count, 4)
 
 
 class TalentFailureTests(TalentHarness):
@@ -174,8 +175,8 @@ class TalentFailureTests(TalentHarness):
             [_person("ny1", "ny"), _person("la1", "la"), _person("t1", "teachers"),
              _person("dcm1", "dcm")],
             {"ny": stale, "la": stale, "teachers": stale, "dcm": stale}))
-        self.fetch_page.side_effect = lambda url: (
-            (_ for _ in ()).throw(RuntimeError("202")) if url.endswith("/ny") else [_page_person("x")])
+        self.fetch_group.side_effect = lambda url: (
+            (_ for _ in ()).throw(RuntimeError("202")) if url == "ny" else [_page_person("x")])
         payload = self.run_at()
         rows = self.rows(payload)
         self.assertTrue(rows["ny"]["stale"])
@@ -188,49 +189,41 @@ class TalentFailureTests(TalentHarness):
         # A partially successful sweep does not back off: ny is retried on the
         # next tick while la/teachers/dcm wait out their day.
         later = NOW + timedelta(hours=3)
-        self.fetch_page.reset_mock()
-        self.fetch_dcm.reset_mock()
-        self.fetch_dcm.side_effect = MustNotFetch()
+        self.fetch_group.reset_mock()
         self.run_at(later)
-        self.fetch_page.assert_called_once_with("https://x.test/ny")
-        self.fetch_dcm.assert_not_called()
+        self.fetch_group.assert_called_once_with("ny")
 
     def test_outright_failure_backs_off_six_hours(self):
         stale = (NOW - timedelta(hours=25)).isoformat()
         storage.save_talent(_previous(
             [_person("ny1", "ny"), _person("dcm1", "dcm")],
             {"ny": stale, "la": stale, "teachers": stale, "dcm": stale}))
-        self.fetch_page.side_effect = RuntimeError("202")
-        self.fetch_dcm.side_effect = RuntimeError("Expecting value")
+        self.fetch_group.side_effect = RuntimeError("202")
         payload = self.run_at()
-        self.assertEqual(self.fetch_page.call_count, 3)
+        self.assertEqual(self.fetch_group.call_count, 4)
         self.assertEqual(payload["roster_scraped_at"], stale)
         self.assertEqual(payload["roster_attempted_at"], NOW.isoformat())
         self.assertEqual([p["slug"] for p in payload["people"]], ["dcm1", "ny1"])
         # 3h later: still inside the back-off, not a single request.
-        self.fetch_page.reset_mock()
-        self.fetch_dcm.reset_mock()
+        self.fetch_group.reset_mock()
         payload = self.run_at(NOW + timedelta(hours=3))
-        self.fetch_page.assert_not_called()
-        self.fetch_dcm.assert_not_called()
+        self.fetch_group.assert_not_called()
         self.assertEqual(payload["roster_attempted_at"], NOW.isoformat())
         self.assertEqual([p["slug"] for p in payload["people"]], ["dcm1", "ny1"])
         rows = self.rows(payload)
-        self.assertFalse(rows["ny"]["stale"])   # a carried-by-cadence row, no error
-        self.assertIsNone(rows["ny"]["error"])
+        self.assertTrue(rows["ny"]["stale"])   # backing off cannot clear the last failure
+        self.assertEqual(rows["ny"]["error"], "202")
         # 6h later: retried, and a success clears the back-off.
-        self.fetch_page.side_effect = lambda url: [_page_person("fresh")]
-        self.fetch_dcm.side_effect = None
+        self.fetch_group.side_effect = lambda url: [_page_person("fresh")]
         payload = self.run_at(NOW + timedelta(hours=6))
-        self.assertEqual(self.fetch_page.call_count, 3)
+        self.assertEqual(self.fetch_group.call_count, 4)
         self.assertEqual(payload["roster_scraped_at"], (NOW + timedelta(hours=6)).isoformat())
         self.assertFalse(talent._backing_off(payload, NOW + timedelta(hours=9)))
 
     def test_backoff_after_first_ever_failed_sweep(self):
         # No previous payload at all: a totally failed first sweep still
         # records the attempt so the next tick does not hammer the host.
-        self.fetch_page.side_effect = RuntimeError("202")
-        self.fetch_dcm.side_effect = RuntimeError("202")
+        self.fetch_group.side_effect = RuntimeError("202")
         payload = self.run_at()
         self.assertIsNone(payload["roster_scraped_at"])
         self.assertTrue(all(not s["ok"] for s in payload["sources"]))
@@ -242,7 +235,7 @@ class TalentFailureTests(TalentHarness):
         prev = [_person(f"ny{i}", "ny") for i in range(10)]
         storage.save_talent(_previous(prev, {"ny": stale, "la": stale,
                                              "teachers": stale, "dcm": stale}))
-        self.pages["https://x.test/ny"] = [_page_person("ny0"), _page_person("ny1")]
+        self.pages["ny"] = [_page_person("ny0"), _page_person("ny1")]
         payload = self.run_at()
         rows = self.rows(payload)
         self.assertTrue(rows["ny"]["stale"])
@@ -250,7 +243,7 @@ class TalentFailureTests(TalentHarness):
         self.assertEqual(rows["ny"]["count"], 10)
         self.assertEqual(rows["ny"]["scraped_at"], stale)
         # A modest change (7 of 10) is a real roster edit and goes through.
-        self.pages["https://x.test/ny"] = [_page_person(f"ny{i}") for i in range(7)]
+        self.pages["ny"] = [_page_person(f"ny{i}") for i in range(7)]
         payload = self.run_at(NOW + timedelta(hours=3))
         self.assertEqual(self.rows(payload)["ny"]["count"], 7)
         self.assertFalse(self.rows(payload)["ny"]["stale"])

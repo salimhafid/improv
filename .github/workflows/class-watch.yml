@@ -11,7 +11,7 @@ name: Class alert watcher
 # Once the state recording a detection is pushed, the chain also dispatches a
 # classes-only feed publish (scrape.yml -f classes_only=true), so the class a
 # push announces reaches the app's Classes tab within minutes rather than on
-# the feed's daily class cadence.
+# the next scheduled feed refresh.
 on:
   workflow_dispatch:
     inputs:

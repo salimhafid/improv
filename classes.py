@@ -1,18 +1,11 @@
 """Classes aggregator.
 
-Mirrors scraper.aggregate() for the class data type: runs each adapter daily
-(the heaviest source is Magnet at ~15 requests/run, and a 24h cadence keeps
-freshly announced sections and sold-out states at most a day stale), carries
-over last-good data for sources not due or that fail, and filters to upcoming
-(start >= today, undated kept).
+The hourly publisher checks UCB's shared catalog for seat availability and
+checks other schools daily. It carries the last successful rows when an adapter
+fails and filters out past classes using the school's local date.
 
-The one exception to the daily cadence: when the class-alert watcher
-(watcher.py) has detected new classes at a school since that source was last
-scraped, the source is forced due. The watcher pushes "new class" alerts
-within minutes, and a push for a class the Classes tab can't show for up to a
-day is the bug this closes. The signal is the per-school "new_at" stamp in the
-watcher's state (class-watch.json), passed in as `watch_state`; watcher school
-ids are the class source ids.
+The watcher also dispatches a publish after detecting new classes. Its per-school
+new_at stamp forces that school due until a successful fetch catches up.
 
 Class detail pages: a source whose listing lacks a class's description,
 location or price can register a `detail(url)` function (see
@@ -37,12 +30,12 @@ from dateutil import parser as dateparser
 
 import storage
 from aggregation import parse_dt, run_sources
-from sources import CLASS_SOURCES
+from sources import CLASS_SOURCES, ucb_classes
 
 log = logging.getLogger("ucb.classes")
 
-_CLASS_INTERVALS: dict[str, int] = {}     # per-source overrides, none currently
-_DEFAULT_CLASS_INTERVAL = 24 * 3600       # daily for every class source
+_CLASS_INTERVALS = {sid: 3600 for sid in ("ucb_ny", "ucb_la", "ucb_online")}
+_DEFAULT_CLASS_INTERVAL = 24 * 3600
 _GRACE = 30 * 60
 
 # Detail pages (see the module docstring). The budget bounds requests per
@@ -68,7 +61,7 @@ def _apply_detail(item: dict, values: dict, overrides=()) -> None:
 
 
 def _enrich_details(items: list[dict], detail_fn, prev_by_id: dict[str, dict],
-                    budget: int, deadline: float | None = None, overrides=()) -> int:
+                    budget: int, deadline: float | None = None, overrides=(), *, refresh=False) -> int:
     """Give each class its detail-page fields: copied from the previous
     payload's row when that class was already fetched, otherwise fetched now
     (in parallel, at most `budget` pages, none started after `deadline`, a
@@ -85,22 +78,30 @@ def _enrich_details(items: list[dict], detail_fn, prev_by_id: dict[str, dict],
     todo: list[dict] = []
     for item in items:
         cached = prev_by_id.get(item.get("id"))
-        if cached is not None:
+        if cached and cached.get("detail_done") and not refresh:
             _apply_detail(item, cached, overrides)
         elif item.get("url"):
             todo.append(item)
 
     todo = todo[:max(0, budget)]
-    if not todo:
-        return 0
-    with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as ex:
-        results = list(ex.map(safe, [item["url"] for item in todo]))
+    results = []
+    if todo:
+        with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as ex:
+            results = list(ex.map(safe, [item["url"] for item in todo]))
     skipped = sum(1 for r in results if r is _PAST_DEADLINE)
     if skipped:
         log.warning("class detail deadline reached: %d page(s) left for the next run", skipped)
     for item, result in zip(todo, results):
         if isinstance(result, dict):
             _apply_detail(item, result, overrides)
+    # A new adapter can move descriptions from the index onto detail pages.
+    # While a fetch is deferred or fails, keep the last description for that
+    # same class. Leave the row eligible for a retry on the next scrape.
+    for item in items:
+        if not item.get("detail_done") and not item.get("description"):
+            prior = prev_by_id.get(item.get("id"), {})
+            if prior.get("description"):
+                item["description"] = prior["description"]
     return len(todo) - skipped
 
 
@@ -167,27 +168,24 @@ def aggregate_classes(now: datetime | None = None, *, watch_state: dict | None =
         log.info("class sources forced due by new-class detections: %s",
                  ", ".join(sorted(forced)))
 
-    # Rows already fetched in an earlier run, by class id. REFRESH_DETAILS=1
-    # empties the cache for one run, exactly as it does for show pages.
-    prev_detail: dict[str, dict] = {}
-    if not os.environ.get("REFRESH_DETAILS"):
-        prev_detail = {c["id"]: c for rows in prev_by_source.values() for c in rows
-                       if c.get("id") and c.get("detail_done")}
+    refresh = bool(os.environ.get("REFRESH_DETAILS"))
+    prev_detail = {c["id"]: c for rows in prev_by_source.values() for c in rows if c.get("id")}
     budget = [_DETAIL_BUDGET]    # shared across sources within one run
     deadline = time.monotonic() + _DETAIL_DEADLINE
 
     def enrich(src, items):
-        if src.get("detail") and budget[0] > 0:
+        if src.get("detail"):
             budget[0] -= _enrich_details(items, src["detail"], prev_detail, budget[0],
                                          deadline=deadline,
-                                         overrides=src.get("detail_overrides", ()))
+                                         overrides=src.get("detail_overrides", ()), refresh=refresh)
 
-    all_classes, summary = run_sources(
-        CLASS_SOURCES, previous_items=prev_by_source, prev_scraped=prev_scraped,
-        now=now, intervals={**_CLASS_INTERVALS, **{sid: 0 for sid in forced}},
-        default_interval=_DEFAULT_CLASS_INTERVAL, grace=_GRACE,
-        keep=_is_upcoming, on_scraped=enrich, log=log, label="class source",
-    )
+    with ucb_classes.feed_snapshot():
+        all_classes, summary = run_sources(
+            CLASS_SOURCES, previous_items=prev_by_source, prev_scraped=prev_scraped,
+            now=now, intervals={**_CLASS_INTERVALS, **{sid: 0 for sid in forced}},
+            default_interval=_DEFAULT_CLASS_INTERVAL, grace=_GRACE,
+            keep=_is_upcoming, on_scraped=enrich, log=log, label="class source", force=refresh,
+        )
     # `or ""` (not a .get default): a present-but-null title would otherwise
     # make the tie-break compare None with str and abort the run.
     all_classes.sort(key=lambda c: (c.get("start") or "9999-12-31", c.get("title") or ""))

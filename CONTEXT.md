@@ -86,7 +86,7 @@ isn't due.
 Key pipeline behaviors (aggregation.py shared loop + scraper.py / classes.py /
 talent.py):
 - **Per-source cadence**: `_SCRAPE_INTERVALS` — ucb_ny every 3h, every other
-  show source 24h (`scraper.py`); every class source daily (`classes.py`),
+  show source 24h (`scraper.py`); UCB class availability refreshes hourly and other class sources daily (`classes.py`),
   except that a source at which the class watcher has detected new classes
   since its last scrape is forced due (see "Feed refresh after a detection");
   each talent group daily (`talent.py`). All with a 30-minute early-tick
@@ -135,16 +135,11 @@ talent.py):
   word). `REFRESH_DETAILS=1` forces every show source due and re-fetches
   details (shows only; via `run_sources(force=True)`, so a source that fails
   on that run keeps its last-good `scraped_at`).
-- **Talent roster**: three dt_team pages (ny / la / teachers) + the DCM
-  load-more endpoint, each group on its own daily stamp (`scraped_at` per
-  summary row). A group that fails carries stale and is retried next tick,
-  but a sweep in which EVERY attempted group failed sets
-  `roster_attempted_at` and backs off for 6 h (`_ROSTER_BACKOFF`) — the host
-  is blocking us, so don't hammer it hourly. A page that parses to < 60 % of
-  its previous head-count is treated as a failed fetch (`_SHRINK_RATIO`); DCM
-  additionally requires 80 % of the total the endpoint reports. Bios: budget
-  150/run (`TALENT_BIO_BUDGET`, parsed leniently), 8 workers, 5-minute
-  deadline, `bio_done` carry-over by slug.
+- **Talent roster** uses one daily stamp for each of the four groups. If a
+  group fails, its last successful rows and timestamp carry forward. A wholly
+  failed sweep backs off for six hours and keeps the source errors visible.
+  The roster includes profile bios. For a missing bio, the profile-page fallback
+  has a 150-request budget and a five-minute deadline.
 - **Never publish empty**: `publish_static.py` exits nonzero if no show source
   is *healthy* (`ok` AND `count > 0` — a legitimately empty `wgis_ny` cannot
   vouch for an empty feed), or if any feed could not be written (including an
@@ -168,13 +163,13 @@ talent.py):
   fingerprint, which is what the rotation exists for); a 202 is treated as a
   challenge; the first bad body per (host, status) is logged once at WARNING
   (`ucb.common`) so the Actions log captures what ucbcomedy.com actually
-  serves; `post_json` exists for the DCM load-more endpoint.
+  serves.
 
 ## Sources (id · method · the quirks that matter)
 
 | id | Theater | Method & quirks |
 |---|---|---|
-| ucb_ny / ucb_la | UCB NY / LA | WP Grid Builder listing (`ucbcomedy.com/shows/<city>`) + detail pages. **Paginated**: `?_page=N` is server-rendered; the walk stops when a page adds nothing new (out-of-range pages re-serve page 1), capped at `_MAX_PAGES = 8` — deliberately NOT a page-size heuristic (88 cards/page today), so a smaller grid can't silently truncate. Reading only page 1 once dropped 54% of LA (134 LA shows in the current feed). Images: strip WP `-WxH` suffix for full-size; detail `og:image` fills gaps. **Structured cast** from detail-page `/people/<slug>/` anchors inside `#main` (nav has team links — never scan outside #main; no `#main` → `detail()` returns None and the page is retried); text "Featuring:" heuristic (one name per line, or a comma list of short names on the label line; stop at `—`/ticket words; "Podcast:" does not match) is fallback only. Text caps (400 cast / 2000 description) cut at a word with "…". Classes via the **Arlo registration API** (`ucbcomedy.arlo.co/api/.../eventsearch`): LOC_NY → `ucb_ny`, LOC_LA → `ucb_la`, **LOC_Online → `ucb_online`** (city "Online", 16 items); the paged walk is memoised per run (including a failure) so the three passes cost one walk; Arlo `Summary` becomes the description only when it isn't a "Category: …" line. Satellite cities (Austin/Pittsburgh/Edinburgh) are still deliberately unscoped. |
+| ucb_ny / ucb_la | UCB NY / LA | WP Grid Builder listing (`ucbcomedy.com/shows/<city>`) + detail pages. **Paginated**: `?_page=N` is server-rendered; the walk stops when a page adds nothing new (out-of-range pages re-serve page 1), capped at `_MAX_PAGES = 8` — deliberately NOT a page-size heuristic (88 cards/page today), so a smaller grid can't silently truncate. Reading only page 1 once dropped 54% of LA (134 LA shows in the current feed). Images: strip WP `-WxH` suffix for full-size; detail `og:image` fills gaps. **Structured cast** from detail-page `/people/<slug>/` anchors inside `#main` (nav has team links — never scan outside #main; no `#main` → `detail()` returns None and the page is retried); text "Featuring:" heuristic (one name per line, or a comma list of short names on the label line; stop at `—`/ticket words; "Podcast:" does not match) is fallback only. Text caps (400 cast / 2000 description) cut at a word with "…". Classes come from UCB's public `/training-center/course/` registration page. The watcher and three class feeds share its section links, city, teaching categories, frequency, dates and availability. The adapter checks the published total against the number of rows. The individual section page supplies the description. Supported campuses are New York, Los Angeles and Online. |
 | brooklyn_cc | Brooklyn Comedy Collective | Squarespace Events collection via `?format=json`. Squarespace categories are **rooms** (Eris Mainstage / Deep Space / Pig Pen…) → `venue`/`venues`, `comedy_types=[]`. "No show…" closure notices skipped. Classes: instructor after ` w/`; a date in the product title ("(Saturday, September 12th, 2026)") becomes `start` so drop-ins age out; multi-week "(Aug-Oct '26)" titles stay undated. |
 | magnet | Magnet Theater | Month-calendar tables (`MONTHS_AHEAD = 3`) + detail pages; **calendar has zero images — og:image from detail is the only artwork**. `detail()` reads `[itemprop="description"]` first, falling back to `#content` cut at the address line / ticket table. Card years are inferred (same-year unless > 240 days stale or > 125 days ahead); href-less cards skipped. Classes: the all-classes-in-session index PLUS per-discipline `/class/<slug>/` pages (nav-discovered, capped at `_MAX_DISCIPLINE_PAGES = 20`, same `div.class-holder` markup, deduped by WP id) — upcoming/enrolling sections only appear on the discipline pages. |
 | wgis_ny / wgis_la | WGIS | Crowdwork slug `wgis` split by the event's `timezone` name (UTC offset as fallback). **wgis_ny = 0 shows is correct**: all Crowdwork items are Pacific — WGIS NY runs classes only (HTML `/nycclasses`, `/laclasses`; `/onlineclasses` deliberately unscoped). Class dates carry no year: month + day required (else undated); "Currently Running"/"in session" sections publish undated; a date > 45 days behind rolls to next year unless that lands > 270 days out (then undated — an in-session course); an explicit year is taken as written. `is_full` recognises full / sold-out / waitlist. |
@@ -184,17 +179,12 @@ talent.py):
 | logan_square | Logan Square Improv | Shared Crowdwork adapter, slug `lsi`, shows AND classes (their /events/ page is a Crowdwork widget on the same API). The old hand-rolled 28-day-window pagination was removed 2026-08-08 after verifying the bare endpoint returns a strict superset. |
 | playground | The Playground Theater | Site is **Canva**; show-calendar embeds a public **Google Calendar** — adapter reads the ICS (`calendar id c_eb31…@group.calendar.google.com`, hardcoded in sources/playground.py), **62-day horizon**. RRULE expansion (dateutil) + EXDATE / RECURRENCE-ID overrides / CANCELLED; date-only and Z-form `UNTIL` both handled (a regex used to double a Z-form UNTIL and drop the series); `TZID=` honoured; `VALARM` blocks ignored; `DTEND` → `end`. One-off all-day entries ("Happy Labor Day") are skipped as calendar notes; recurring all-day series and their overrides are kept. All shows free. No images (app's GeneratedCover handles). If they regenerate the calendar id, the source fails loudly and carries. |
 
-**Talent** (talent.py + sources/ucb_talent.py): NY + LA + Teachers pages are
-dt_team grids (`div.wf-cell[data-name]`, `/people/<slug>/`, headshot
-data-src) read by `fetch_page`. The **DCM page is a WP Grid Builder AJAX
-grid** — `/page/N` URLs all serve the same 30 people; the real protocol is
-`POST /?wpgb-ajax=refresh&_load_more=<offset>` with the grid's form fields
-(`_dcm_batch`, driven by `fetch_dcm_roster`; the first batch supplies the
-total and is fatal, later batches that fail log and return `[]` and the 80 %
-completeness check decides). Names are HTML-unescaped. Groups: ny / la /
-teachers / dcm, merged by slug (880 DCM people in the current feed; la 903,
-ny 448, teachers 134). Live status: see the watchlist — all four groups have
-failed on every recent run.
+**Talent** uses the site's public WordPress REST collection
+`/wp-json/wp/v2/dt_team`. The NY, LA, Teachers and DCM categories use term
+IDs 31, 21, 22 and 270 respectively. Each group is paged in stable post-ID
+order. The number of unique profiles must match the API total before the new
+roster can replace the previous one. Profiles shared by several groups keep
+one entry and one set of current details.
 
 ## Class-alert watcher (watcher.py + .github/workflows/class-watch*.yml)
 
@@ -210,9 +200,9 @@ turn those into APNs pushes on their registered devices.
   (job `timeout-minutes: 355`) and
   then, `if: always()`, dispatches its own successor (3 attempts). Each
   iteration runs `python watcher.py --ucb` first, delivering and persisting
-  UCB alerts before `python watcher.py --all-if-stale 20`: UCB's Arlo
-  catalog every iteration, every other school only when the newest non-UCB
-  state stamp is > 20 h old (so roughly daily). Concurrency group
+  UCB alerts before `python watcher.py --all-if-stale 20`: the UCB registration catalog
+  is checked every iteration. Each other school has its own 20-hour interval.
+  Failed schools keep their known IDs and retry after an hour. Concurrency group
   `class-watch-chain` for the chain; one-shot modes (including diagnostics) get
   a per-run group so they are not cancelled by the chain's self-dispatch.
   Two minutes is a target, not a guarantee: daily scans, source outages and
@@ -226,21 +216,27 @@ turn those into APNs pushes on their registered devices.
   `class-watch-state` (checked out into `state-branch/`, `WATCH_STATE` points
   at it; the bare default `state/class-watch.json` is for local runs).
   `{ "<school>": {"ids": [...], "updated": iso, "new_at": iso}, "_pending_alerts": [...] }`.
-  `new_at` (present once a school has had a detection) is when new classes
-  were last found there: set on a detection, carried forward unchanged
-  otherwise, never set by a baseline or a failed (empty) scan. UCB `ids` are
-  bare Arlo EventIDs and must stay so — re-keying them (to feed ids, say)
-  would re-alert every class.
+  `new_at` records a detection or campus move that requires fresh feed data.
+  For an unchanged school the previous stamp is preserved. Migrated UCB
+  sections keep their Arlo ID through `sources/ucb_section_ids.json`. Newly
+  posted sections use both course slug and native section number, including
+  leading zeros. A move between campuses schedules a refresh of both and
+  preserves the section's known status. Failed non-UCB attempts are recorded
+  under `_failed_other_scans` until that school succeeds.
   Committed after every iteration by `class-watch-bot` (rebase-on-top on a
   rejected push) — up to ~720 commits/day on that branch. If the state checkout
   fails, the job baselines from scratch ONLY when `git ls-remote` positively
   reports no such branch (exit 2); any other failure aborts, because an empty
   state would silently baseline every school and then overwrite the real one.
-- **Scan → diff**: `scan_ucb()` = one Arlo pull split by `LOC_*` tag, or the
-  public `Location` when no location tag exists, into
-  `ucb_ny / ucb_la / ucb_online`, each noncore class tagged with EVERY matching
-  `CTG_*`/`FRQ_*` category (`UCB_CATEGORY_TAGS`; first match = primary
-  `category`); `scan_others()` = every non-UCB `CLASS_SOURCES` adapter (a
+- **Scan → diff**: `scan_ucb()` reads the same catalog as the class feed and
+  groups sections by their listed city. Noncore classes carry their catalog
+  categories and workshop/intensive tags. When UCB omits subject tags, its
+  course-group heading can supply the subject. For newly detected noncore
+  sections with missing subjects, the watcher also reads explicit category
+  labels from their individual section pages. It checks up to four in
+  parallel per iteration and retains the catalog group if that lookup fails.
+  `scan_others()` reads each
+  due non-UCB `CLASS_SOURCES` adapter (a
   raising adapter is skipped, state untouched). `diff_and_alert`: a school
   with no prior state is **baselined silently**; a scan that comes back
   **empty for a school that had classes is treated as a failed scan** (prior
@@ -269,13 +265,12 @@ turn those into APNs pushes on their registered devices.
   narrowest body line seen on a 360 pt iPhone mini. iOS itself keeps the
   title to one line. A collapsed banner shows two body lines (name and
   instructor); the Lock Screen and Notification Center show all three.
-  Larger Dynamic Type sizes can still wrap. Category: for UCB, Arlo's
-  canonical course name (numbering stripped, as in the feed's `level`) plus
+  Larger Dynamic Type sizes can still wrap. Category: for UCB, the
+  course-group heading (the feed's `level`) plus
   "workshop"/"intensive" when the name doesn't say so, else the first
   subject category's label (never Workshops, Intensives or Other); elsewhere
   the adapter's `level`, except WGIS LA's "Currently Running" status;
-  dropped when it repeats the class name. Instructor: Arlo `Presenters`
-  joined as in the feed, or the adapter's `instructor`.
+  dropped when it repeats the class name. Instructor: the listing's instructor, as in the feed.
 - **CloudKit record**: `POST https://api.apple-cloudkit.com/database/1/
   iCloud.com.salimhafid.UCBShows/<env>/public/records/modify`, record type
   `ClassAlert`, fields `school`, `category`, `categories` (STRING_LIST),
@@ -318,8 +313,8 @@ turn those into APNs pushes on their registered devices.
   and still commits state. Delivery remains **at least once**: uncertain
   responses or state-push failures can produce duplicate records/pushes.
 - **Feed refresh after a detection**: the push goes out within ~2 minutes,
-  but class sources publish daily, so an alert could name a class the
-  Classes tab would not show for up to a day. With `WATCH_NEW_CLASSES_FILE`
+  while UCB availability normally publishes on the hourly tick and other
+  class sources run daily. With `WATCH_NEW_CLASSES_FILE`
   set (the workflow sets it), `watcher.py` appends each school with newly
   detected classes after `save_state` — whether or not CloudKit accepted the
   alerts; never in `--dry-run`; pending-alert retries don't count. Only once
@@ -751,14 +746,11 @@ matches real subscribers.
   flight, and uses the protocol cache policy (usually a 304). Before 1.7 the
   launch fetch was the only automatic one, so a long-running app never showed
   a newly alerted class.
-- **UCB registration links**: Arlo's `ViewUri` supplies `arlo_id`, the course
-  template ID; `EventID` identifies the exact session. The class feed uses
-  `https://ucbcomedy.com/courses/?eventtemplate=<template>&event=<session>`.
-  UCB redirects this supported route to the course permalink and preserves
-  the selected session (verified `44 / 40741` →
-  `/courses/improv-301-i301/?event=40741`). Do not regress to catalog search
-  links or guess a slug from the class title. Missing IDs fail the source so
-  aggregation retains last-good data rather than publishing a broad Register link.
+- **UCB registration links**: both the feed and alert use the exact native
+  `/course/<slug>/<section>/` link from the public listing. UCB migrated
+  from Arlo in November 2026. The old template resolver now opens a course
+  overview. A missing or invalid section link fails the scan so the feed
+  retains its last good catalog and the watcher can retry.
 - **1.6 verification (2026-09-08)**: 254 Python tests and the full Swift logic
   harness passed, including 51 alert-preference assertions. Simulator and
   signed device archive builds succeeded; the simulator showed separate
@@ -1094,16 +1086,10 @@ Gotchas learned the hard way:
   `showAttributes.venue[].name`. **To confirm after merge**: the next
   scheduled run's log shows `second_city: scraped N`, and
   `sources[second_city].scraped_at` in `docs/shows.json` is no longer null.
-- **ucbcomedy.com answers 202 to the Actions runner** (intermittently for
-  `ucb_ny` shows since July — the source still succeeds on some runs — and on
-  every recent run for the three talent pages, while the DCM endpoint
-  alternates between success and a non-JSON body). Root cause unknown (a
-  Cloudflare-style challenge is the working theory). This branch: the first
-  202/non-JSON body per host is logged once at WARNING (read it in the scrape
-  log), a 202 counts as a challenge for the fingerprint rotation, and the
-  talent sweep backs off 6 h after a total failure instead of retrying every
-  tick. Until it clears, `docs/talent.json` keeps carrying the 2026-08-31
-  roster and `ucb_ny` runs on whatever ticks get through.
+- The November 22 talent publish carried the August 31 roster. UCB had
+  replaced the directory markup and the DCM grid previously used here.
+  After deploying the REST adapter, check the four group timestamps in
+  `docs/talent.json` to verify runner access.
 
 ## Access & conventions
 

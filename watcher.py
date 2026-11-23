@@ -8,9 +8,8 @@ successor, because GitHub delays *scheduled* runs by hours but not running
 ones. Three staggered odd-minute crons (class-watch-kick-*.yml) only restart
 the chain if it has died.
 
-  --ucb    every iteration: one Arlo catalog pull, split into
-           ucb_ny / ucb_la / ucb_online by LOC_* tag or public venue when the
-           location tag is missing, categorized by CTG_* tag.
+  --ucb    every iteration: one public registration catalog, split by the
+           section's location and classified using UCB's category and format filters.
   --all    every non-UCB class source; BCC is categorized like UCB (including
            exclusive core courses), other schools use category "all". The
            chain passes --all-if-stale 20 so this stays a roughly daily scan
@@ -68,6 +67,7 @@ import unicodedata
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 log = logging.getLogger("ucb.watcher")
@@ -123,21 +123,21 @@ DISPLAY = {
     "second_city": "The Second City", "logan_square": "Logan Square Improv",
 }
 
-# Arlo tag → canonical category key. Order = priority: the first match is the
+# Registration catalog tag → canonical category key. Order = priority: the first match is the
 # record's primary `category`; every match lands in `categories`.
 UCB_CATEGORY_TAGS = [
-    ("CTG_Improv_Electives", "improv_electives"),
-    ("CTG_Improv", "improv"),
-    ("CTG_Sketch_Electives", "sketch_electives"),
-    ("CTG_Sketch_Character", "sketch_character"),
-    ("CTG_Musical_Improv", "musical_improv"),
-    ("CTG_Standup", "standup"),
-    ("CTG_Clowning", "clowning"),
-    ("CTG_Acting", "acting"),
-    ("CTG_Writing_Programs", "writing_programs"),
-    ("CTG_Featured_Programs", "featured_programs"),
-    ("FRQ_Workshop", "workshops"),
-    ("FRQ_Intensive", "intensives"),
+    ("improv-electives", "improv_electives"),
+    ("improv", "improv"),
+    ("sketch-electives", "sketch_electives"),
+    ("sketch-and-character", "sketch_character"),
+    ("musical-improv", "musical_improv"),
+    ("stand-up", "standup"),
+    ("clowning", "clowning"),
+    ("acting", "acting"),
+    ("writing-programs", "writing_programs"),
+    ("featured-programs", "featured_programs"),
+    ("workshop", "workshops"),
+    ("intensive", "intensives"),
 ]
 
 CATEGORY_LABEL = {
@@ -151,8 +151,7 @@ CATEGORY_LABEL = {
     "workshops": "Workshops", "intensives": "Intensives", "other": "Other",
 }
 
-UCB_LOCATIONS = [("LOC_NY", "ucb_ny"), ("LOC_LA", "ucb_la"), ("LOC_Online", "ucb_online")]
-_UCB_SCHOOLS = {school for _, school in UCB_LOCATIONS}
+_UCB_SCHOOLS = {"ucb_ny", "ucb_la", "ucb_online"}
 _CORE_LEVELS = {
     "ucb": {"improv": {"101", "201", "301", "401"}, "sketch": {"101", "201", "301"}},
     "brooklyn_cc": {"improv": {"1", "2", "3", "4"}, "sketch": {"1", "2"}},
@@ -232,7 +231,7 @@ def _category(tags: list[str]) -> str:
 
 
 def _ucb_class_type(canonical: str, tags, categories: list[str]) -> str:
-    """The UCB class's type for the push body: Arlo's canonical course name
+    """The UCB class's type for the push body: the catalog's course group
     (the feed's `level`, numbering stripped the same way), plus the format
     when the name doesn't already say it. Without a canonical name, the label
     of the class's first subject category stands in; format-only or untagged
@@ -244,52 +243,49 @@ def _ucb_class_type(canonical: str, tags, categories: list[str]) -> str:
     if not kind:
         return ""
     named = kind.casefold()
-    for tag, word in (("FRQ_Workshop", "workshop"), ("FRQ_Intensive", "intensive")):
-        if tag in tags and word not in named:
+    for word in ("workshop", "intensive"):
+        if word in tags and word not in named:
             kind += f" {word}"
     return kind
 
 
-def scan_ucb() -> dict[str, dict[str, dict]]:
-    """Arlo catalog → {school: {EventID: {title, when, categories, feed_id,
-    instructor, type, url}}}. Keys stay bare EventIDs (the watcher state's ids —
-    changing them would re-alert every class); `feed_id` is the id the same
-    session has in the app's class feed, `when` its start date and `url` its
-    listing on the school's site ("" when the event doesn't identify one)."""
-    from common import clean
-    from sources.ucb_classes import event_location_tags, raw_events, registration_url
+# Optional lookups for just-posted, uncategorized sections run together, so
+# a change to dozens of listings can't turn the watcher into a detail crawl.
+_MAX_UCB_CATEGORY_LOOKUPS = 4
 
-    out: dict[str, dict[str, dict]] = {s: {} for _, s in UCB_LOCATIONS}
-    for ev in raw_events():
-        tags = ev.get("Tags") or []
-        locations = event_location_tags(ev)
-        title = clean(ev.get("Name"))
-        if not title or not ev.get("EventID"):
-            continue
-        canonical = next((clean(c.get("Name")) for c in (ev.get("Categories") or [])
-                          if isinstance(c, dict)), "")
-        # Same names, same order and separator as the class feed's instructor.
-        instructor = ", ".join(clean(p.get("Name")) for p in (ev.get("Presenters") or [])
-                               if isinstance(p, dict) and p.get("Name"))
-        try:
-            url = registration_url(ev)
-        except ValueError:
-            url = ""   # still alerted; the tap just has no listing to open
-        for tag, school in UCB_LOCATIONS:
-            if tag in locations:
-                when = (ev.get("StartDateTime") or "")[:10]
-                categories = class_categories(school, title, tags, canonical)
-                out[school][str(ev.get("EventID"))] = {
-                    "title": title, "when": when, "categories": categories,
-                    "feed_id": f"{school}/{ev.get('EventID')}",
-                    "instructor": instructor,
-                    "type": _ucb_class_type(canonical, tags, categories),
-                    "url": url,
-                }
+
+def scan_ucb(state: dict | None = None) -> dict[str, dict[str, dict]]:
+    """Use the same registration rows, session IDs and links as the class feed."""
+    from sources.ucb_classes import catalog, section_category_tags
+
+    state = state or {}
+    known = {cid for school, prior in state.items() if school in _UCB_SCHOOLS and isinstance(prior, dict)
+             for cid in prior.get("ids") or []}
+    lookups = []
+    out = {school: {} for school in _UCB_SCHOOLS}
+    for item, tags, missing_subjects in catalog():
+        school, cid = item["id"].split("/", 1)
+        categories = class_categories(school, item["title"], tags, item["level"])
+        out[school][cid] = {
+            "title": item["title"], "when": (item["start"] or "")[:10],
+            "categories": categories, "feed_id": item["id"], "instructor": item["instructor"],
+            "type": _ucb_class_type(item["level"], tags, categories), "url": item["url"],
+        }
+        if (missing_subjects and isinstance(state.get(school), dict) and cid not in known
+                and categories[0] not in ("improv_core", "sketch_core") and len(lookups) < _MAX_UCB_CATEGORY_LOOKUPS):
+            lookups.append((school, cid, item, tags))
+    if lookups:
+        with ThreadPoolExecutor(max_workers=len(lookups)) as pool:
+            extra_tags = pool.map(section_category_tags, [item["url"] for _, _, item, _ in lookups])
+            for (school, cid, item, tags), extra in zip(lookups, extra_tags):
+                if extra:
+                    categories = class_categories(school, item["title"], tags + extra, item["level"])
+                    out[school][cid]["categories"] = categories
+                    out[school][cid]["type"] = _ucb_class_type(item["level"], tags + extra, categories)
     return out
 
 
-def scan_others() -> dict[str, dict[str, dict]]:
+def scan_others(schools: set[str] | None = None) -> dict[str, dict[str, dict]]:
     """Every non-UCB class source → class metadata, with categories for BCC.
     The adapter's id is both the state key and the class feed id. Its `level`
     is the class type, except WGIS LA's "Currently Running" bucket, which is a
@@ -300,7 +296,7 @@ def scan_others() -> dict[str, dict[str, dict]]:
 
     out: dict[str, dict[str, dict]] = {}
     for src in CLASS_SOURCES:
-        if src["id"].startswith("ucb"):
+        if src["id"].startswith("ucb") or (schools is not None and src["id"] not in schools):
             continue
         try:
             items = src["fetch"]()
@@ -325,19 +321,29 @@ def scan_others() -> dict[str, dict[str, dict]]:
     return out
 
 
-def others_stale(state: dict, hours: float) -> bool:
-    """True when the non-UCB schools haven't been scanned within `hours` — or
-    never have. Lets a job that runs every 2 minutes keep the other schools on
-    a daily cadence without a second workflow racing it for the state branch."""
-    stamps = [v.get("updated") for k, v in state.items()
-              if not k.startswith("ucb") and isinstance(v, dict)]
-    stamps = [t for t in stamps if t]
-    if not stamps:
-        return True
-    newest = datetime.fromisoformat(max(stamps))
-    if newest.tzinfo is None:
-        newest = newest.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - newest).total_seconds() > hours * 3600
+def due_other_schools(state: dict, hours: float | None) -> set[str]:
+    """Use each school's last successful scan. Retry failed schools hourly
+    so one unavailable source doesn't force a full crawl every two minutes."""
+    from aggregation import parse_dt
+    from sources import CLASS_SOURCES
+
+    now = datetime.now(timezone.utc)
+    failures = state.get("_failed_other_scans") or {}
+    due = set()
+    for source in CLASS_SOURCES:
+        school = source["id"]
+        if school in _UCB_SCHOOLS:
+            continue
+        entry = state.get(school)
+        updated = parse_dt(entry.get("updated")) if isinstance(entry, dict) else None
+        failed = parse_dt(failures.get(school)) if isinstance(failures, dict) else None
+        if hours is not None:
+            if updated and (now - updated).total_seconds() < hours * 3600:
+                continue
+            if failed and (now - failed).total_seconds() < min(1, hours) * 3600:
+                continue
+        due.add(school)
+    return due
 
 
 def load_state() -> dict:
@@ -354,6 +360,30 @@ def save_state(state: dict) -> None:
         json.dump(state, f, indent=1, sort_keys=True)
 
 
+def _move_ucb_sections(scanned: dict, state: dict) -> set[str]:
+    """A UCB section keeps its identity when the catalog corrects its campus.
+
+    Move known IDs before computing additions. An old state entry whose only
+    class moved may then legitimately be empty. A section first published at
+    two locations together is still new at each.
+    """
+    changed = set()
+    for previous_school in _UCB_SCHOOLS.intersection(scanned):
+        prior = state.get(previous_school)
+        if not isinstance(prior, dict):
+            continue
+        removed = set(prior.get("ids") or []) - scanned[previous_school].keys()
+        for school in _UCB_SCHOOLS.intersection(scanned) - {previous_school}:
+            transferred = removed.intersection(scanned[school])
+            if not transferred:
+                continue
+            if isinstance(state.get(school), dict):
+                state[school]["ids"] = sorted(set(state[school].get("ids") or []).union(transferred))
+            prior["ids"] = sorted(set(prior["ids"]) - transferred)
+            changed.update((previous_school, school))
+    return changed
+
+
 def diff_and_alert(scanned: dict[str, dict[str, dict]], state: dict, per_category: bool) -> list[dict]:
     """Update state and return alert payloads for genuinely new classes: one
     record per new class, or one summary record for a school with more than
@@ -365,6 +395,7 @@ def diff_and_alert(scanned: dict[str, dict[str, dict]], state: dict, per_categor
     empty-scan guard leaves the whole entry untouched."""
     alerts: list[dict] = []
     now = datetime.now(timezone.utc).isoformat()
+    relocated = _move_ucb_sections(scanned, state) if per_category else set()
     for school, current in scanned.items():
         prior = state.get(school)
         if prior is not None and not isinstance(prior, dict):
@@ -406,6 +437,8 @@ def diff_and_alert(scanned: dict[str, dict[str, dict]], state: dict, per_categor
             alerts.append(compose_summary(school, new))
         else:
             alerts.extend(compose(school, item) for item in new)
+    for school in relocated:
+        state[school]["new_at"] = now
     return alerts
 
 
@@ -785,7 +818,7 @@ def _delete_record(env: str, record_name: str) -> None:
         log.warning("%s: could not delete test record %s", env, record_name)
 
 
-def mark_new_classes(fresh: list[dict]) -> None:
+def mark_new_classes(schools: list[str]) -> None:
     """Append each school that had newly detected classes this run to the
     WATCH_NEW_CLASSES_FILE marker, one id per line, so the workflow can
     publish the class feed now instead of on its daily cadence (the push
@@ -796,7 +829,6 @@ def mark_new_classes(fresh: list[dict]) -> None:
     refresh — the next publish still sees `new_at` — so it warns and never
     fails the run."""
     path = os.environ.get(NEW_CLASSES_FILE_ENV)
-    schools = list(dict.fromkeys(a["school"] for a in fresh))
     if not path or not schools:
         return
     try:
@@ -811,7 +843,7 @@ def mark_new_classes(fresh: list[dict]) -> None:
 def main() -> int:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr)
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ucb", action="store_true", help="scan UCB (NY/LA/Online) via Arlo")
+    ap.add_argument("--ucb", action="store_true", help="scan the UCB registration catalog (NY/LA/Online)")
     ap.add_argument("--all", action="store_true", help="scan every non-UCB class source")
     ap.add_argument("--all-if-stale", type=float, metavar="HOURS",
                     help="scan the non-UCB sources only if their state is older than HOURS")
@@ -835,10 +867,7 @@ def main() -> int:
         ap.error("pass --ucb, --all, and/or --all-if-stale")
 
     state = load_state()
-    if args.all_if_stale is not None and not args.all:
-        args.all = others_stale(state, args.all_if_stale)
-        log.info("non-UCB scan %s (stale threshold %.0fh)",
-                 "due" if args.all else "skipped", args.all_if_stale)
+    before = {school: entry.get("new_at") for school, entry in state.items() if isinstance(entry, dict)}
     alerts: list[dict] = pending_alerts(state)
     if alerts:
         log.info("retrying %d alert(s) left pending by an earlier iteration", len(alerts))
@@ -846,14 +875,30 @@ def main() -> int:
     scan_failed = False
     if args.ucb:
         try:
-            scanned = scan_ucb()
+            scanned = scan_ucb(state)
         except Exception as e:  # noqa: BLE001 — still deliver previously parked alerts
             log.error("UCB scan failed; keeping prior school state: %r", e)
             scan_failed = True
         else:
             fresh += diff_and_alert(scanned, state, per_category=True)
-    if args.all:
-        fresh += diff_and_alert(scan_others(), state, per_category=False)
+    if args.all or args.all_if_stale is not None:
+        due = due_other_schools(state, None if args.all else args.all_if_stale)
+        if due:
+            scanned = scan_others(due)
+            retries = state.get("_failed_other_scans", {})
+            retries = dict(retries) if isinstance(retries, dict) else {}
+            for school in due:
+                prior = state.get(school)
+                if school not in scanned or (not scanned[school] and isinstance(prior, dict) and prior.get("ids")):
+                    retries[school] = datetime.now(timezone.utc).isoformat()
+                    scan_failed = True
+                else:
+                    retries.pop(school, None)
+            if retries:
+                state["_failed_other_scans"] = retries
+            else:
+                state.pop("_failed_other_scans", None)
+            fresh += diff_and_alert(scanned, state, per_category=False)
     alerts += fresh
     if args.dry_run:
         log.info("DRY RUN: %d alert(s); no CloudKit writes or state changes", len(alerts))
@@ -872,7 +917,12 @@ def main() -> int:
             log.warning("alert backlog exceeds %d; retaining all %d undelivered alert(s)",
                         _PENDING_WARN_THRESHOLD, len(unsent))
     save_state(state)
-    mark_new_classes(fresh)
+    # Preserve detection order for regular postings and include both campuses
+    # when only the location changed. Retried push records have no new stamp.
+    changes = [a["school"] for a in fresh]
+    changes.extend(school for school, entry in state.items() if isinstance(entry, dict)
+                   and entry.get("new_at") and entry["new_at"] != before.get(school))
+    mark_new_classes(list(dict.fromkeys(changes)))
     return 1 if unsent or scan_failed else 0
 
 

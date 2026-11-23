@@ -328,6 +328,17 @@ class ClassesAggregateTests(AggregatorHarness):
         self.assertEqual([c["title"] for c in payload["classes"]], ["Carried"])
         self.assertEqual(payload["generated_at"], NOW.isoformat())
 
+    def test_ucb_seat_availability_refreshes_without_new_class_detection(self):
+        fetch = Mock(side_effect=[
+            [make_class(id="ucb_ny/1", title="Improv", is_full=False)],
+            [make_class(id="ucb_ny/1", title="Improv", is_full=True)],
+        ])
+        source = {"id": "ucb_ny", "org": "UCB", "city": "New York", "fetch": fetch}
+        with patch.object(classes_mod, "CLASS_SOURCES", [source]):
+            storage.save_classes(classes_mod.aggregate_classes(now=NOW))
+            payload = classes_mod.aggregate_classes(now=NOW + timedelta(hours=1))
+        self.assertTrue(payload["classes"][0]["is_full"])
+
     def test_null_title_does_not_break_sort(self):
         # Two classes sharing a start where one has a present-but-null title
         # used to raise TypeError in the sort tie-break and abort the run.
@@ -380,6 +391,29 @@ class ClassDetailEnrichmentTests(AggregatorHarness):
         self.assertEqual({c["id"]: c["description"] for c in payload["classes"]},
                          {f"x/{i}": f"desc https://x.test/{i}" for i in (1, 2, 3)})
 
+    def test_migrated_description_survives_until_the_new_page_is_read(self):
+        storage.save_classes({"sources": [], "classes": [self._row(1, description="Prior bio")]})
+        fetch = lambda: [self._row(1)]
+        detail = Mock(return_value=None)
+        offline = self._run(fetch, detail, now=NOW)
+        self.assertEqual(offline["classes"][0]["description"], "Prior bio")
+        self.assertNotIn("detail_done", offline["classes"][0])
+        storage.save_classes(offline)
+        detail.return_value = {"description": "Current details"}
+        updated = self._run(fetch, detail, now=NOW + timedelta(days=1))
+        self.assertEqual(updated["classes"][0]["description"], "Current details")
+        self.assertTrue(updated["classes"][0]["detail_done"])
+
+    def test_exhausted_budget_keeps_existing_detail_fields(self):
+        fetch = lambda: [self._row(1)]
+        detail = Mock(return_value={"description": "From the class page"})
+        storage.save_classes(self._run(fetch, detail, now=NOW))
+        with patch.object(classes_mod, "_DETAIL_BUDGET", 0):
+            row = self._run(fetch, detail, now=NOW + timedelta(days=1))["classes"][0]
+        self.assertEqual(row["description"], "From the class page")
+        self.assertTrue(row["detail_done"])
+        detail.assert_called_once()
+
     def test_failed_fetch_is_left_unflagged_and_retried(self):
         fetch = lambda: [self._row(1), self._row(2)]
         def flaky(url):
@@ -407,7 +441,7 @@ class ClassDetailEnrichmentTests(AggregatorHarness):
         storage.save_classes(self._run(fetch, detail, now=NOW))
         detail.return_value = {"description": "new"}
         with patch.dict(os.environ, {"REFRESH_DETAILS": "1"}):
-            payload = self._run(fetch, detail, now=NOW + timedelta(days=1))
+            payload = self._run(fetch, detail, now=NOW + timedelta(minutes=1))
         self.assertEqual(detail.call_count, 2)
         self.assertEqual(payload["classes"][0]["description"], "new")
 

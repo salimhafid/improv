@@ -15,11 +15,11 @@ who installed earlier); everything else stays free.
 ## How it works
 
 ```
-GitHub Actions cron (hourly; each source has its own 3h/24h cadence)
+GitHub Actions cron (hourly, with a separate cadence for each source)
   → publish_static.py  (LOCAL_STORE_DIR=docs — the checkout IS the state)
       scraper.py   → docs/shows.json    (11 sources, per-performance)
-      classes.py   → docs/classes.json  (11 sources, incl. UCB Online)
-      talent.py    → docs/talent.json   (UCB directory, ~1.7k people)
+      classes.py   → docs/classes.json  (hourly UCB availability, other schools daily)
+      talent.py    → docs/talent.json   (four UCB WordPress talent rosters)
   → commits changed feeds
 
 Class alerts: a second Actions workflow (watcher.py) scans UCB every ~2 minutes

@@ -1,104 +1,165 @@
-"""Public Arlo venue metadata must route sessions before LOC tags arrive."""
+"""UCB's registration page feeds both the class browser and class alerts."""
+from contextlib import ExitStack
+from datetime import date
 import unittest
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlsplit
 
 from sources import ucb_classes
+import watcher
 
 
-def event(event_id, location, tags=None):
-    result = {
-        "EventID": event_id, "Name": "A new workshop",
-        "ViewUri": "https://ucbcomedy.com/?arlo_id=353",
-        "Location": location, "StartDateTime": "2026-09-30T11:00:00-04:00",
-    }
-    if tags is not None:
-        result["Tags"] = tags
-    return result
+def section(*, title="Improv 101", course="improv-101/1001", city="New York",
+            venue="Union Square", open_seats="0", categories="improv", frequency="weekly",
+            group="Improv 101: Improv Basics", teacher="Jacklyn Uweh", dates="Nov 29 – Jan 31",
+            pattern="Sundays 11am-2pm ET"):
+    where = venue + (f'<span class="ucb-cl-run-sub">{city}</span>' if city != "Online" else "")
+    return f"""
+    <article class="ucb-cl-course"><h2 class="ucb-cl-course-title">{group}</h2>
+    <section class="ucb-cl-sub"><h3 class="ucb-cl-sub-title">{title}</h3><table><tbody>
+    <tr class="ucb-cl-run" data-cat="{categories}" data-freq="{frequency}" data-open="{open_seats}">
+    <td data-label="Schedule"><span class="ucb-cl-run-value">{pattern}</span></td>
+    <td data-label="Where"><span class="ucb-cl-run-value">{where}</span></td>
+    <td data-label="Instructor"><span class="ucb-cl-avatar">AB</span>
+    <span class="ucb-cl-run-value">{teacher}</span></td>
+    <td data-label="Starts">{dates}</td><td data-label="Price">$525.00</td>
+    <td data-label="Status"><a href="/course/{course}/">Register</a></td></tr>
+    </tbody></table></section></article>"""
 
 
-class UcbClassLocationTests(unittest.TestCase):
+def page(*sections):
+    return f'<p class="ucb-cl-count">Showing {len(sections)} classes</p>' + ''.join(sections)
+
+
+class UcbCatalogTests(unittest.TestCase):
     def setUp(self):
-        ucb_classes._memo = None
-        self.addCleanup(setattr, ucb_classes, "_memo", None)
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        self.fetch = stack.enter_context(patch.object(ucb_classes, 'fetch_html'))
+        stack.enter_context(patch.object(ucb_classes, 'local_today', return_value=date(2026, 11, 22)))
+        stack.enter_context(patch.object(ucb_classes, '_memo', None))
 
-    def test_routes_untagged_published_sessions_in_all_three_feeds(self):
-        # Arlo commonly supplies just Name, even when Location is expanded.
-        page = {"Items": [
-            event(42589, {"Name": "NY: 14th Street Campus"}, ["CTG_Clowning"]),
-            event(42590, {"Name": "LA: Franklin Campus"}, []),
-            event(41946, {"Name": "Online"}),
-        ]}
-        with patch.object(ucb_classes, "fetch_json", return_value=page) as fetch:
-            feeds = [ucb_classes.fetch_ny(), ucb_classes.fetch_la(), ucb_classes.fetch_online()]
-        self.assertEqual([[c["id"] for c in feed] for feed in feeds],
-                         [["ucb_ny/42589"], ["ucb_la/42590"], ["ucb_online/41946"]])
-        self.assertEqual(fetch.call_count, 1)
-        query = parse_qs(urlsplit(fetch.call_args.args[0]).query)
-        self.assertIn("Location", query["fields"][0].split(","))
-        self.assertIn("Location", query["expand"][0].split(","))
+    def test_shared_catalog_routes_native_sections_and_preserves_known_ids(self):
+        self.fetch.return_value = page(section(),
+            section(city="Los Angeles", venue="Franklin Campus", course="new-improv/001", open_seats="1"),
+            section(city="Online", venue="Online", course="online-lab/001", title="Performance Lab",
+                    categories="improv-electives featured-programs", frequency="workshop",
+                    group="Performance", teacher="Sam", pattern="Tuesdays 4pm-6pm PT", dates="Jan 5 – Jan 12"),
+            section(city="Austin", venue="ColdTowne Campus", course="improv-101/1003"))
+        (ny,) = ucb_classes.fetch_ny()
+        (la,) = ucb_classes.fetch_la()
+        (online,) = ucb_classes.fetch_online()
+        self.assertEqual(ny['id'], "ucb_ny/42873")
+        self.assertEqual(ny['url'], "https://ucbcomedy.com/course/improv-101/1001/")
+        self.assertEqual((ny['title'], ny['instructor'], ny['schedule'], ny['start'], ny['price'],
+                          ny['is_full'], ny['location'], ny['level']),
+                         ("Improv 101", "Jacklyn Uweh", "Sundays 11am-2pm ET · Nov 29 – Jan 31",
+                          "2026-11-29T11:00:00", "$525.00", True, "Union Square, New York",
+                          "Improv 101: Improv Basics"))
+        self.assertFalse(la['is_full'])
+        self.assertEqual(online['location'], "Online")
+        self.assertEqual(online['start'], "2027-01-05T19:00:00")
+        scanned = watcher.scan_ucb()
+        self.assertEqual(sum(map(len, scanned.values())), 3)
+        self.assertEqual(scanned["ucb_ny"]["42873"]["categories"], ["improv_core"])
+        # Existing numeric Arlo state must only notify for actual new sections.
+        state = {"ucb_ny": {"ids": ["42873"]}, "ucb_online": {"ids": []}}
+        alerts = watcher.diff_and_alert(scanned, state, per_category=True)
+        self.assertEqual(len(alerts), 1)
+        alert = alerts[0]
+        self.assertEqual((alert['classIDs'], alert['url']), (online['id'], online['url']))
+        self.assertEqual(alert['categories'], ["improv_electives", "featured_programs", "workshops"])
+        self.assertEqual(alert['pushBody'], "Performance Lab\nSam\nPerformance workshop")
+        self.assertEqual(watcher.diff_and_alert(scanned, state, per_category=True), [])
+        self.fetch.assert_called_once()
 
-    def test_expanded_location_fields_support_unlabelled_venues(self):
-        cases = [
-            ({"City": "New York City", "Country": "United States"}, "LOC_NY"),
-            ({"City": "New York", "Country": "US"}, "LOC_NY"),
-            ({"City": "Los Angeles", "Country": "United States"}, "LOC_LA"),
-            ({"IsOnline": True, "Name": "Virtual classroom"}, "LOC_Online"),
-            ({"Name": "  online  "}, "LOC_Online"),
-        ]
-        for location, tag in cases:
-            with self.subTest(location=location):
-                self.assertEqual(ucb_classes.event_location_tags(event(1, location)), [tag])
+    def test_group_fills_missing_category_and_in_person_clock_stays_venue_local(self):
+        self.fetch.return_value = page(section(city="Los Angeles", venue="Silver Lake", title="Character 201",
+            group="Character", categories="", frequency="intensive", pattern="Wednesdays 7pm-10pm ET"),
+            section(course="online-commercial-auditioning/003", city="Online", venue="Online",
+                    group="Acting", title="ONLINE Commercial Auditioning", categories=""))
+        (la,) = ucb_classes.fetch_la()
+        self.assertEqual(la["start"], "2026-11-29T19:00:00")
+        self.assertEqual(la["schedule"], "Wednesdays 7pm-10pm · Nov 29 – Jan 31")
+        scanned = watcher.scan_ucb()
+        self.assertEqual(next(iter(scanned["ucb_la"].values()))["categories"], ["sketch_character", "intensives"])
+        self.assertEqual(next(iter(scanned["ucb_online"].values()))["categories"], ["acting"])
 
-    def test_explicit_tags_take_precedence_over_conflicting_venue(self):
-        self.assertEqual(ucb_classes.event_location_tags(
-            event(1, {"Name": "Online"}, ["LOC_NY"])), ["LOC_NY"])
-        self.assertEqual(ucb_classes.event_location_tags(
-            event(1, {"Name": "NY: Union Square"}, ["LOC_LA", "LOC_Online"])),
-            ["LOC_LA", "LOC_Online"])
+    def test_only_new_uncategorized_noncore_sections_fetch_explicit_detail_subjects(self):
+        def acting(slug, **kwargs):
+            return section(course=slug, city="Online", venue="Online", title="Commercial Auditioning",
+                           categories="", group="Acting", **kwargs)
+        listing = page(acting("auditions/095"), acting("auditions/096"), acting("auditions/097"),
+                       section(title="Sketch 201", course="writing/011", categories="", city="Online",
+                               venue="Online", group="Sketch and Character", frequency="workshop"),
+                       section(course="new-lab/003", categories="featured-programs", city="Online",
+                               venue="Online", title="Featured Lab", group="Featured Programs"),
+                       section(course="first-campus/001", categories="", title="LA Lab", city="Los Angeles"))
+        tag_html = '<p class="ucb-class-band__tagline">Category: Acting / Featured Programs</p>'
+        def fetch(url):
+            if "training-center" in url:
+                return listing
+            if "/096/" in url:
+                return tag_html
+            if "/097/" in url:
+                raise RuntimeError("site unavailable")
+            self.fail("Unexpected section lookup " + url)
+        self.fetch.side_effect = fetch
+        state = {"ucb_online": {"ids": ["section-auditions-095"]}}
+        scanned = watcher.scan_ucb(state)
+        online = scanned["ucb_online"]
+        self.assertEqual(online["section-auditions-096"]["categories"], ["acting", "featured_programs"])
+        self.assertEqual(online["section-auditions-097"]["categories"], ["acting"])
+        self.assertEqual(online["section-writing-011"]["categories"], ["sketch_core"])
+        self.assertEqual(self.fetch.call_count, 3)
+        alerts = watcher.diff_and_alert(scanned, state, per_category=True)
+        self.assertTrue(any(a["classIDs"].endswith("096") and "featured_programs" in a["categories"] for a in alerts))
+        watcher.scan_ucb(state)
+        self.assertEqual(self.fetch.call_count, 3, "known sections keep the two-minute scan to the catalog")
 
-    def test_unsupported_explicit_location_is_not_reassigned(self):
-        for tag in ("LOC_TX", "LOC_PIT", "LOC_Edinburgh"):
-            with self.subTest(tag=tag):
-                self.assertEqual(ucb_classes.event_location_tags(
-                    event(1, {"Name": "Online"}, [tag])), [])
+    def test_large_drop_bounds_section_detail_lookups_and_keeps_the_remaining_alerts(self):
+        listing = page(*(section(course=f"acting-lab/{i:03}", title="Lab", group="Acting", categories="")
+                         for i in range(watcher._MAX_UCB_CATEGORY_LOOKUPS + 2)))
+        self.fetch.side_effect = lambda url: listing if "training-center" in url else ""
+        scanned = watcher.scan_ucb({"ucb_ny": {"ids": []}})
+        self.assertEqual(len(scanned["ucb_ny"]), watcher._MAX_UCB_CATEGORY_LOOKUPS + 2)
+        self.assertEqual(self.fetch.call_count, 1 + watcher._MAX_UCB_CATEGORY_LOOKUPS)
+        self.assertTrue(all(item["categories"] == ["acting"] for item in scanned["ucb_ny"].values()))
 
-    def test_ambiguous_locations_stay_unassigned_despite_title(self):
-        for location in (None, {}, "Online", {"Name": "New York style comedy"},
-                         {"Name": "Brooklyn"}, {"City": "Albany", "State": "NY"},
-                         {"City": "Los Angeles", "Country": "Chile"},
-                         {"Name": "Virtual classroom", "IsOnline": "true"}):
-            with self.subTest(location=location):
-                e = event(1, location)
-                e["Name"] = "ONLINE workshop in New York and LA"
-                self.assertEqual(ucb_classes.event_location_tags(e), [])
+    def test_one_publish_keeps_one_catalog_across_slow_enrichment(self):
+        self.fetch.side_effect = [page(section()), page(section(title="Replacement"))]
+        with patch.object(ucb_classes, "_MEMO_TTL", 0):
+            with ucb_classes.feed_snapshot():
+                first = ucb_classes.catalog()
+                self.assertIs(ucb_classes.catalog(), first)
+            with ucb_classes.feed_snapshot():
+                self.assertNotEqual(ucb_classes.catalog(), first)
+        self.assertEqual(self.fetch.call_count, 2)
 
-    def test_unassigned_diagnostic_is_emitted_once_per_walk(self):
-        unknown = event(999, {"Name": "Mystery campus"})
-        unsupported = event(998, {"Name": "Austin: ColdTowne Theater"}, ["LOC_TX"])
-        with patch.object(ucb_classes, "fetch_json", return_value={"Items": [unknown, unsupported]}):
-            with self.assertLogs("ucb.classes.source", level="WARNING") as logs:
-                self.assertEqual(ucb_classes.fetch_ny(), [])
-                self.assertEqual(ucb_classes.fetch_la(), [])
-                self.assertEqual(ucb_classes.fetch_online(), [])
-        self.assertEqual(len(logs.output), 1)
-        self.assertIn("id=999", logs.output[0])
-        self.assertIn("A new workshop", logs.output[0])
-        self.assertIn("Mystery campus", logs.output[0])
+    def test_same_section_number_on_two_courses_has_distinct_ids(self):
+        self.fetch.return_value = page(section(course="course-one/001"), section(course="course-two/001"))
+        rows = ucb_classes.fetch_ny()
+        self.assertEqual(len({row["id"] for row in rows}), 2)
 
-    def test_fallback_route_diagnostic_is_emitted_once_per_walk(self):
-        page = {"Items": [event(41946, {"Name": "Online"})]}
-        with patch.object(ucb_classes, "fetch_json", return_value=page):
-            with self.assertLogs("ucb.classes.source", level="INFO") as logs:
-                ucb_classes.fetch_ny()
-                ucb_classes.fetch_la()
-                self.assertEqual(len(ucb_classes.fetch_online()), 1)
-        self.assertEqual(len(logs.output), 1)
-        self.assertIn("routed from venue id=41946", logs.output[0])
-        self.assertIn("A new workshop", logs.output[0])
-        self.assertIn("Online", logs.output[0])
-        self.assertIn("LOC_Online", logs.output[0])
+    def test_partial_or_malformed_page_fails_once_without_partial_results(self):
+        fixture = section()
+        for bad in [page(), page(fixture).replace("Showing 1", "Showing 2"), page(fixture, fixture),
+                    page(fixture).replace('/course/improv-101/1001/', '/course/improv-101/'),
+                    page(fixture).replace('/course/improv-101/1001/', 'https://example.org/course/i/1/'),
+                    page(fixture).replace('data-label="Where"', 'data-label="Elsewhere"'),
+                    page(fixture).replace('data-open="0"', 'data-open=""')]:
+            with self.subTest(bad=bad), patch.object(ucb_classes, "_memo", None):
+                self.fetch.reset_mock()
+                self.fetch.return_value = bad
+                with self.assertRaises(ValueError):
+                    ucb_classes.fetch_ny()
+                with self.assertRaises(RuntimeError):
+                    watcher.scan_ucb()
+                self.fetch.assert_called_once()
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_year_rollover_keeps_recent_december_starts_in_december(self):
+        start = ucb_classes._start
+        jan2 = date(2027, 1, 2)
+        self.assertEqual(start("Dec 30 – Jan 12", "4pm-6pm", "New York", jan2), "2026-12-30T16:00:00")
+        self.assertEqual(start("Jan 8", "Time TBD", "New York", jan2), "2027-01-08")
+        self.assertEqual(start("March 12, 2028", "", "New York", jan2), "2028-03-12")
+        self.assertIsNone(start("TBD", "", "New York", jan2))
