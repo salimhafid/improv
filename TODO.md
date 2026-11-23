@@ -10,7 +10,10 @@ Companion to [CONTEXT.md](CONTEXT.md). As of November 22, 2026, Improv
       accepted nine new UCB class alerts. The next scan found no duplicates.
 - [x] Archived and signed 1.8.1 (31). Release notes and the automatic release
       setting are in App Store Connect.
-- [ ] Submit build 31 for review after Apple accepts the binary upload.
+- [x] Submitted build 31 for review on 2026-11-23 at 06:05:58 UTC.
+      App Store Connect verified `WAITING_FOR_REVIEW` for version 1.8.1 and
+      submission `bb29c80d-8d9a-4b77-9d6f-119f5b68df6a`, with automatic
+      release after approval.
 
 ## Class details + alert deep links (2026-11-10)
 
