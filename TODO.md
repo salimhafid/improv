@@ -1,7 +1,18 @@
 # TODO.md — open items, watchlist, and likely next steps
 
-Companion to [CONTEXT.md](CONTEXT.md). As of November 22, 2026, Improv
-1.8 (30) is live and its Class Alerts in-app purchase is approved.
+Companion to [CONTEXT.md](CONTEXT.md). As of November 24, 2026, Improv
+1.8.1 (31) is live and the Class Alerts in-app purchase is approved.
+
+## UCB sign-in (1.8.2)
+
+- [x] Verified that UCB checkout and the student wallet share their session,
+      a remembered WebKit cookie survives a cold launch, and explicit sign-out
+      survives another launch. A clean iPhone simulator opened UCB’s live login
+      form and a show’s ticket page. Personal-account authentication and purchases
+      were outside these checks.
+- [x] Submitted build 32 on November 24, 2026 at 7:48 p.m. Eastern. App Store
+      Connect reported `WAITING_FOR_REVIEW` for submission
+      `7cb16cb5-353c-4e34-b499-35d43278b3a1`, with automatic release after approval.
 
 ## Feed refresh and class alerts (1.8.1)
 
