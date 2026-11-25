@@ -1,0 +1,1 @@
+Improv now remembers your UCB sign-in more reliably when you reopen the app. UCB class and ticket pages share the sign-in you use for your student wallet. A temporary connection problem no longer makes your saved tickets disappear.

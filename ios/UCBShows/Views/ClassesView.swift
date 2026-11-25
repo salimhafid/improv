@@ -137,7 +137,7 @@ struct ClassesView: View {
             .sheet(item: $sheet) { sheet in
                 switch sheet {
                 case .alerts: ClassAlertsView()
-                case .listing(let link): SafariView(url: link.url).ignoresSafeArea()
+                case .listing(let link): VenueWebView(url: link.url)
                 }
             }
             .refreshable { await store.refresh() }

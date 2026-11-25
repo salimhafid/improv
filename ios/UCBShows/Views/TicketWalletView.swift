@@ -92,7 +92,6 @@ struct TicketWalletView: View {
                         signingOut = true
                         Task {
                             await account.signOut()
-                            tickets.clearLocal()   // cancel reminders
                             signingOut = false
                         }
                     }
@@ -159,6 +158,7 @@ struct TicketWalletView: View {
             Text("Sign in to reserve free student tickets, carry them as a QR, and get a nudge when you reach the theater.")
                 .font(.subheadline).foregroundStyle(.secondary)
             Button("Sign in to UCB") { showSignIn = true }
+                .disabled(account.isSigningOut)
                 .buttonStyle(.borderedProminent)
                 .padding(.top, 2)
         }

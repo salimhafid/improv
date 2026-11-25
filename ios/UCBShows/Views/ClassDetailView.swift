@@ -59,7 +59,7 @@ struct ClassDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(item: $webLink) { link in
-            SafariView(url: link.url).ignoresSafeArea()
+            VenueWebView(url: link.url)
         }
         .onSwipeRight { dismiss() }   // swipe L→R anywhere goes back to the list
     }

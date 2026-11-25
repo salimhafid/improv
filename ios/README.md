@@ -72,7 +72,7 @@ runs too (see CONTEXT.md, "Class Alerts in-app purchase (1.8)").
 - **UCB sign-in, reserve, release** — optional. Signing in happens on UCB's own
   `/my-account/` page inside a web view; the session (cookies) stays in an
   on-device WebKit data store and a Keychain marker remembers that a session
-  exists. On a UCB show, a **Reserve · Free** button between the heart and Get
+  exists. UCB class registration and ticket links share that login. On a UCB show, a **Reserve · Free** button between the heart and Get
   Tickets claims a student ticket in one tap; tickets can be released from
   their detail page until an hour before showtime.
 - **Apple Wallet** — Add to Wallet for the Student ID (surfaces near either UCB

@@ -768,15 +768,13 @@ matches real subscribers.
   does not claim a newly detected natural class push was observed.
 - **UCB session engine** (`UCBSession`): UCB has no API and sits behind
   Cloudflare Turnstile + JA3 binding, so ONE permanent off-screen `WKWebView`
-  over a named `WKWebsiteDataStore` (fixed UUID) is both the login surface's
-  cookie jar and the API client — every authenticated call runs as injected
-  JS inside it. The sign-in sheet (`UCBSignInView`) opens UCB's real
-  `/my-account/` login in a second web view over the SAME data store, ticks
-  WooCommerce's "Remember me" (else the auth cookie is a session cookie and
-  users got signed out), and treats the sheet as signed in only when a page
-  shows a positive dashboard marker (`.woocommerce-MyAccount-navigation` or
-  `.ucb-student-id`) — not merely "no login form" (the lost-password page and
-  Cloudflare interstitials used to fire it). Ops are serialized behind an
+  over a named `WKWebsiteDataStore` (fixed UUID) reads the student wallet.
+  The sign-in sheet and UCB website links use separate views backed by this
+  same on-device store. UCB's “Remember me” checkbox defaults to selected and
+  honors the user's choice. UCB controls when the session expires.
+  The app recognizes visible private account controls on trusted UCB pages.
+  Before clearing the wallet for a website logout it checks for a login form
+  on two fresh, successful account page loads. Ops are serialized behind an
   async lock, bounded by a 20 s navigation gate, stand down while the login
   sheet owns the web view, and re-check cancellation after acquiring the
   lock. API: `refresh() → RefreshOutcome (signedIn(snapshot) | signedOut |
@@ -790,8 +788,9 @@ matches real subscribers.
   `com.salimhafid.UCBShows.ucb`, account `session-valid`,
   `AfterFirstUnlockThisDeviceOnly`, never iCloud Keychain) so launch starts
   in `.checking` and cached tickets render immediately.
-  `completeSignIn() → RefreshOutcome` is handed straight to `tickets.adopt`
-  so sign-in costs one navigation. `TicketStore`: `reserved: [Ticket]` +
+  If the marker is missing, the app checks for a UCB login cookie and verifies
+  the session with UCB. A confirmed account read delivers its wallet update
+  in the same main-actor turn. Explicit sign-out clears the shared store. `TicketStore`: `reserved: [Ticket]` +
   `studentID` in `tickets.json` (mirrored to iCloud; an empty remote copy
   is refused and the local wallet re-pushed). Carry-forward by order id keeps
   `showID/start/posterURL`, and keeps the old QR/title/venue when a partial

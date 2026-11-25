@@ -54,6 +54,7 @@ struct StudentReserveButton: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
+            .disabled(account.isSigningOut)
             .accessibilityLabel("Sign in for a free student ticket")
         case .available:
             Button {

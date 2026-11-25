@@ -14,7 +14,12 @@ final class TicketStore {
     private(set) var studentID: Ticket?
 
     /// Set once at app composition (strong; no cycle back to us).
-    var account: UCBAccountStore?
+    var account: UCBAccountStore? {
+        didSet {
+            oldValue?.onRefresh = nil
+            account?.onRefresh = { [weak self] outcome in self?.adopt(outcome) }
+        }
+    }
 
     /// Set once at app composition (strong; no cycle back to us). We tell it
     /// which shows we hold tickets to so it stands its own reminder down —
@@ -67,7 +72,10 @@ final class TicketStore {
         guard let account else { return false }
         activeReads += 1
         defer { activeReads -= 1 }
-        return adopt(await account.refresh())
+        switch await account.refresh() {
+        case .signedIn, .signedOut: return true
+        case .unknown: return false
+        }
     }
 
     @ObservationIgnored private var activeReads = 0
@@ -86,8 +94,7 @@ final class TicketStore {
     }
 
     /// Apply a refresh outcome. `unknown` (transient / interstitial) is a no-op,
-    /// so a bad read never wipes the offline cache. Reports whether it applied,
-    /// so the caller can leave a failed read eligible for an immediate retry.
+    /// so the cached wallet remains available when the site is unreachable.
     ///
     /// Only a read that actually landed starts the staleness clock — a
     /// transient one applies nothing, and stamping it would sit on an empty
@@ -96,12 +103,11 @@ final class TicketStore {
     /// account read with the wallet: without it, the Tickets tab treated the
     /// launch read as never having happened and kicked off a second, serialized
     /// ucbcomedy.com navigation the moment it appeared.
-    @discardableResult
-    func adopt(_ outcome: UCBSession.RefreshOutcome) -> Bool {
+    private func adopt(_ outcome: UCBSession.RefreshOutcome) {
         switch outcome {
-        case .signedIn(let snap): apply(snap); lastSynced = Date(); return true
-        case .signedOut: clearLocal(); lastSynced = Date(); return true
-        case .unknown: return false
+        case .signedIn(let snap): apply(snap); lastSynced = Date()
+        case .signedOut: clearLocal(); lastSynced = nil
+        case .unknown: break
         }
     }
 
@@ -152,10 +158,10 @@ final class TicketStore {
     /// let a device that never had a UCB session empty the wallet — and cancel
     /// the reminders — on the device that does.
     func clearLocal() {
+        pendingJoins = []
         guard hasAnything else { return }
         reserved = []
         studentID = nil
-        pendingJoins = []
         save()
         cancelAllReminders()
     }

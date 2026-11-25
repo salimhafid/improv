@@ -168,8 +168,7 @@ struct UCBShowsApp: App {
                         return
                     }
                     #endif
-                    let outcome = await account.restoreOnLaunch()
-                    tickets.adopt(outcome)
+                    await account.restoreOnLaunch()
                 }
                 // Same-count feed updates can resolve previously unmatched tickets.
                 .onChange(of: store.feedVersion) { _, _ in
@@ -179,8 +178,13 @@ struct UCBShowsApp: App {
                 // one sync per 5 minutes) keeps the locally stored QR current.
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
-                    if account.isSignedIn {
-                        Task { await tickets.syncIfStale() }
+                    Task {
+                        if account.isSignedIn {
+                            await tickets.syncIfStale()
+                        } else {
+                            // Protected data may have been unavailable at launch.
+                            await account.restoreOnLaunch()
+                        }
                     }
                     // Covers a device token rotating and permission granted in
                     // Settings while we were backgrounded. Idempotent.

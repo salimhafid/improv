@@ -22,10 +22,25 @@ final class UCBAccountStore {
     /// default is a lie the wallet must not print.
     private(set) var isConfirmed = false
 
+    /// Deliver a validated wallet change in the same main-actor turn as the
+    /// identity change. A caller resuming after an await may already belong to
+    /// a newer login or an explicit sign-out.
+    @ObservationIgnored var onRefresh: ((UCBSession.RefreshOutcome) -> Void)?
+    private(set) var isSigningOut = false
+    @ObservationIgnored private var generation: UInt64 = 0
+    @ObservationIgnored private var readSequence: UInt64 = 0
+    @ObservationIgnored private var lastAppliedRead: UInt64 = 0
+    @ObservationIgnored private var restoringGeneration: UInt64?
+    @ObservationIgnored private var signOutTask: Task<Void, Never>?
+    private let defaults: UserDefaults
+    // A local cleanup flag, deliberately outside CloudSync's mirrored keys.
+    private static let pendingSignOut = "ucbSignOutPending"
+
     let session = UCBSession()
     private static let marker = "session-valid"
 
-    /// A read confirmed the session. The gate for anything that talks to UCB.
+    /// Ready to use or revalidate the session. An offline restoration can
+    /// reach this phase before identity and eligibility are confirmed.
     var isSignedIn: Bool { phase == .signedIn }
 
     /// The launch session check hasn't answered yet.
@@ -36,85 +51,117 @@ final class UCBAccountStore {
     /// `isSignedIn` for that.
     var hasSession: Bool { phase != .signedOut }
 
-    /// Seed the phase from the on-device marker BEFORE any view renders.
-    /// `restoreOnLaunch` used to be the first thing to set `.checking`, but it
-    /// runs from a `.task` — frames after the Tickets tab has already drawn,
-    /// and then only after a 1–20s web-view round trip. Starting at
-    /// `.signedOut` is what made a returning user's wallet render the connect
-    /// card over a Student ID that was already decoded in memory.
-    ///
-    /// `Keychain.string` is a synchronous `SecItemCopyMatching` — cheap enough
-    /// for an initializer, at the cost of making the initial phase
-    /// device-dependent (see `restoreOnLaunch`'s `defer` for the escape hatch).
-    init() {
-        if Keychain.string(for: Self.marker) == "1" { phase = .checking }
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        isSigningOut = defaults.bool(forKey: Self.pendingSignOut)
+        if !isSigningOut, Keychain.string(for: Self.marker) == "1" { phase = .checking }
     }
 
-    /// On launch: if we have a marker, confirm the session. Returns the outcome
-    /// so `TicketStore` can adopt the same snapshot without a second load.
-    ///
-    /// No marker means we never asked UCB anything, so the outcome is `unknown`,
-    /// NOT a definitive signed-out: reporting signed-out made every launch
-    /// without a keychain marker wipe the ticket cache — including the fresh
-    /// install that had just adopted `tickets.json` from iCloud, and with it
-    /// the showtime reminders that cache arms. Phase stays `signedOut` (never
-    /// seeded above), so the UI still shows the connect card.
+    /// Called at launch, on foreground and after first-party web browsing. A
+    /// visitor without either a marker or a WebKit login cookie has no local
+    /// session to verify. Leave their iCloud-restored tickets alone, and check
+    /// again next time in case Keychain was temporarily locked or they logged
+    /// in through another page in the shared WebKit store.
     @discardableResult
     func restoreOnLaunch() async -> UCBSession.RefreshOutcome {
-        guard phase == .checking else { return .unknown }
-        // Marker present but the read was inconclusive (offline / interstitial /
-        // task cancelled mid-launch): stay optimistically signed-in so cached
-        // tickets show; a later refresh confirms or clears. As a `defer` rather
-        // than an outcome check so no path can leave `.checking` dangling — a
-        // stranded `.checking` is a permanent "Updating…" chip and no sign-out
-        // button.
-        defer { if phase == .checking { phase = .signedIn } }
-        return await refresh()
+        if defaults.bool(forKey: Self.pendingSignOut) {
+            await signOut()
+            return .signedOut
+        }
+        guard phase != .signedIn, !isSigningOut, restoringGeneration != generation else { return .unknown }
+        let current = generation
+        restoringGeneration = current
+        defer { if restoringGeneration == current { restoringGeneration = nil } }
+        if phase != .checking, Keychain.string(for: Self.marker) != "1" {
+            let hasCookie = await session.hasLoginCookie()
+            guard current == generation, hasCookie else { return .unknown }
+        }
+        return await confirmSession(current)
     }
 
-    /// Re-read the account. Applies identity on success, clears on a definitive
-    /// signed-out, and leaves state untouched on an ambiguous read.
+    /// A previous local sign-in or a verified dashboard permits showing
+    /// cached tickets after an inconclusive read. A server-confirmed logout
+    /// and an explicit logout both take precedence over that fallback.
+    private func confirmSession(_ current: UInt64) async -> UCBSession.RefreshOutcome {
+        guard current == generation, !isSigningOut else { return .unknown }
+        phase = .checking
+        let outcome = await refresh()
+        guard current == generation else { return .unknown }
+        if phase == .checking { phase = .signedIn }
+        return outcome
+    }
+
     @discardableResult
     func refresh() async -> UCBSession.RefreshOutcome {
+        guard hasSession, !isSigningOut else { return .unknown }
+        let current = generation
+        readSequence += 1
+        let read = readSequence
         let outcome = await session.refresh()
+        guard current == generation, read > lastAppliedRead else { return .unknown }
         switch outcome {
         case .signedIn(let snap):
+            rememberSession()
             phase = .signedIn
             isConfirmed = true
             name = snap.name; eligible = snap.eligible; freeRemaining = snap.freeRemaining
         case .signedOut:
             Keychain.delete(Self.marker)
-            phase = .signedOut
-            isConfirmed = false
-            name = ""; eligible = false; freeRemaining = 0
+            clearIdentity()
         case .unknown:
-            break
+            return .unknown
         }
+        lastAppliedRead = read
+        onRefresh?(outcome)
         return outcome
     }
 
-    /// Called by the sign-in web view once it lands on the logged-in dashboard.
-    /// Returns the read's outcome so the caller can hand it to
-    /// `TicketStore.adopt` — the same one-read-shared-with-the-wallet shape as
-    /// launch, instead of the Tickets tab immediately paying for a second
-    /// serialized 1–20 s navigation.
+    private func rememberSession() {
+        if Keychain.string(for: Self.marker) != "1" { Keychain.set("1", for: Self.marker) }
+    }
+
+    /// The login sheet already saw a verified first-party dashboard. Invalidate
+    /// every read started under the old identity before confirming this one.
     @discardableResult
     func completeSignIn() async -> UCBSession.RefreshOutcome {
-        Keychain.set("1", for: Self.marker)
-        let outcome = await refresh()
-        // The user just watched the dashboard load, so an ambiguous first read
-        // (challenge interstitial, slow network) must not leave the app looking
-        // signed out — trust the login; the next refresh confirms.
-        if case .unknown = outcome { phase = .signedIn }
-        return outcome
+        guard !isSigningOut else { return .unknown }
+        generation += 1
+        let current = generation
+        restoringGeneration = current
+        defer { if restoringGeneration == current { restoringGeneration = nil } }
+        clearIdentity()
+        rememberSession()
+        return await confirmSession(current)
     }
 
-    func signOut() async {
-        await session.signOut()
-        Keychain.delete(Self.marker)
+    private func clearIdentity() {
         phase = .signedOut
         isConfirmed = false
         name = ""; eligible = false; freeRemaining = 0
+    }
+
+    func signOut() async {
+        if let task = signOutTask { await task.value; return }
+        generation += 1
+        isSigningOut = true
+        // If iOS terminates us before WebKit finishes, resume erasing the
+        // previous session on launch before considering any surviving cookie.
+        defaults.set(true, forKey: Self.pendingSignOut)
+        clearIdentity()
+        onRefresh?(.signedOut)
+        let removedMarker = Keychain.delete(Self.marker)
+        let task = Task {
+            await session.signOut()
+            // The marker can be inaccessible before the device's first unlock.
+            // Keep cleanup pending then, so it cannot seed a new cached login.
+            if removedMarker || Keychain.delete(Self.marker) {
+                defaults.removeObject(forKey: Self.pendingSignOut)
+                isSigningOut = false
+            }
+            signOutTask = nil
+        }
+        signOutTask = task
+        await task.value
     }
 
     #if DEBUG

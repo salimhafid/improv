@@ -68,7 +68,7 @@ private struct TalentBioContent: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(item: $webLink) { link in
-            SafariView(url: link.url).ignoresSafeArea()
+            VenueWebView(url: link.url)
         }
         .task(id: "\(person.slug)|\(person.name)|\(shows.feedVersion)") {
             matchingShows = computeMatchingShows()

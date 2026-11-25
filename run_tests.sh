@@ -50,3 +50,23 @@ xcrun swiftc -parse-as-library -o "$BUILD_DIR/class_alert_store_tests" \
   ios/UCBShows/Services/ClassAlertsStore.swift \
   tests/ios/ClassAlertsStoreTests.swift
 "$BUILD_DIR/class_alert_store_tests"
+
+echo "── UCB account restoration and lifecycle tests ─────────"
+xcrun swiftc -parse-as-library -o "$BUILD_DIR/ucb_account_store_tests" \
+  ios/UCBShows/Services/UCBAccountStore.swift \
+  tests/ios/UCBAccountStoreTests.swift
+"$BUILD_DIR/ucb_account_store_tests"
+
+echo "── UCB account WebKit tests ───────────────────────────"
+xcrun swiftc -parse-as-library -o "$BUILD_DIR/ucb_account_tests" \
+  ios/UCBShows/Support/DateUtils.swift \
+  ios/UCBShows/Support/UCBWebOrigin.swift \
+  ios/UCBShows/Models/Source.swift \
+  ios/UCBShows/Models/Venue.swift \
+  ios/UCBShows/Models/Show.swift \
+  ios/UCBShows/Models/Ticket.swift \
+  ios/UCBShows/Services/UCBSession.swift \
+  tests/ios/UCBWebOriginTests.swift \
+  tests/ios/UCBSessionRefreshTests.swift \
+  tests/ios/UCBAccountPageTests.swift
+"$BUILD_DIR/ucb_account_tests"

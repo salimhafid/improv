@@ -1,25 +1,17 @@
 import Foundation
 import WebKit
 
-/// The app's UCB "session engine." UCB has no API and sits behind Cloudflare
-/// Turnstile + JA3 binding, so credentials can't be POSTed natively and cookies
-/// can't be lifted into URLSession. Instead ONE persistent `WKWebView` (backed
-/// by a named, on-device data store) is BOTH the login surface and the API
-/// client: the user signs in inside it once, and every authenticated call runs
-/// *inside the same web view* via injected `fetch()` / DOM reads — so requests
-/// carry the real cookies + TLS fingerprint. Nothing hits a server we run.
-///
-/// One web view means operations must not overlap, so they're serialized behind
-/// a small async lock, every navigation is bounded by a timeout (so a stalled
-/// load can never wedge the lock), and while the login sheet is driving the web
-/// view, off-screen ops stand down.
+/// The login sheet, UCB checkout and private account reads use one persistent
+/// WebKit data store. UCB owns all session cookies and their expiration.
+/// The off-screen web view serializes account reads and ticket operations.
 @MainActor
 final class UCBSession {
     static let accountURL = URL(string: "https://ucbcomedy.com/my-account/")!
     static let studentTicketsURL = URL(string: "https://ucbcomedy.com/my-account/student-tickets/")!
 
     private static let storeID = UUID(uuidString: "B9F4C1A2-7E33-49D0-8C21-000000000001")!
-    let dataStore: WKWebsiteDataStore = .init(forIdentifier: storeID)
+    let dataStore: WKWebsiteDataStore
+    private let navigate: @MainActor (WKWebView, URLRequest) -> WKNavigation?
 
     /// The ENGINE web view: permanently off-screen, never installed in a window,
     /// never touched — it only loads pages and runs injected JS. Keeping it out
@@ -28,7 +20,14 @@ final class UCBSession {
     /// crashes UIKit's delayed-touch bookkeeping).
     let web: WKWebView
 
-    init() {
+    convenience init() {
+        self.init(dataStore: .init(forIdentifier: Self.storeID))
+    }
+
+    init(dataStore: WKWebsiteDataStore,
+         navigate: @escaping @MainActor (WKWebView, URLRequest) -> WKNavigation? = { $0.load($1) }) {
+        self.dataStore = dataStore
+        self.navigate = navigate
         web = WKWebView(frame: CGRect(x: 0, y: 0, width: 480, height: 900),
                         configuration: Self.configuration(store: dataStore))
     }
@@ -40,47 +39,114 @@ final class UCBSession {
         return cfg
     }
 
-    /// A fresh LOGIN web view for the sign-in sheet, over the SAME data store —
+    /// A fresh account or checkout browser over the same persistent data store —
     /// same network process, same cookie jar — so the cookies the user earns by
     /// logging in are immediately visible to the engine's calls. The sheet owns
     /// it outright and it dies with the sheet: never reused, never reparented,
     /// so no gesture state can outlive its window.
-    func makeLoginWebView() -> WKWebView {
+    func makeAccountBrowserWebView() -> WKWebView {
         let cfg = Self.configuration(store: dataStore)
         cfg.userContentController.addUserScript(
-            WKUserScript(source: Self.rememberMeJS, injectionTime: .atDocumentEnd,
-                         forMainFrameOnly: true))
+            WKUserScript(source: Self.rememberMeJS, injectionTime: .atDocumentStart,
+                         forMainFrameOnly: true, in: .defaultClient))
         return WKWebView(frame: .zero, configuration: cfg)
     }
 
-    /// Tick WooCommerce's "Remember me" before the user submits.
-    ///
-    /// It ships unchecked, and unchecked is what kept signing people out: WordPress
-    /// only calls `wp_set_auth_cookie($id, true)` when `rememberme` is posted, so
-    /// without it the auth cookie carries no expiry — a *session* cookie, which
-    /// WebKit discards whenever the web content process is recycled, not just on
-    /// relaunch. Checked, WordPress issues the persistent (14-day by default)
-    /// cookie, and because it silently re-issues that cookie once past half-life on
-    /// any authenticated load, the launch `refresh()` keeps rolling it forward — an
-    /// active user stops being logged out at all.
-    ///
-    /// Runs at document-end, and watches for a form rendered late (some themes
-    /// inject the login markup after load). Pure no-op on pages without the field.
-    private static let rememberMeJS = """
+    private static let isUCBOriginJS = "['https://ucbcomedy.com', 'https://www.ucbcomedy.com'].includes(location.origin)"
+
+    /// Only UCB's HTTPS account pages can establish an app session. The account
+    /// recovery pages may also have WooCommerce navigation and login links.
+    static let isAccountPageJS = """
+    (\(isUCBOriginJS)
+      && /^\\/my-account(?:\\/|$)/.test(location.pathname)
+      && !/^\\/my-account\\/(?:lost-password|reset-password|register|customer-logout)(?:\\/|$)/.test(location.pathname))
+    """
+
+    private static let loginFormSelector = "form.woocommerce-form-login, #customer_login form.login, form:has(input[name=woocommerce-login-nonce])"
+
+    /// The sheet and the engine must agree before changing the on-device
+    /// account state. Scope both checks to the account content; headers, drawers
+    /// and hidden templates can include a login form on an authenticated page.
+    static let accountPageStateJS = """
     (() => {
-      const tick = () => {
-        const box = document.querySelector('input[name="rememberme"], #rememberme');
-        if (!box) return false;
-        if (!box.checked) {
-          box.checked = true;
-          box.dispatchEvent(new Event('change', { bubbles: true }));
+      if (!\(isAccountPageJS)) return 'unknown';
+      const scope = document.querySelector('main, [role="main"], #main') || document;
+      const visible = el => {
+        if (el.closest('header, footer, [role="banner"], dialog, [role="dialog"], [inert], [hidden], [aria-hidden="true"]')) return false;
+        for (let node = el; node; node = node.parentElement) {
+          const css = getComputedStyle(node);
+          if (css.display === 'none' || css.visibility === 'hidden') return false;
         }
         return true;
       };
-      if (tick()) return;
-      const obs = new MutationObserver(() => { if (tick()) obs.disconnect(); });
-      obs.observe(document.documentElement, { childList: true, subtree: true });
-      setTimeout(() => obs.disconnect(), 15000);
+      const anyVisible = (selector, check) => Array.from(scope.querySelectorAll(selector))
+        .some(el => visible(el) && check(el));
+      const hasLogin = anyVisible('\(loginFormSelector)', form => {
+        const hasField = selector => Array.from(form.querySelectorAll(selector)).some(visible);
+        return hasField('input[type="password"]') && hasField('input[name="username"], input[type="email"], input[autocomplete="username"]');
+      });
+      const hasCard = anyVisible('.ucb-id-card--student, .ucb-student-id', card =>
+        card.getAttribute('data-name') || card.querySelector('svg') || card.textContent.trim());
+      const hasAccountLink = anyVisible('.woocommerce-MyAccount-navigation a[href], .woocommerce-MyAccount-content a[href]', link => {
+        if (link.origin !== location.origin) return false;
+        return /^\\/my-account\\/customer-logout\\/?$/.test(link.pathname)
+          || (link.pathname === '/wp-login.php' && new URLSearchParams(link.search).get('action') === 'logout')
+          || (link.closest('.woocommerce-MyAccount-navigation') && /^\\/my-account\\/(?:edit-account|account-settings|orders|student-tickets|in-person-tickets)\\/?$/.test(link.pathname));
+      });
+      if (hasLogin && (hasCard || hasAccountLink)) return 'unknown';
+      if (hasCard || hasAccountLink) return 'signedIn';
+      return hasLogin ? 'signedOut' : 'unknown';
+    })()
+    """
+
+    static let dashboardMessage = "ucbAccountReady"
+    // UCB can populate the private dashboard after navigation finishes.
+    // Observe in WebKit's isolated client world so page scripts and frames
+    // cannot invoke the app's completion handler.
+    static let observeDashboardJS = """
+    (() => {
+      if (!\(isAccountPageJS)) return;
+      const check = () => {
+        if (\(accountPageStateJS) !== 'signedIn') return;
+        observer.disconnect();
+        window.webkit.messageHandlers.\(dashboardMessage).postMessage(null);
+      };
+      const observer = new MutationObserver(check);
+      observer.observe(document, { childList: true, subtree: true, attributes: true,
+        attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'data-name', 'href'] });
+      check();
+    })();
+    """
+
+
+    /// Default UCB's real login checkbox to persistent sign-in. Keep the user's
+    /// selection through form replacements and validation redirects in this
+    /// sheet. WordPress sets and enforces the eventual server-side expiration.
+    static let rememberMeJS = """
+    (() => {
+      if (!\(isUCBOriginJS) || !/^\\/(?:my-account|checkout)(?:\\/|$)/.test(location.pathname)) return;
+      const forms = '\(loginFormSelector)';
+      const boxes = 'input[type="checkbox"][name="rememberme"], input[type="checkbox"]#rememberme';
+      const seen = new WeakSet();
+      const preferenceKey = 'improv.ucb.rememberMe';
+      let remember = true;
+      try { remember = sessionStorage.getItem(preferenceKey) !== 'false'; } catch {}
+      const apply = () => {
+        for (const form of document.querySelectorAll(forms)) {
+          if (form.closest('header, footer, dialog, [role="banner"], [role="dialog"]')) continue;
+          for (const box of form.querySelectorAll(boxes)) {
+            if (seen.has(box)) continue;
+            seen.add(box);
+            box.checked = remember;
+            box.addEventListener('change', () => {
+              remember = box.checked;
+              try { sessionStorage.setItem(preferenceKey, String(remember)); } catch {}
+            });
+          }
+        }
+      };
+      apply();
+      new MutationObserver(apply).observe(document, { childList: true, subtree: true });
     })();
     """
 
@@ -117,6 +183,7 @@ final class UCBSession {
     private var busy = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var loginActive = false
+    private var loginGeneration = 0
 
     /// Not cancellation-aware while queued (a waiter's continuation has to be
     /// resumed by `unlock` exactly once), so every op checks `Task.isCancelled`
@@ -133,6 +200,7 @@ final class UCBSession {
     /// The sign-in sheet claims the web view: abort any in-flight op load (it
     /// fails out and releases the lock) and make new ops stand down.
     func beginLogin() {
+        loginGeneration &+= 1
         loginActive = true
         web.stopLoading()
         availabilityCache.removeAll()
@@ -143,41 +211,73 @@ final class UCBSession {
 
     private static let loadTimeout: Duration = .seconds(20)
 
-    private func load(_ url: URL) async throws {
-        let g = NavGate()
+    private func load(_ url: URL, freshAccountPage: Bool = false) async throws {
+        let g = UCBNavigationGate()
         web.navigationDelegate = g
         // Bind the gate to THIS navigation: a stopped load (timeout, or the
         // sign-in sheet claiming the web view) reports its cancellation
         // asynchronously, and without the binding that late callback could
         // land on the next op's gate and fail a load that never started.
-        g.navigation = web.load(URLRequest(url: url))
+        let policy: URLRequest.CachePolicy = freshAccountPage ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy
+        g.navigation = navigate(web, URLRequest(url: url, cachePolicy: policy))
         let timeout = Task { try? await Task.sleep(for: Self.loadTimeout); g.cancel() }
         defer { timeout.cancel() }
         do { try await g.wait() }
         catch { web.stopLoading(); throw error }
-        try? await Task.sleep(for: .milliseconds(300))  // let client-rendered QR SVG paint
+        if freshAccountPage {
+            guard let response = g.mainResponse, response.statusCode == 200, UCBWebOrigin.isTrusted(response.url),
+                  let finalURL = web.url, UCBWebOrigin.isTrusted(finalURL),
+                  response.url?.host == finalURL.host, response.url?.path == finalURL.path else {
+                throw URLError(.badServerResponse)
+            }
+        }
+        try await Task.sleep(for: .milliseconds(300))  // let the client-rendered QR SVG paint
     }
 
     private func evalDict(_ js: String) async -> [String: Any]? {
         (try? await web.evaluateJavaScript(js)) as? [String: Any]
     }
 
-    private var onUCBOrigin: Bool { web.url?.host?.contains("ucbcomedy.com") ?? false }
+    private var onUCBOrigin: Bool { UCBWebOrigin.isTrusted(web.url) }
+
+    /// A hint to attempt a fresh account read when a device lost its marker.
+    /// Cookie values stay in WebKit. UCB's account page decides whether a
+    /// session is valid, including when UCB has revoked an unexpired cookie.
+    func hasLoginCookie() async -> Bool {
+        let cookies = await dataStore.httpCookieStore.allCookies()
+        return cookies.contains { cookie in
+            let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return (domain == "ucbcomedy.com" || domain == "www.ucbcomedy.com")
+                && cookie.name.hasPrefix("wordpress_logged_in_")
+                && (cookie.expiresDate.map { $0 > Date() } ?? true)
+        }
+    }
 
     // MARK: Public API (each self-contained + serialized)
 
     func refresh() async -> RefreshOutcome {
-        if loginActive { return .unknown }
+        let generation = loginGeneration
+        func canRead() -> Bool { !loginActive && generation == loginGeneration && !Task.isCancelled }
+        guard canRead() else { return .unknown }
         await lock(); defer { unlock() }
-        if loginActive || Task.isCancelled { return .unknown }
-        // Account state may have changed (quota spent, ticket released on the
-        // website) — cached per-show claim reads are no longer trustworthy.
+        guard canRead() else { return .unknown }
         availabilityCache.removeAll()
-        guard (try? await load(Self.studentTicketsURL)) != nil,
-              let d = await evalDict(Self.readAccountJS) else { return .unknown }
-        switch d["state"] as? String {
-        case "signedIn": return .signedIn(Self.parseSnapshot(d))
-        case "signedOut": return .signedOut
+        guard (try? await load(Self.studentTicketsURL, freshAccountPage: true)) != nil, canRead(),
+              let data = await evalDict(Self.readAccountJS), canRead() else { return .unknown }
+        switch data["state"] as? String {
+        case "signedIn":
+            // A dashboard redirect proves identity but has no ticket list.
+            // Publishing its empty list would erase the user's saved tickets.
+            guard web.url?.path == Self.studentTicketsURL.path else { return .unknown }
+            return .signedIn(Self.parseSnapshot(data))
+        case "signedOut":
+            // Confirm independently on a fresh dashboard before deleting the
+            // sign-in marker and wallet. A stale login page or a cookie still
+            // propagating from the just-completed login must not sign a user out.
+            guard (try? await load(Self.accountURL, freshAccountPage: true)) != nil, canRead(),
+                  let state = try? await web.evaluateJavaScript(Self.accountPageStateJS) as? String,
+                  canRead(), state == "signedOut" else { return .unknown }
+            return .signedOut
         default: return .unknown
         }
     }
@@ -311,11 +411,9 @@ final class UCBSession {
     private static let readAccountJS = """
     (() => {
       const q = (s, r=document) => r.querySelector(s);
-      if (q('.woocommerce-form-login')) return {state:'signedOut'};
-      // The ID card was `.ucb-student-id` until UCB's November 2026 redesign.
+      const state = \(accountPageStateJS);
+      if (state !== 'signedIn') return {state};
       const card = q('.ucb-id-card--student') || q('.ucb-student-id');
-      const accountMarker = card || q('.woocommerce-MyAccount-navigation') || q('.woocommerce-MyAccount-content');
-      if (!accountMarker) return {state:'unknown'};
       const idSvg = card ? (q('svg.qr-svg', card)?.outerHTML || q('svg', card)?.outerHTML || '') : '';
       const name = card?.getAttribute('data-name') || '';
       const bodyText = (q('.woocommerce-MyAccount-content')?.innerText || document.body.innerText || '');
@@ -399,10 +497,23 @@ final class UCBSession {
 /// exactly once, so `load()` can never hang. Bound to the `WKNavigation` the
 /// caller started (when WebKit handed one back): callbacks for any other
 /// navigation — a previous op's stopped load reporting in late — are ignored.
-private final class NavGate: NSObject, WKNavigationDelegate {
+final class UCBNavigationGate: NSObject, WKNavigationDelegate {
     var navigation: WKNavigation?
     private var cont: CheckedContinuation<Void, Error>?
-    private var done = false
+    private var result: Result<Void, Error>?
+    private(set) var mainResponse: HTTPURLResponse?
+
+    func receivedMainResponse(_ response: URLResponse) {
+        mainResponse = response as? HTTPURLResponse
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if navigationResponse.isForMainFrame {
+            receivedMainResponse(navigationResponse.response)
+        }
+        decisionHandler(.allow)
+    }
 
     private func owns(_ n: WKNavigation?) -> Bool {
         guard let navigation, let n else { return true }
@@ -411,17 +522,14 @@ private final class NavGate: NSObject, WKNavigationDelegate {
 
     func wait() async throws {
         try await withCheckedThrowingContinuation { c in
-            if done { c.resume(); return }
+            if let result { c.resume(with: result); return }
             cont = c
         }
     }
     private func finish(_ result: Result<Void, Error>) {
-        guard !done else { return }
-        done = true
-        switch result {
-        case .success: cont?.resume()
-        case .failure(let e): cont?.resume(throwing: e)
-        }
+        guard self.result == nil else { return }
+        self.result = result
+        cont?.resume(with: result)
         cont = nil
     }
     /// Called by the caller's timeout task.

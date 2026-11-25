@@ -142,7 +142,7 @@ private struct ShowDetailContent: View {
         }
         .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(item: $webLink) { link in
-            SafariView(url: link.url).ignoresSafeArea()
+            VenueWebView(url: link.url)
         }
         .sheet(isPresented: $showSignIn) {
             UCBSignInView(account: account)

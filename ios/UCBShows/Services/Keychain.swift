@@ -14,16 +14,23 @@ enum Keychain {
 
     @discardableResult
     static func set(_ data: Data, for key: String) -> Bool {
-        // Delete any existing item first so this is an upsert.
-        delete(key)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
+        ]
+        let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+        let update = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        guard update == errSecItemNotFound else { return update == errSecSuccess }
+        let item = query.merging(attributes) { _, value in value }
+        let add = SecItemAdd(item as CFDictionary, nil)
+        if add == errSecDuplicateItem {
+            return SecItemUpdate(query as CFDictionary, attributes as CFDictionary) == errSecSuccess
+        }
+        return add == errSecSuccess
     }
 
     static func data(for key: String) -> Data? {
