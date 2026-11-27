@@ -360,7 +360,6 @@
    "42273",
    "42568",
    "42998",
-   "43101",
    "43111",
    "43131",
    "43263",
@@ -428,7 +427,7 @@
    "section-sketch-101-204"
   ],
   "new_at": "2026-11-23T02:15:25.544093+00:00",
-  "updated": "2026-11-23T22:36:27.252307+00:00"
+  "updated": "2026-11-27T17:42:24.535366+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -441,7 +440,6 @@
    "42883",
    "42903",
    "43169",
-   "43179",
    "43200",
    "43221",
    "43230",
@@ -491,13 +489,21 @@
    "44610",
    "44617",
    "44624",
+   "section-character-101-87",
    "section-character-201-008",
    "section-clown-curious-5",
    "section-clowning-for-improvisers-1",
-   "section-musical-improv-101-065"
+   "section-generating-ideas-for-stand-up-comedy-going-from-nothing-to-something-2",
+   "section-improv-101-1034",
+   "section-improv-201-588",
+   "section-improv-301-359",
+   "section-musical-improv-101-065",
+   "section-punch-up-your-sketch-5",
+   "section-sketch-101-203",
+   "section-sketch-seminar-1"
   ],
-  "new_at": "2026-11-23T02:15:25.544093+00:00",
-  "updated": "2026-11-23T22:36:27.252307+00:00"
+  "new_at": "2026-11-27T17:42:24.535366+00:00",
+  "updated": "2026-11-27T17:42:24.535366+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -516,10 +522,11 @@
    "44288",
    "44479",
    "44555",
-   "44631"
+   "44631",
+   "section-online-pilot-writing-114"
   ],
-  "new_at": "2026-11-23T02:15:25.544093+00:00",
-  "updated": "2026-11-23T22:36:27.252307+00:00"
+  "new_at": "2026-11-27T17:42:24.535366+00:00",
+  "updated": "2026-11-27T17:42:24.535366+00:00"
  },
  "wgis_la": {
   "ids": [
