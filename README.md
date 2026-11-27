@@ -15,9 +15,9 @@ who installed earlier); everything else stays free.
 ## How it works
 
 ```
-GitHub Actions cron (hourly, with a separate cadence for each source)
+Hourly feed publish from the running watcher, backed by a GitHub Actions cron
   → publish_static.py  (LOCAL_STORE_DIR=docs — the checkout IS the state)
-      scraper.py   → docs/shows.json    (11 sources, per-performance)
+      scraper.py   → docs/shows.json    (hourly UCB calendars, other venues daily)
       classes.py   → docs/classes.json  (hourly UCB availability, other schools daily)
       talent.py    → docs/talent.json   (four UCB WordPress talent rosters)
   → commits changed feeds

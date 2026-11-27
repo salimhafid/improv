@@ -50,7 +50,7 @@ key-value storage that mirrors the user's own settings, and APNs.
 ## System shape
 
 ```
-GitHub Actions cron (.github/workflows/scrape.yml, "23 * * * *" — hourly)
+Hourly dispatch from the running class watcher, backed by the scrape.yml cron
   → publish_static.py  (LOCAL_STORE_DIR=docs — the checkout IS the state)
       scraper.py    → docs/shows.json    (11 sources; 2,182 shows in the 2026-09-05 feed,
                                           541 of them a frozen Second City carry — see watchlist)
@@ -78,15 +78,16 @@ App fetch URLs (default URLSession cache policy → ETag/304 revalidation):
                       fetched by non-App-Store builds only)
 ```
 
-The hourly cron replaced `17 */3 * * *` on this branch: GitHub starves a
-3-hourly cron on a quiet repo (runs landed hours late or were skipped; the
-delivered cadence from 2026-08-27 was 2–5 runs/day). Extra ticks are ~1-minute
-no-ops because the aggregator's own per-source cadence carries everything that
-isn't due.
+The running watcher requests a full publish on startup and hourly thereafter.
+GitHub has delayed hourly cron runs by 6–12 hours, so the cron serves as a
+backup. The two triggers share the same per-source timestamps. After writing
+feeds, the publishing workflow checks that each expected UCB source succeeded
+within the past two hours. A failed check marks the run for attention while
+preserving the saved listings.
 
 Key pipeline behaviors (aggregation.py shared loop + scraper.py / classes.py /
 talent.py):
-- **Per-source cadence**: `_SCRAPE_INTERVALS` — ucb_ny every 3h, every other
+- **Per-source cadence**: `_SCRAPE_INTERVALS` — UCB New York and Los Angeles hourly, every other
   show source 24h (`scraper.py`); UCB class availability refreshes hourly and other class sources daily (`classes.py`),
   except that a source at which the class watcher has detected new classes
   since its last scrape is forced due (see "Feed refresh after a detection");
@@ -323,8 +324,9 @@ turn those into APNs pushes on their registered devices.
   detected classes after `save_state` — whether or not CloudKit accepted the
   alerts; never in `--dry-run`; pending-alert retries don't count. Only once
   `commit_state` has pushed that state does the workflow's
-  `refresh_class_feed` run `gh workflow run scrape.yml -f classes_only=true`
-  and truncate the file; a failed dispatch keeps it for the next iteration.
+  `dispatch_feeds` request publication and clear the marker. If an hourly
+  full publish is due it serves both requests. A failed dispatch leaves the
+  request due for the next iteration.
   scrape.yml copies `class-watch.json` off the state branch into
   `WATCH_STATE_FILE` (unreadable, missing or corrupt → a warning and normal
   cadence), and `classes.aggregate_classes` forces due (interval 0, not

@@ -11,11 +11,17 @@ import watcher
 def section(*, title="Improv 101", course="improv-101/1001", city="New York",
             venue="Union Square", open_seats="0", categories="improv", frequency="weekly",
             group="Improv 101: Improv Basics", teacher="Jacklyn Uweh", dates="Nov 29 – Jan 31",
-            pattern="Sundays 11am-2pm ET"):
+            pattern="Sundays 11am-2pm ET", standalone=False):
     where = venue + (f'<span class="ucb-cl-run-sub">{city}</span>' if city != "Online" else "")
+    if standalone:
+        table = f'<div class="ucb-cl-course-body"><table><caption>Class times for {title}</caption>'
+        close = "</table></div>"
+    else:
+        table = f'<section class="ucb-cl-sub"><h3 class="ucb-cl-sub-title">{title}</h3><table>'
+        close = "</table></section>"
     return f"""
     <article class="ucb-cl-course"><h2 class="ucb-cl-course-title">{group}</h2>
-    <section class="ucb-cl-sub"><h3 class="ucb-cl-sub-title">{title}</h3><table><tbody>
+    {table}<tbody>
     <tr class="ucb-cl-run" data-cat="{categories}" data-freq="{frequency}" data-open="{open_seats}">
     <td data-label="Schedule"><span class="ucb-cl-run-value">{pattern}</span></td>
     <td data-label="Where"><span class="ucb-cl-run-value">{where}</span></td>
@@ -23,7 +29,7 @@ def section(*, title="Improv 101", course="improv-101/1001", city="New York",
     <span class="ucb-cl-run-value">{teacher}</span></td>
     <td data-label="Starts">{dates}</td><td data-label="Price">$525.00</td>
     <td data-label="Status"><a href="/course/{course}/">Register</a></td></tr>
-    </tbody></table></section></article>"""
+    </tbody>{close}</article>"""
 
 
 def page(*sections):
@@ -140,9 +146,35 @@ class UcbCatalogTests(unittest.TestCase):
         rows = ucb_classes.fetch_ny()
         self.assertEqual(len({row["id"] for row in rows}), 2)
 
+    def test_standalone_course_keeps_existing_sections_and_announces_once(self):
+        seminar = section(course="sketch-seminar/1", title="Sketch Seminar", group="Sketch Seminar",
+                          open_seats="1", categories="sketch-electives writing-programs workshop",
+                          frequency="workshop", teacher="Haley Hepworth", standalone=True)
+        self.fetch.return_value = page(section(), seminar)
+        original, new = ucb_classes.fetch_ny()
+        self.assertEqual(original["id"], "ucb_ny/42873")
+        self.assertEqual((new["id"], new["title"], new["level"], new["instructor"], new["is_full"]),
+                         ("ucb_ny/section-sketch-seminar-1", "Sketch Seminar", "Sketch Seminar", "Haley Hepworth", False))
+        state = {"ucb_ny": {"ids": ["42873"]}}
+        scanned = watcher.scan_ucb(state)
+        alerts = watcher.diff_and_alert(scanned, state, per_category=True)
+        self.assertEqual([a["classIDs"] for a in alerts], [new["id"]])
+        self.assertEqual(watcher.diff_and_alert(scanned, state, per_category=True), [])
+
+    def test_standalone_uses_its_course_heading_without_a_caption(self):
+        item = section(title="Sketch Seminar", group="Sketch Seminar", standalone=True)
+        self.fetch.return_value = page(item.replace("<caption>Class times for Sketch Seminar</caption>", ""))
+        self.assertEqual(ucb_classes.fetch_ny()[0]["title"], "Sketch Seminar")
+
+    def test_table_caption_names_the_course_under_a_broader_curriculum(self):
+        item = section().replace('<h3 class="ucb-cl-sub-title">Improv 101</h3>', "")
+        self.fetch.return_value = page(item.replace("<tbody>", "<caption>Class times for Improv 101</caption><tbody>"))
+        self.assertEqual(ucb_classes.fetch_ny()[0]["title"], "Improv 101")
+
     def test_partial_or_malformed_page_fails_once_without_partial_results(self):
         fixture = section()
         for bad in [page(), page(fixture).replace("Showing 1", "Showing 2"), page(fixture, fixture),
+                    page(fixture).replace('<h3 class="ucb-cl-sub-title">Improv 101</h3>', ''),
                     page(fixture).replace('/course/improv-101/1001/', '/course/improv-101/'),
                     page(fixture).replace('/course/improv-101/1001/', 'https://example.org/course/i/1/'),
                     page(fixture).replace('data-label="Where"', 'data-label="Elsewhere"'),

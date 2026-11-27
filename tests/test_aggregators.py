@@ -69,6 +69,27 @@ class ScraperAggregateTests(AggregatorHarness):
         self.assertFalse(summary["stale"])
         self.assertEqual(summary["count"], 1)
 
+    def test_hourly_tick_refreshes_both_ucb_show_calendars(self):
+        venues = ["ucb_ny", "ucb_la", "magnet"]
+        fetch = {sid: Mock(return_value=[_show(sid, sid, "2026-07-25T20:00:00")])
+                 for sid in venues}
+        with patch.object(scraper, "SOURCES", [_src(sid, fetch[sid]) for sid in venues]):
+            storage.save_payload(scraper.aggregate(now=NOW))
+            for mock in fetch.values():
+                mock.reset_mock()
+            scraper.aggregate(now=NOW + timedelta(minutes=15))
+            for mock in fetch.values():
+                mock.assert_not_called()
+            next_hour = NOW + timedelta(hours=1)
+            payload = scraper.aggregate(now=next_hour)
+
+        fetch["ucb_ny"].assert_called_once_with()
+        fetch["ucb_la"].assert_called_once_with()
+        fetch["magnet"].assert_not_called()
+        stamps = {s["id"]: s["scraped_at"] for s in payload["sources"]}
+        self.assertEqual(stamps, {"ucb_ny": next_hour.isoformat(), "ucb_la": next_hour.isoformat(),
+                                  "magnet": NOW.isoformat()})
+
     def test_not_due_carries_previous(self):
         prev = scraper.build_payload(
             [_show("a", "Carried", "2026-07-25T20:00:00")],

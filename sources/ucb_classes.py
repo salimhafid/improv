@@ -113,9 +113,18 @@ def _parse_catalog(html: str) -> list[tuple[dict, list[str], bool]]:
         path = _SECTION_PATH.fullmatch(url.path) if url and url.netloc == "ucbcomedy.com" else None
         section = row.find_parent("section", class_="ucb-cl-sub")
         group = row.find_parent("article", class_="ucb-cl-course")
+        group_title = _text(group, ".ucb-cl-course-title") if group else ""
         title = _text(section, ".ucb-cl-sub-title") if section else ""
+        if not title:
+            # Standalone courses such as Sketch Seminar put their table directly
+            # in the course article. Its caption also names the exact class if
+            # a subsection heading is absent inside a broader curriculum group.
+            table = row.find_parent("table")
+            caption = _text(table, "caption") if table else ""
+            name = re.fullmatch(r"Class times for (.+)", caption, re.I)
+            title = name[1] if name else (group_title if section is None else "")
         if not path or url.scheme != "https" or not title or row.get("data-open") not in ("0", "1"):
-            raise ValueError(f"Incomplete UCB section for {title!r} in {city}")
+            raise ValueError(f"Incomplete UCB section for {title!r} in {city} ({url.path if url else 'no registration link'})")
         slug, number = path.groups()
         key = f"{slug}/{number}"
         if key in seen:
@@ -139,7 +148,7 @@ def _parse_catalog(html: str) -> list[tuple[dict, list[str], bool]]:
             instructor="Teacher TBD" if instructor == "UCBclasses" else instructor,
             schedule=" · ".join(filter(None, (pattern, dates))),
             start=_start(dates, pattern, city, local_today(city)),
-            level=_text(group, ".ucb-cl-course-title") if group else "",
+            level=group_title,
             price=_text(row, '[data-label="Price"]'),
             location=clean(where.get_text(", ", strip=True)), is_full=row["data-open"] == "0",
         )

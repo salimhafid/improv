@@ -40,9 +40,9 @@ _PAST_DEADLINE = object()    # safe() result for a fetch skipped by the deadline
 
 # Per-source scrape cadence: scrape a source at most this often (the scheduler
 # may fire more frequently; sources not yet due are carried over from the store).
-_SCRAPE_INTERVALS = {"ucb_ny": 3 * 3600}      # UCB New York: every 3h
-_DEFAULT_SCRAPE_INTERVAL = 24 * 3600          # everything else: every 24h
-_SCRAPE_GRACE = 30 * 60                        # let a scheduled tick fire slightly early
+_SCRAPE_INTERVALS = {"ucb_ny": 3600, "ucb_la": 3600}
+_DEFAULT_SCRAPE_INTERVAL = 24 * 3600  # other venues refresh daily
+_SCRAPE_GRACE = 30 * 60                # allow early scheduled ticks
 
 
 def _is_upcoming(show: dict, today: date) -> bool:
