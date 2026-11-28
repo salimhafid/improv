@@ -421,12 +421,18 @@
    "44707",
    "section-acting-for-sketch-33",
    "section-improv-101-1035",
+   "section-improv-101-1039",
    "section-improv-201-589",
+   "section-improv-201-593",
+   "section-improv-201-594",
+   "section-improv-301-361",
    "section-intro-to-stand-up-comedy-2-61",
-   "section-sketch-101-204"
+   "section-sketch-101-204",
+   "section-sketch-101-205",
+   "section-sketch-201-101"
   ],
-  "new_at": "2026-11-23T02:15:25.544093+00:00",
-  "updated": "2026-11-28T06:21:00.129516+00:00"
+  "new_at": "2026-11-28T06:23:02.173947+00:00",
+  "updated": "2026-11-28T06:23:02.173947+00:00"
  },
  "ucb_ny": {
   "ids": [
@@ -488,6 +494,8 @@
    "44610",
    "44617",
    "44624",
+   "section-advanced-study-improv-improv-to-sketch-1",
+   "section-advanced-study-improv-resurrecting-an-ancient-form-the-structured-deco-1",
    "section-character-101-87",
    "section-character-201-008",
    "section-clown-curious-5",
@@ -502,8 +510,8 @@
    "section-sketch-101-203",
    "section-sketch-seminar-1"
   ],
-  "new_at": "2026-11-27T18:22:27.806183+00:00",
-  "updated": "2026-11-28T06:21:00.129516+00:00"
+  "new_at": "2026-11-28T06:23:02.173947+00:00",
+  "updated": "2026-11-28T06:23:02.173947+00:00"
  },
  "ucb_online": {
   "ids": [
@@ -526,7 +534,7 @@
    "section-online-pilot-writing-114"
   ],
   "new_at": "2026-11-27T17:42:24.535366+00:00",
-  "updated": "2026-11-28T06:21:00.129516+00:00"
+  "updated": "2026-11-28T06:23:02.173947+00:00"
  },
  "wgis_la": {
   "ids": [
